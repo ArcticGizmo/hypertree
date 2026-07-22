@@ -27,6 +27,9 @@ internal sealed class MapOverlay
     public event Action<int>? GoToTopRequested;
     /// <summary>Click a group desktop (group index, desktop index) to jump there.</summary>
     public event Action<int, int>? GoToGroupRequested;
+    /// <summary>Delete a desktop (× badge) — top-row index, or group index + desktop index.</summary>
+    public event Action<int>? DeleteTopRequested;
+    public event Action<int, int>? DeleteGroupDesktopRequested;
     /// <summary>Footer actions.</summary>
     public event Action? NewGroupRequested;
     public event Action<int>? RemoveGroupRequested;
@@ -41,6 +44,8 @@ internal sealed class MapOverlay
         _map.CloseRequested += Close;
         _map.GoToTopRequested += i => GoToTopRequested?.Invoke(i);
         _map.GoToGroupRequested += (g, d) => GoToGroupRequested?.Invoke(g, d);
+        _map.DeleteTopRequested += i => DeleteTopRequested?.Invoke(i);
+        _map.DeleteGroupDesktopRequested += (g, d) => DeleteGroupDesktopRequested?.Invoke(g, d);
         _map.NewGroupRequested += () => NewGroupRequested?.Invoke();
         _map.RemoveGroupRequested += g => RemoveGroupRequested?.Invoke(g);
         _map.Render(map);
@@ -104,6 +109,8 @@ internal sealed class MapWindow : Window
     public event Action? CloseRequested;
     public event Action<int>? GoToTopRequested;
     public event Action<int, int>? GoToGroupRequested;
+    public event Action<int>? DeleteTopRequested;
+    public event Action<int, int>? DeleteGroupDesktopRequested;
     public event Action? NewGroupRequested;
     public event Action<int>? RemoveGroupRequested;
 
@@ -155,7 +162,9 @@ internal sealed class MapWindow : Window
 
         Control board = BoardView.Render(map, 1.0,
             onTopClick: i => GoToTopRequested?.Invoke(i),
-            onGroupClick: (g, d) => GoToGroupRequested?.Invoke(g, d));
+            onGroupClick: (g, d) => GoToGroupRequested?.Invoke(g, d),
+            onTopDelete: i => DeleteTopRequested?.Invoke(i),
+            onGroupDelete: (g, d) => DeleteGroupDesktopRequested?.Invoke(g, d));
 
         var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         var add = new Button { Content = "+ New group", FontSize = 12 };

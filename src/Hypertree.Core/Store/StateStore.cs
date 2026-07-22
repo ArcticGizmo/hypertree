@@ -1,0 +1,69 @@
+using System.Text.Json;
+
+namespace Hypertree.Store;
+
+/// <summary>Persisted group state — the anchor↔scope map that must survive a reboot (PLAN.md §5) so
+/// Hypertree re-associates its created desktops instead of treating them as orphaned/ungrouped.</summary>
+public sealed class PersistedState
+{
+    public int ActiveGroup { get; set; }
+    public List<PersistedGroup> Groups { get; set; } = new();
+}
+
+public sealed class PersistedGroup
+{
+    public string Name { get; set; } = "";
+    public int LastUsedIndex { get; set; }
+    public List<PersistedDesktop> Desktops { get; set; } = new();
+}
+
+public sealed class PersistedDesktop
+{
+    public Guid Id { get; set; }
+    public string Label { get; set; } = "";
+}
+
+/// <summary>Load/save the persisted state. Kept behind an interface so tests use an in-memory fake.</summary>
+public interface IStateStore
+{
+    PersistedState Load();
+    void Save(PersistedState state);
+}
+
+/// <summary>
+/// Stores state as JSON under <c>%APPDATA%\hypertree\state.json</c>. All reads/writes are best-effort:
+/// a missing or corrupt file yields empty state rather than throwing, so a bad file never blocks startup.
+/// </summary>
+public sealed class FileStateStore : IStateStore
+{
+    private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
+
+    public string Path { get; }
+
+    public FileStateStore()
+    {
+        string dir = System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "hypertree");
+        Directory.CreateDirectory(dir);
+        Path = System.IO.Path.Combine(dir, "state.json");
+    }
+
+    public PersistedState Load()
+    {
+        try
+        {
+            if (!File.Exists(Path)) return new PersistedState();
+            return JsonSerializer.Deserialize<PersistedState>(File.ReadAllText(Path)) ?? new PersistedState();
+        }
+        catch
+        {
+            return new PersistedState();
+        }
+    }
+
+    public void Save(PersistedState state)
+    {
+        try { File.WriteAllText(Path, JsonSerializer.Serialize(state, Options)); }
+        catch { /* best-effort; losing a write is better than crashing the tray */ }
+    }
+}

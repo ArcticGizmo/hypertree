@@ -46,7 +46,8 @@ internal static class DesignShot
         {
             Background = new SolidColorBrush(Color.Parse("#0F131B")), // design --bg (dark)
             Padding = new Thickness(24),
-            Child = BoardView.Render(map, 1.0),
+            // Pass delete callbacks so the × badges render in the verification shot.
+            Child = BoardView.Render(map, 1.0, onTopDelete: _ => { }, onGroupDelete: (_, _) => { }),
         };
         host.Measure(Size.Infinity);
         host.Arrange(new Rect(host.DesiredSize));

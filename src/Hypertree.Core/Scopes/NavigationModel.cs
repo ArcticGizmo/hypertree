@@ -1,4 +1,5 @@
 using Hypertree.Desktops;
+using Hypertree.Store;
 
 namespace Hypertree.Scopes;
 
@@ -14,6 +15,7 @@ namespace Hypertree.Scopes;
 public sealed class NavigationModel
 {
     private readonly IDesktopController _desktops;
+    private readonly IStateStore? _store;
     private readonly List<Group> _groups = new();
 
     private List<DesktopRef> _topRow = new();
@@ -24,14 +26,52 @@ public sealed class NavigationModel
 
     public event Action? Changed;
 
-    public NavigationModel(IDesktopController desktops)
+    public NavigationModel(IDesktopController desktops, IStateStore? store = null)
     {
         _desktops = desktops;
+        _store = store;
+
+        RestoreGroups();
         SyncTopRow();
         // Start on whichever top-row desktop the OS is showing, if any.
         int idx = _topRow.FindIndex(d => d.Id == desktops.Current);
         if (idx >= 0) _topIndex = idx;
         _target = CurrentDesktop().Id;
+    }
+
+    /// <summary>Desktop ids that belong to a group — the App uses these to rebuild its "created" set.</summary>
+    public IEnumerable<DesktopId> GroupDesktopIds() => _groups.SelectMany(g => g.Desktops).Select(d => d.Id);
+
+    // Load persisted groups, keeping only desktops the OS still has (so vanished desktops don't
+    // resurrect as orphans, and empty groups are dropped). Prevents orphaning across restarts.
+    private void RestoreGroups()
+    {
+        if (_store is null) return;
+        PersistedState state = _store.Load();
+        var live = _desktops.List().Select(d => d.Id.Value).ToHashSet();
+        foreach (PersistedGroup pg in state.Groups)
+        {
+            var desks = pg.Desktops
+                .Where(d => live.Contains(d.Id))
+                .Select(d => new DesktopRef(new DesktopId(d.Id), d.Label))
+                .ToList();
+            if (desks.Count > 0) _groups.Add(new Group(pg.Name, desks, pg.LastUsedIndex));
+        }
+        _activeGroup = _groups.Count == 0 ? 0 : Math.Clamp(state.ActiveGroup, 0, _groups.Count - 1);
+    }
+
+    private void Save()
+    {
+        _store?.Save(new PersistedState
+        {
+            ActiveGroup = _activeGroup,
+            Groups = _groups.Select(g => new PersistedGroup
+            {
+                Name = g.Name,
+                LastUsedIndex = g.LastUsedIndex,
+                Desktops = g.Desktops.Select(d => new PersistedDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
+            }).ToList(),
+        });
     }
 
     // ── Queries ──────────────────────────────────────────────────────────────────
@@ -150,6 +190,7 @@ public sealed class NavigationModel
         if (id == _target) return false;
         _target = id;
         _desktops.SwitchTo(id);
+        Save(); // persist the moved cursor/active-group so a restart resumes here
         Changed?.Invoke();
         return true;
     }
@@ -176,6 +217,7 @@ public sealed class NavigationModel
         _groups.Add(group);
         _activeGroup = _groups.Count - 1;
         SyncTopRow();
+        Save();
         Changed?.Invoke();
     }
 
@@ -188,7 +230,75 @@ public sealed class NavigationModel
         if (_groups.Count == 0) _onTop = true;
         _activeGroup = _groups.Count == 0 ? 0 : Math.Clamp(_activeGroup, 0, _groups.Count - 1);
         SyncTopRow();
+        Save();
         Changed?.Invoke();
         return removed;
+    }
+
+    // ── Single-desktop deletion (from the map's per-tile × button) ────────────────
+
+    /// <summary>Total desktops Hypertree knows about (top row + all groups) — guard the last one.</summary>
+    public int TotalDesktops => _topRow.Count + _groups.Sum(g => g.Count);
+
+    /// <summary>Peek a top-row desktop's id + label (for a confirm prompt), or null if out of range.</summary>
+    public (DesktopId id, string label)? PeekTopDesktop(int index)
+        => index >= 0 && index < _topRow.Count ? (_topRow[index].Id, _topRow[index].Label) : null;
+
+    /// <summary>Peek a group desktop's id + label (for a confirm prompt), or null if out of range.</summary>
+    public (DesktopId id, string label)? PeekGroupDesktop(int groupIndex, int desktopIndex)
+        => groupIndex >= 0 && groupIndex < _groups.Count
+           && desktopIndex >= 0 && desktopIndex < _groups[groupIndex].Count
+            ? (_groups[groupIndex].Desktops[desktopIndex].Id, _groups[groupIndex].Desktops[desktopIndex].Label)
+            : null;
+
+    /// <summary>
+    /// Detach a desktop from a group so the caller can destroy it. Returns the id (null if invalid).
+    /// If it was the group's last desktop, the whole group is removed. Pure state mutation — the
+    /// caller destroys the OS desktop then calls <see cref="Resync"/>.
+    /// </summary>
+    public DesktopId? DetachGroupDesktop(int groupIndex, int desktopIndex)
+    {
+        if (groupIndex < 0 || groupIndex >= _groups.Count) return null;
+        Group g = _groups[groupIndex];
+        if (desktopIndex < 0 || desktopIndex >= g.Count) return null;
+
+        DesktopId id = g.Desktops[desktopIndex].Id;
+        if (g.Count == 1)
+        {
+            _groups.RemoveAt(groupIndex);
+            if (_groups.Count == 0) _onTop = true;
+            _activeGroup = _groups.Count == 0 ? 0 : Math.Clamp(_activeGroup, 0, _groups.Count - 1);
+        }
+        else
+        {
+            g.RemoveDesktopAt(desktopIndex);
+        }
+        return id;
+    }
+
+    /// <summary>
+    /// Re-anchor to whatever desktop the OS is now showing (after a desktop was created/destroyed
+    /// underneath us) and refresh the top row. Keeps the model's position from going stale.
+    /// </summary>
+    public void Resync()
+    {
+        SyncTopRow();
+        DesktopId cur = _desktops.Current;
+
+        int ti = _topRow.FindIndex(d => d.Id == cur);
+        if (ti >= 0) { _onTop = true; _topIndex = ti; }
+        else
+        {
+            for (int gi = 0; gi < _groups.Count; gi++)
+            {
+                int di = -1;
+                for (int j = 0; j < _groups[gi].Desktops.Count; j++) if (_groups[gi].Desktops[j].Id == cur) di = j;
+                if (di >= 0) { _onTop = false; _activeGroup = gi; _groups[gi].LastUsedIndex = di; break; }
+            }
+        }
+
+        _target = CurrentDesktop().Id;
+        Save();
+        Changed?.Invoke();
     }
 }

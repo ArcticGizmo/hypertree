@@ -15,8 +15,10 @@ public sealed record DesktopRef(DesktopId Id, string Label);
 /// </summary>
 public sealed class Group
 {
+    private readonly List<DesktopRef> _desktops;
+
     public string Name { get; }
-    public IReadOnlyList<DesktopRef> Desktops { get; }
+    public IReadOnlyList<DesktopRef> Desktops => _desktops;
 
     /// <summary>Index within <see cref="Desktops"/> last occupied — the resume point. Always valid.</summary>
     public int LastUsedIndex { get; set; }
@@ -25,7 +27,16 @@ public sealed class Group
     {
         if (desktops.Count == 0) throw new ArgumentException("A group needs at least one desktop.", nameof(desktops));
         Name = name;
-        Desktops = desktops;
-        LastUsedIndex = Math.Clamp(lastUsedIndex, 0, desktops.Count - 1);
+        _desktops = desktops.ToList();
+        LastUsedIndex = Math.Clamp(lastUsedIndex, 0, _desktops.Count - 1);
+    }
+
+    public int Count => _desktops.Count;
+
+    /// <summary>Remove a desktop from the group, keeping <see cref="LastUsedIndex"/> valid.</summary>
+    public void RemoveDesktopAt(int index)
+    {
+        _desktops.RemoveAt(index);
+        if (_desktops.Count > 0) LastUsedIndex = Math.Clamp(LastUsedIndex, 0, _desktops.Count - 1);
     }
 }

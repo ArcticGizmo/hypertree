@@ -25,7 +25,8 @@ internal static class BoardView
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
 
     public static Control Render(NavMap map, double s = 1.0, int maxGroups = int.MaxValue,
-                                 Action<int>? onTopClick = null, Action<int, int>? onGroupClick = null)
+                                 Action<int>? onTopClick = null, Action<int, int>? onGroupClick = null,
+                                 Action<int>? onTopDelete = null, Action<int, int>? onGroupDelete = null)
     {
         double tileW = 96 * s, screenH = 50 * s, capH = 22 * s, gap = 14 * s, conn = 22 * s;
         double tileH = screenH + capH, lift = 6 * s, top = 14 * s, pad = 22 * s;
@@ -66,7 +67,8 @@ internal static class BoardView
             double boxY = firstBoxY + d * ( labelH + 6 * s + tileH + scopePad * 2 + groupGap );
 
             Action<int>? clickForThisGroup = onGroupClick is null ? null : j => onGroupClick(groupIndex, j);
-            Control box = BuildGroupBox(g, s, tileW, screenH, capH, gap, scopePad, clickForThisGroup);
+            Action<int>? deleteForThisGroup = onGroupDelete is null ? null : j => onGroupDelete(groupIndex, j);
+            Control box = BuildGroupBox(g, s, tileW, screenH, capH, gap, scopePad, clickForThisGroup, deleteForThisGroup);
             box.Opacity = g.IsCurrentLevel ? 1.0 : Math.Max(0.22, (map.OnTop ? 0.55 : 0.4) - d * 0.12);
             Canvas.SetLeft(box, boxX);
             Canvas.SetTop(box, boxY);
@@ -94,7 +96,8 @@ internal static class BoardView
             bool focused = map.OnTop && map.TopRow[i].IsCurrent;
             int idx = i;
             Control tile = Tile(map.TopRow[i].Label, isStream: false, focused, s, tileW, screenH, capH,
-                                onTopClick is null ? null : () => onTopClick(idx));
+                                onTopClick is null ? null : () => onTopClick(idx),
+                                onTopDelete is null ? null : () => onTopDelete(idx));
             Canvas.SetLeft(tile, i * (tileW + gap) + topOffset);
             Canvas.SetTop(tile, rowY);
             canvas.Children.Add(tile);
@@ -105,7 +108,7 @@ internal static class BoardView
     }
 
     private static Control BuildGroupBox(NavMapGroup g, double s, double tileW, double screenH, double capH,
-                                         double gap, double scopePad, Action<int>? onDeskClick)
+                                         double gap, double scopePad, Action<int>? onDeskClick, Action<int>? onDeskDelete)
     {
         var label = new TextBlock
         {
@@ -119,7 +122,9 @@ internal static class BoardView
         {
             int idx = j;
             row.Children.Add(Tile(g.Desktops[j].Label, isStream: true, g.Desktops[j].IsCurrent, s,
-                                  tileW, screenH, capH, onDeskClick is null ? null : () => onDeskClick(idx)));
+                                  tileW, screenH, capH,
+                                  onDeskClick is null ? null : () => onDeskClick(idx),
+                                  onDeskDelete is null ? null : () => onDeskDelete(idx)));
         }
 
         return new Border
@@ -134,7 +139,7 @@ internal static class BoardView
     }
 
     private static Control Tile(string caption, bool isStream, bool focused, double s,
-                                double tileW, double screenH, double capH, Action? onClick)
+                                double tileW, double screenH, double capH, Action? onClick, Action? onDelete = null)
     {
         Color border = focused ? Focus : (isStream ? StrBorder : TileBorder);
         double bt = focused ? 2 : 1;
@@ -167,13 +172,41 @@ internal static class BoardView
         };
 
         var stack = new StackPanel { Orientation = Orientation.Vertical, Width = tileW, Children = { screen, cap } };
-        if (focused) stack.RenderTransform = new TranslateTransform(0, -6 * s);
         if (onClick is not null)
         {
             stack.Cursor = new Cursor(StandardCursorType.Hand);
             stack.PointerPressed += (_, _) => onClick();
         }
-        return stack;
+
+        Control result = stack;
+        if (onDelete is not null)
+        {
+            // Overlay a small delete badge in the screen's top-right corner. Its own pointer handler is
+            // marked handled so it doesn't also trigger the tile's click-to-navigate.
+            var badge = new Border
+            {
+                Width = 17 * s, Height = 17 * s,
+                CornerRadius = new CornerRadius(9 * s),
+                Background = new SolidColorBrush(Color.FromArgb(0xE0, 0xC0, 0x3A, 0x2E)),
+                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, 3 * s, 3 * s, 0),
+                Cursor = new Cursor(StandardCursorType.Hand),
+                Child = new TextBlock
+                {
+                    Text = "×", FontSize = 12 * s, FontWeight = FontWeight.Bold, Foreground = Brushes.White,
+                    HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                },
+            };
+            badge.PointerPressed += (_, e) => { e.Handled = true; onDelete(); };
+
+            var grid = new Grid { Width = tileW };
+            grid.Children.Add(stack);
+            grid.Children.Add(badge);
+            result = grid;
+        }
+
+        if (focused) result.RenderTransform = new TranslateTransform(0, -6 * s);
+        return result;
     }
 
     private static void AddWin(Canvas c, double x, double y, double w, double h, Color color, double opacity)

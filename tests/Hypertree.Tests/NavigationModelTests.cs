@@ -175,4 +175,36 @@ public class NavigationModelTests
         Assert.True(m.OnTop);
         Assert.False(m.Apply(NavAction.Dive)); // nothing to dive into now
     }
+
+    // ── Single-desktop deletion ──────────────────────────────────────────────────
+
+    [Fact]
+    public void DetachGroupDesktop_removes_one_desktop_and_keeps_the_group()
+    {
+        var (m, _) = New();
+        m.AddGroup(G("feat", G1)); // a, b, c
+        DesktopId? id = m.DetachGroupDesktop(0, 1); // remove b
+        Assert.Equal(D(11), id);
+        Assert.Equal(1, m.GroupCount);
+        Assert.Equal(new[] { "a", "c" }, m.BuildMap().Groups[0].Desktops.Select(t => t.Label));
+    }
+
+    [Fact]
+    public void DetachGroupDesktop_removes_the_group_when_its_last_desktop_goes()
+    {
+        var (m, _) = New();
+        m.AddGroup(G("solo", (30, "only")));
+        DesktopId? id = m.DetachGroupDesktop(0, 0);
+        Assert.Equal(D(30), id);
+        Assert.Equal(0, m.GroupCount);
+    }
+
+    [Fact]
+    public void PeekTopDesktop_exposes_id_and_label_for_a_confirm_prompt()
+    {
+        var (m, _) = New();
+        var peek = m.PeekTopDesktop(1);
+        Assert.NotNull(peek);
+        Assert.Equal(T1, peek!.Value.id);
+    }
 }

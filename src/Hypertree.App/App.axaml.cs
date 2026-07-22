@@ -7,6 +7,7 @@ using Hypertree.App.Views;
 using Hypertree.Desktops;
 using Hypertree.Platform;
 using Hypertree.Scopes;
+using Hypertree.Store;
 
 namespace Hypertree.App;
 
@@ -74,12 +75,18 @@ public sealed class App : Application
     private void Startup()
     {
         _desktops = PlatformServices.CreateDesktopController();
-        _model = new NavigationModel(_desktops);
+        _model = new NavigationModel(_desktops, new FileStateStore());
+        // Desktops restored from persisted groups were created by Hypertree — track them so the
+        // teardown guard still only ever destroys our own desktops.
+        foreach (DesktopId id in _model.GroupDesktopIds()) _created.Add(id.Value);
+
         _hud = new HudWindow();
 
         _overlay = new MapOverlay(_desktops);
-        _overlay.GoToTopRequested += i => { _model.GoToTop(i); RefreshOverlay(); };
-        _overlay.GoToGroupRequested += (g, d) => { _model.GoToGroupDesktop(g, d); RefreshOverlay(); };
+        _overlay.GoToTopRequested += i => { _model!.GoToTop(i); RefreshOverlay(); };
+        _overlay.GoToGroupRequested += (g, d) => { _model!.GoToGroupDesktop(g, d); RefreshOverlay(); };
+        _overlay.DeleteTopRequested += DeleteTopDesktop;
+        _overlay.DeleteGroupDesktopRequested += DeleteGroupDesktop;
         _overlay.NewGroupRequested += PromptNewGroup;
         _overlay.RemoveGroupRequested += RemoveGroup;
 
@@ -186,6 +193,60 @@ public sealed class App : Application
         if (_model is null) return;
         TearDown(_model.RemoveGroup(index));
         RefreshOrFlash();
+    }
+
+    // ── Delete a single desktop (map × badge) with a confirm prompt ───────────────
+
+    private void DeleteTopDesktop(int index)
+    {
+        if (_model is null || _desktops is null) return;
+        var peek = _model.PeekTopDesktop(index);
+        if (peek is null || _model.TotalDesktops <= 1) return; // never delete the last desktop
+
+        Confirm($"Delete desktop “{peek.Value.label}”?\nAny windows on it move to another desktop.", () =>
+        {
+            _desktops.Remove(peek.Value.id, Fallback(peek.Value.id));
+            _created.Remove(peek.Value.id.Value);
+            _model.Resync();
+            RefreshOrFlash();
+        });
+    }
+
+    private void DeleteGroupDesktop(int groupIndex, int desktopIndex)
+    {
+        if (_model is null || _desktops is null) return;
+        var peek = _model.PeekGroupDesktop(groupIndex, desktopIndex);
+        if (peek is null || _model.TotalDesktops <= 1) return;
+
+        Confirm($"Delete desktop “{peek.Value.label}”?\nAny windows on it move to another desktop.", () =>
+        {
+            DesktopId fallback = Fallback(peek.Value.id);
+            DesktopId? id = _model.DetachGroupDesktop(groupIndex, desktopIndex);
+            if (id is not null)
+            {
+                _created.Remove(id.Value.Value);
+                try { _desktops.Remove(id.Value, fallback); } catch { /* already gone */ }
+            }
+            _model.Resync();
+            RefreshOrFlash();
+        });
+    }
+
+    // Any live desktop other than the one being deleted (prefer the current view).
+    private DesktopId Fallback(DesktopId avoid)
+    {
+        DesktopId cur = _desktops!.Current;
+        if (cur != avoid) return cur;
+        foreach (DesktopInfo d in _desktops.List()) if (d.Id != avoid) return d.Id;
+        return avoid; // unreachable — guarded by TotalDesktops > 1
+    }
+
+    private void Confirm(string message, Action onConfirm)
+    {
+        var dlg = new ConfirmDialog(message);
+        if (_overlay is { IsOpen: true }) dlg.Topmost = true;
+        dlg.Confirmed += onConfirm;
+        dlg.Show();
     }
 
     // Remove a group's desktops — but ONLY ones Hypertree created, never the user's own desktops.
