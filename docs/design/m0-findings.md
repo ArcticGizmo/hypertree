@@ -103,11 +103,60 @@ bake the `HString` helper into the real Windows platform layer.
   consistent per run, but confirm a dive/return lands you *exactly* where you started
   with real windows open.
 
-## Phase 0.3 — Move window onto desktop  ⏳ next
-Plan: use the **documented, stable** `IVirtualDesktopManager.MoveWindowToDesktop(hwnd,
-ref Guid)` (no build risk) to move a real window (e.g. Notepad) onto a created desktop,
-targeting an hwnd via perch's `EnumWindows`/`GA_ROOTOWNER` walk. This is the last
-make-or-break primitive (provisioning a scope's window trio).
+## Phase 0.3 — Move window onto desktop  ✅ proven (internal API required)
+
+Test rig: `spike/m0-move` — launches a **foreign** window (charmap, a separate process,
+the realistic case for provisioning a scope's terminal/editor/browser) and moves it.
+
+| Path | Result |
+|---|---|
+| **A** — documented `IVirtualDesktopManager.MoveWindowToDesktop(hwnd, guid)` | ❌ `E_ACCESSDENIED` (0x80070005) — the documented API refuses windows the caller doesn't own |
+| **B** — `IApplicationViewCollection.GetViewForHwnd(hwnd)` → `IVirtualDesktopManagerInternal.MoveViewToDesktop(view, desktop)` | ✅ window moved — `GetWindowDesktopId` == target, `IsWindowOnCurrentVirtualDesktop` == false |
+
+**Verdict: moving foreign windows works, but *only* via the internal (build-fragile)
+`IApplicationView` path** — the documented API is a dead end for other apps' windows.
+This raises the surface of build-specific interop: the app depends on
+`IApplicationViewCollection` + `IApplicationView` GUIDs too, not just the desktop
+manager. All the more reason for the single `IDesktopController` seam.
+
+Note (fixed but educational): Win11's Notepad is a Store-app stub that reparents to
+another process, so `Process.MainWindowHandle` never populates — use a classic Win32
+app (charmap) or an `EnumWindows`-by-pid scan (perch's `WindowActivator` already does
+the latter for real terminals/IDEs).
+
+### Additional build-matched definitions verified on 26200
+- `IApplicationViewCollection` IID = `1841C6D7-4F9D-42C0-AF41-8747538F10E5`
+  (obtained via `shell.QueryService(iid, iid)`; `GetViewForHwnd` at vtable slot 3)
+- `IApplicationView` IID = `372E1D3B-38D3-42E4-A15B-8AB2B178F513` (opaque — only passed through)
+
+## Phase 0.4 — Decision: **NATIVE** ✅
+
+All four M0 primitives (`PLAN.md` §6 spike goal) pass on build 26200 through **our own
+COM interop — no third-party DLL**:
+
+| # | Primitive | Status |
+|---|---|---|
+| a | create + **name** a desktop | ✅ (0.2; naming via manual HSTRING) |
+| b | switch to a desktop | ✅ (0.2) |
+| c | move a (foreign) window onto a desktop | ✅ (0.3; internal IApplicationView path) |
+| d | capture a global hotkey with no focus | ✅ (0.1; `Ctrl+Alt+Arrow`, FIRES press-test outstanding) |
+
+**Go native.** komorebi/GlazeWM stays documented as the fallback (`PLAN.md` §9 risk 1)
+but is not needed: native control is solid and the interop is ~150 lines we own. The
+whole build-fragile surface — `IVirtualDesktopManagerInternal`, `IVirtualDesktop`,
+`IApplicationViewCollection`, `IApplicationView`, and their per-build GUIDs — is
+quarantined behind **`IDesktopController`** (M1 Phase 1.1), so a Windows update that
+shifts a GUID is a one-file change, and komorebi remains a drop-in alternate
+implementation of the same interface if the churn ever gets untenable.
+
+### Residual items to carry into M1 (not blockers)
+- **FIRES press-test** for `Ctrl+Alt+Arrow` (0.1) — I can't press keys; confirm before
+  Phase 1.3 wires hotkeys.
+- **Multi-monitor** (`PLAN.md` §5): confirm `SwitchDesktop` moves all 3 monitors as one.
+- **HSTRING helper** + the `IApplicationView` resolve both need to live in the real
+  `Hypertree.Platform.Windows` layer behind `IDesktopController`.
+- Consider maintaining a **per-build GUID table** (24H2/25H2 done) so a future OS bump
+  is a data change, not a code change.
 
 ## Phase 0.4 — Decision: native vs. komorebi  ⏳
 _(pending)_
