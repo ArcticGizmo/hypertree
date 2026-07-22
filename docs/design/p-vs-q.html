@@ -1,0 +1,529 @@
+<style>
+  :root{
+    --sans:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;
+    --mono:"Cascadia Code","Cascadia Mono",Consolas,ui-monospace,"SFMono-Regular",monospace;
+
+    /* light */
+    --bg:#eaeef4;
+    --panel:#ffffff;
+    --tile:#e6eaf1;
+    --tile-win:#c4ccd9;
+    --ink:#1a212e;
+    --ink-soft:#5a6579;
+    --ink-faint:#8b94a5;
+    --line:#d3dae4;
+    --stream:#c47d16;
+    --stream-soft:#f4e2c2;
+    --stream-line:#e7c485;
+    --stream-win:#e2a544;
+    --focus:#2f6df0;
+    --focus-glow:rgba(47,109,240,.30);
+    --shadow:0 1px 2px rgba(20,30,50,.06),0 8px 24px rgba(20,30,50,.08);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0f131b;
+      --panel:#161c27;
+      --tile:#1f2836;
+      --tile-win:#374357;
+      --ink:#e8edf5;
+      --ink-soft:#9aa6b8;
+      --ink-faint:#69748a;
+      --line:#2a3444;
+      --stream:#e8a23d;
+      --stream-soft:#3a2e18;
+      --stream-line:#6a5124;
+      --stream-win:#c9922f;
+      --focus:#6ea8ff;
+      --focus-glow:rgba(110,168,255,.32);
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.45);
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#eaeef4;--panel:#ffffff;--tile:#e6eaf1;--tile-win:#c4ccd9;--ink:#1a212e;--ink-soft:#5a6579;
+    --ink-faint:#8b94a5;--line:#d3dae4;--stream:#c47d16;--stream-soft:#f4e2c2;--stream-line:#e7c485;
+    --stream-win:#e2a544;--focus:#2f6df0;--focus-glow:rgba(47,109,240,.30);
+    --shadow:0 1px 2px rgba(20,30,50,.06),0 8px 24px rgba(20,30,50,.08);
+  }
+  :root[data-theme="dark"]{
+    --bg:#0f131b;--panel:#161c27;--tile:#1f2836;--tile-win:#374357;--ink:#e8edf5;--ink-soft:#9aa6b8;
+    --ink-faint:#69748a;--line:#2a3444;--stream:#e8a23d;--stream-soft:#3a2e18;--stream-line:#6a5124;
+    --stream-win:#c9922f;--focus:#6ea8ff;--focus-glow:rgba(110,168,255,.32);
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.45);
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0}
+  .wrap{
+    font-family:var(--sans);
+    color:var(--ink);
+    background:
+      radial-gradient(1200px 600px at 82% -8%, color-mix(in srgb,var(--stream) 8%,transparent), transparent 60%),
+      var(--bg);
+    min-height:100vh;
+    padding:clamp(18px,4vw,44px);
+    -webkit-font-smoothing:antialiased;
+  }
+  .inner{max-width:1140px;margin:0 auto}
+
+  /* header */
+  header.head{margin-bottom:22px}
+  .eyebrow{
+    font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--stream);margin:0 0 10px;
+  }
+  h1{
+    font-size:clamp(26px,4.4vw,40px);line-height:1.04;margin:0 0 12px;font-weight:700;
+    letter-spacing:-.02em;text-wrap:balance;max-width:20ch;
+  }
+  .lede{margin:0;color:var(--ink-soft);font-size:clamp(15px,1.7vw,17px);line-height:1.55;max-width:64ch}
+
+  /* legend */
+  .legend{display:flex;flex-wrap:wrap;gap:18px 26px;margin:20px 0 4px;font-size:13px;color:var(--ink-soft)}
+  .legend span{display:inline-flex;align-items:center;gap:9px}
+  .sw{width:26px;height:17px;border-radius:5px;border:1px solid var(--line);flex:none}
+  .sw.ddt{background:var(--tile)}
+  .sw.str{background:var(--stream-soft);border-color:var(--stream-line)}
+  .sw.foc{background:var(--tile);box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--focus)}
+
+  /* controls */
+  .controls{
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:14px 16px;margin:22px 0 18px;box-shadow:var(--shadow);
+  }
+  .step-copy{flex:1 1 320px;min-width:260px}
+  .step-copy .st-title{font-weight:650;font-size:16px;margin:0 0 3px;letter-spacing:-.01em}
+  .step-copy .st-desc{margin:0;color:var(--ink-soft);font-size:13.5px;line-height:1.5}
+  .btns{display:flex;align-items:center;gap:8px}
+  button{
+    font-family:var(--sans);font-size:14px;font-weight:600;color:var(--ink);
+    background:var(--tile);border:1px solid var(--line);border-radius:9px;
+    padding:9px 14px;cursor:pointer;transition:transform .08s ease,background .15s ease,border-color .15s ease;
+  }
+  button:hover{border-color:var(--ink-faint)}
+  button:active{transform:translateY(1px)}
+  button.primary{background:var(--focus);border-color:var(--focus);color:#fff}
+  :root[data-theme="dark"] button.primary,@media (prefers-color-scheme:dark){}
+  button:focus-visible{outline:3px solid var(--focus-glow);outline-offset:2px}
+  button[disabled]{opacity:.4;cursor:not-allowed}
+  .dots{display:flex;gap:7px;align-items:center;margin-left:2px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--line);border:none;padding:0;cursor:pointer;transition:background .2s,transform .2s}
+  .dot.on{background:var(--stream);transform:scale(1.25)}
+  .count{font-family:var(--mono);font-size:12px;color:var(--ink-faint);letter-spacing:.05em;white-space:nowrap}
+
+  /* comparison */
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media (max-width:880px){.grid{grid-template-columns:1fr}}
+  .pane{
+    background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    padding:18px 18px 20px;box-shadow:var(--shadow);display:flex;flex-direction:column;
+  }
+  .pane-hd{display:flex;align-items:baseline;gap:10px;margin-bottom:2px}
+  .pane-tag{font-family:var(--mono);font-size:12px;font-weight:700;color:#fff;background:var(--ink);border-radius:6px;padding:3px 8px;letter-spacing:.04em}
+  .pane-tag.q{background:var(--stream);color:#1a130a}
+  .pane-name{font-size:17px;font-weight:650;letter-spacing:-.01em}
+  .pane-sub{margin:6px 0 0;color:var(--ink-soft);font-size:13px;line-height:1.5;min-height:2.8em}
+
+  .stage{
+    margin-top:14px;border:1px solid var(--line);border-radius:12px;
+    background:
+      linear-gradient(180deg, color-mix(in srgb,var(--ink) 3%,transparent), transparent 40%),
+      var(--bg);
+    padding:20px 16px;overflow-x:auto;
+  }
+  .board{display:flex;flex-direction:column;gap:22px;width:max-content;min-width:100%}
+  .row{display:flex;align-items:flex-end}
+
+  /* tiles */
+  .tile{
+    width:96px;flex:none;position:relative;cursor:default;
+    transition:transform .28s cubic-bezier(.2,.7,.2,1),opacity .28s ease,box-shadow .22s ease,width .34s cubic-bezier(.4,0,.2,1),margin .34s cubic-bezier(.4,0,.2,1);
+  }
+  .row--strip .tile{margin-right:12px}
+  .row--strip .tile:last-child{margin-right:0}
+  .tile .screen{
+    height:50px;border-radius:8px 8px 0 0;background:var(--tile);border:1px solid var(--line);border-bottom:none;
+    position:relative;overflow:hidden;
+  }
+  .tile .win{position:absolute;border-radius:3px;background:var(--tile-win)}
+  .tile .w1{left:9px;top:9px;width:44px;height:14px}
+  .tile .w2{left:9px;top:27px;width:30px;height:13px}
+  .tile .w3{right:9px;top:14px;width:22px;height:26px;opacity:.7}
+  .tile .cap{
+    font-family:var(--mono);font-size:11px;color:var(--ink-soft);text-align:center;
+    padding:5px 4px;border:1px solid var(--line);border-top:none;border-radius:0 0 8px 8px;
+    background:var(--panel);white-space:nowrap;letter-spacing:.02em;
+  }
+  .tile.focus{transform:translateY(-6px)}
+  .tile.focus .screen{box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--focus),0 10px 22px var(--focus-glow)}
+  .tile.focus .cap{color:var(--ink);border-color:var(--focus);box-shadow:0 0 0 1px var(--focus)}
+
+  /* stream-flavoured tiles */
+  .tile--stream .screen{background:var(--stream-soft);border-color:var(--stream-line)}
+  .tile--stream .win{background:var(--stream-win)}
+  .tile--stream .cap{color:var(--stream)}
+
+  /* Q collapse */
+  .tile.collapsed{width:0;margin-right:0;opacity:0;pointer-events:none}
+  .tile.collapsed .screen,.tile.collapsed .cap{border:none}
+
+  /* Q ambiguity query */
+  .tile.query .screen{animation:pulseq 1.2s ease-in-out infinite}
+  .tile.query::after{
+    content:"?";position:absolute;inset:0 0 auto 0;top:12px;margin:auto;width:26px;height:26px;left:0;right:0;
+    display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:15px;color:#1a130a;
+    background:var(--stream);border-radius:50%;box-shadow:0 3px 10px rgba(0,0,0,.3);
+  }
+  @keyframes pulseq{0%,100%{box-shadow:0 0 0 2px var(--stream)}50%{box-shadow:0 0 0 4px var(--stream),0 0 16px var(--stream)}}
+
+  /* P scope box */
+  .scope-wrap{position:relative;padding-top:0}
+  .conn{position:absolute;top:-22px;width:2px;height:22px;background:var(--stream-line)}
+  .scope{
+    border:1.5px solid var(--stream-line);background:color-mix(in srgb,var(--stream-soft) 55%,transparent);
+    border-radius:12px;padding:9px 10px 10px;width:max-content;
+    transition:opacity .3s ease,filter .3s ease,transform .3s ease;
+  }
+  .scope-label{
+    font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--stream);margin:0 0 8px 2px;display:flex;align-items:center;gap:6px;
+  }
+  .scope-label::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--stream)}
+  .scope.resting{opacity:.4;filter:saturate(.5);transform:scale(.97)}
+  .scope.resting .scope-label::after{content:" · resting";color:var(--ink-faint);font-weight:500}
+
+  /* HUD + keys */
+  .readout{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:16px;flex-wrap:wrap}
+  .hud{
+    font-family:var(--mono);font-size:12.5px;font-weight:600;color:var(--ink);
+    background:var(--tile);border:1px solid var(--line);border-radius:8px;padding:7px 11px;letter-spacing:.02em;
+  }
+  .hud.instream{background:var(--stream-soft);border-color:var(--stream-line);color:var(--stream)}
+  .keys{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-faint)}
+  .keys .lbl{margin-right:3px}
+  kbd{
+    font-family:var(--mono);font-size:13px;min-width:24px;text-align:center;color:var(--ink);
+    background:var(--panel);border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;padding:3px 6px;
+  }
+  .keys .plus{color:var(--ink-faint);font-size:11px}
+  .keys .combo{display:inline-flex;align-items:center;gap:4px}
+  .keys .then{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-faint);margin:0 4px}
+  .keys .none{color:var(--ink-faint);font-style:italic}
+  kbd.hot{background:var(--stream);border-color:var(--stream);color:#1a130a;box-shadow:0 2px 0 color-mix(in srgb,var(--stream) 60%,#000)}
+  .note{margin:12px 0 0;font-size:12.5px;line-height:1.5;color:var(--ink-soft);min-height:3em}
+  .note.crux{color:var(--ink);border-left:3px solid var(--stream);padding-left:11px}
+
+  /* takeaway */
+  .takeaway{margin-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media (max-width:880px){.takeaway{grid-template-columns:1fr}}
+  .tk{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;box-shadow:var(--shadow)}
+  .tk h3{margin:0 0 12px;font-size:15px;letter-spacing:-.01em;display:flex;align-items:center;gap:9px}
+  .tk h3 .t{font-family:var(--mono);font-size:11px;font-weight:700;color:#fff;background:var(--ink);border-radius:5px;padding:2px 7px}
+  .tk.q h3 .t{background:var(--stream);color:#1a130a}
+  .tk ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+  .tk li{font-size:13.5px;line-height:1.45;color:var(--ink-soft);padding-left:20px;position:relative}
+  .tk li::before{content:"";position:absolute;left:2px;top:7px;width:7px;height:7px;border-radius:2px;background:var(--stream)}
+  .tk li.cost{color:var(--ink)}
+  .tk li.cost::before{background:var(--ink-faint);border-radius:50%}
+  .tk li.cost b{color:var(--ink);font-weight:650}
+
+  /* keymap */
+  .keymap{margin-top:24px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px 22px;box-shadow:var(--shadow)}
+  .keymap h2{margin:0 0 3px;font-size:17px;font-weight:650;letter-spacing:-.01em}
+  .keymap .km-lede{margin:0;color:var(--ink-soft);font-size:13.5px;line-height:1.5;max-width:66ch}
+  .km-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}
+  @media (max-width:880px){.km-grid{grid-template-columns:1fr}}
+  .km-col{border:1px solid var(--line);border-radius:12px;padding:16px 18px;background:var(--bg)}
+  .km-col.p{border-color:var(--stream-line);background:color-mix(in srgb,var(--stream-soft) 22%,var(--bg))}
+  .km-head{font-family:var(--mono);font-size:11.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:15px;display:flex;align-items:center;gap:8px}
+  .km-col.p .km-head{color:var(--stream)}
+  .km-head .badge{font-size:10px;background:var(--ink-faint);color:var(--panel);border-radius:5px;padding:2px 6px;letter-spacing:.03em}
+  .km-col.p .km-head .badge{background:var(--stream);color:#1a130a}
+  .km-row{display:flex;align-items:center;gap:13px;padding:8px 0;flex-wrap:wrap}
+  .km-row+.km-row{border-top:1px dashed var(--line)}
+  .km-keys{display:inline-flex;align-items:center;gap:4px;flex:none;min-width:132px}
+  .km-keys .plus{color:var(--ink-faint);font-size:11px}
+  .km-keys .slash{color:var(--ink-faint);margin:0 4px;font-size:13px}
+  .km-desc{font-size:13px;color:var(--ink-soft);line-height:1.4}
+  .km-desc b{color:var(--ink);font-weight:600}
+  .km-note{margin:14px 0 0;font-size:12.5px;color:var(--ink-soft);line-height:1.5}
+  .km-note b{color:var(--ink);font-weight:650}
+  .km-col.p .km-note b{color:var(--stream)}
+  .km-foot{margin:16px 0 0;font-size:12px;color:var(--ink-faint);line-height:1.5}
+
+  .foot{margin-top:22px;font-size:12.5px;color:var(--ink-faint);line-height:1.55;max-width:70ch}
+  .foot code{font-family:var(--mono);background:var(--tile);padding:1px 5px;border-radius:4px;border:1px solid var(--line)}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+ <div class="inner">
+  <header class="head">
+    <p class="eyebrow">Hypertree · navigation model</p>
+    <h1>Two ways to jump into a worktree scope</h1>
+    <p class="lede">Same journey, same intent &mdash; step through it in both models and feel where they diverge. <b>P</b> gives the scope its own depth axis you dive into and surface out of. <b>Q</b> splices the scope inline into one continuous strip. Watch the crux steps (3&nbsp;and&nbsp;4).</p>
+    <div class="legend">
+      <span><i class="sw ddt"></i>Day-to-day desktop</span>
+      <span><i class="sw str"></i>feat-123 worktree scope</span>
+      <span><i class="sw foc"></i>Focus &mdash; where you are right now</span>
+    </div>
+  </header>
+
+  <div class="controls">
+    <div class="step-copy">
+      <p class="st-title" id="stTitle"></p>
+      <p class="st-desc" id="stDesc"></p>
+    </div>
+    <div class="btns">
+      <button id="prev" aria-label="Previous step">&larr; Prev</button>
+      <button id="play" class="primary">&#9654; Play</button>
+      <button id="next" aria-label="Next step">Next &rarr;</button>
+    </div>
+    <div class="dots" id="dots" role="tablist" aria-label="Journey steps"></div>
+    <span class="count" id="count"></span>
+  </div>
+
+  <div class="grid">
+    <!-- P -->
+    <section class="pane" aria-label="Model P">
+      <div class="pane-hd"><span class="pane-tag">P</span><span class="pane-name">Dive / Surface</span></div>
+      <p class="pane-sub">The scope lives on a second axis. Down dives in, up surfaces out. Left/right stays scoped to the level you're on.</p>
+      <div class="stage"><div class="board" id="boardP"></div></div>
+      <div class="readout"><span class="hud" id="hudP"></span><span class="keys" id="keysP"></span></div>
+      <p class="note" id="noteP"></p>
+    </section>
+
+    <!-- Q -->
+    <section class="pane" aria-label="Model Q">
+      <div class="pane-hd"><span class="pane-tag q">Q</span><span class="pane-name">Inline expand</span></div>
+      <p class="pane-sub">The scope splices into your one horizontal strip. Only ever left/right &mdash; no modes, but the strip grows and the scope has no edges.</p>
+      <div class="stage"><div class="board" id="boardQ"></div></div>
+      <div class="readout"><span class="hud" id="hudQ"></span><span class="keys" id="keysQ"></span></div>
+      <p class="note" id="noteQ"></p>
+    </section>
+  </div>
+
+  <section class="keymap">
+    <h2>How you'd drive it</h2>
+    <p class="km-lede">You keep the horizontal muscle memory you already have. Model&nbsp;P just adds one <b>vertical</b> axis for depth &mdash; the two amber keys below are the whole difference from today.</p>
+    <div class="km-grid">
+      <div class="km-col">
+        <div class="km-head"><span class="badge">Today</span> Flat desktops</div>
+        <div class="km-row">
+          <span class="km-keys"><kbd>Win</kbd><span class="plus">+</span><kbd>Ctrl</kbd><span class="plus">+</span><kbd>←</kbd><span class="slash">/</span><kbd>→</kbd></span>
+          <span class="km-desc">step along one long line of desktops</span>
+        </div>
+        <p class="km-note">One axis. Day-to-day desktops and <em>every</em> worktree sit in the same flat row &mdash; the more worktrees, the longer the line you scan.</p>
+      </div>
+      <div class="km-col p">
+        <div class="km-head"><span class="badge">Model P</span> Dive &amp; surface</div>
+        <div class="km-row">
+          <span class="km-keys"><kbd>Win</kbd><span class="plus">+</span><kbd>←</kbd><span class="slash">/</span><kbd>→</kbd></span>
+          <span class="km-desc">move within the level you're on</span>
+        </div>
+        <div class="km-row">
+          <span class="km-keys"><kbd>Win</kbd><span class="plus">+</span><kbd class="hot">↓</kbd></span>
+          <span class="km-desc"><b>dive</b> into the scope anchored here</span>
+        </div>
+        <div class="km-row">
+          <span class="km-keys"><kbd>Win</kbd><span class="plus">+</span><kbd class="hot">↑</kbd></span>
+          <span class="km-desc"><b>surface</b> back out to your anchor</span>
+        </div>
+        <p class="km-note">Same left/right as today &mdash; plus a <b>new vertical dimension</b>. Depth is a felt state, and surfacing always returns you to the exact desktop you dived from.</p>
+      </div>
+    </div>
+    <p class="km-foot">Optional fourth binding worth reserving: <kbd>Win</kbd><span class="plus" style="color:var(--ink-faint)">+</span><kbd>Ctrl</kbd><span class="plus" style="color:var(--ink-faint)">+</span><kbd>↓</kbd> to hop straight from one scope into another without surfacing first &mdash; a &ldquo;scope switcher&rdquo; for when you're jumping between two worktrees a lot.</p>
+  </section>
+
+  <div class="takeaway">
+    <div class="tk">
+      <h3><span class="t">P</span> What dive / surface buys you</h3>
+      <ul>
+        <li>A boundary you can <b>feel</b> &mdash; you always know if you're inside a scope or out in day-to-day.</li>
+        <li>Resumable: diving back lands you exactly where you left off inside the scope.</li>
+        <li>Anchored in space &mdash; &ldquo;feat-123 lives under my Web desktop.&rdquo;</li>
+        <li class="cost"><b>Cost:</b> one extra keystroke to cross the boundary, and a depth mode to hold in your head.</li>
+      </ul>
+    </div>
+    <div class="tk q">
+      <h3><span class="t">Q</span> What inline expand buys you</h3>
+      <ul>
+        <li>One axis only &mdash; left/right forever, no modes to track.</li>
+        <li>Fluid: flow straight from inside the scope out into day-to-day without popping.</li>
+        <li>Fewer keystrokes at the edges of a scope.</li>
+        <li class="cost"><b>Cost:</b> the strip keeps growing, and nothing marks where a scope begins or ends &mdash; no scope memory.</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="foot">These bindings <b>assume <code>Win+arrow</code> is free</b> so the new vertical axis reads cleanly against today's flat <code>Win+Ctrl+&larr;/&rarr;</code>. In reality <code>Win+arrow</code> is Windows' window-snap, so a real build would land on something like <code>Win+Ctrl+arrow</code> or a custom hotkey layer &mdash; the <em>shape</em> (add up/down for depth) is what matters, not the exact keys. And the on-screen <b>HUD chip</b> is doing real work: native Task View can't draw a second axis, so that small &ldquo;where am I&rdquo; readout is what actually keeps you un-lost.</p>
+ </div>
+</div>
+
+<script>
+(function(){
+  var TILE_W=96, GAP=12, ANCHOR_IDX=2;
+  var DDT=[{id:'home',name:'Home'},{id:'comms',name:'Comms'},{id:'web',name:'Web'},{id:'notes',name:'Notes'}];
+  var STREAM=[{id:'spa',name:'SPA'},{id:'api',name:'API'},{id:'mob',name:'Mobile'}];
+
+  function tileEl(item, isStream){
+    var t=document.createElement('div');
+    t.className='tile'+(isStream?' tile--stream':'');
+    t.dataset.id=item.id;
+    t.innerHTML='<div class="screen"><span class="win w1"></span><span class="win w2"></span><span class="win w3"></span></div><div class="cap">'+item.name+'</div>';
+    return t;
+  }
+
+  // ---- Build P board ----
+  var boardP=document.getElementById('boardP');
+  var rowDdtP=document.createElement('div'); rowDdtP.className='row row--ddt';
+  var pTiles={};
+  DDT.forEach(function(d){var e=tileEl(d,false);rowDdtP[('appendChild')](e);pTiles[d.id]=e;});
+  boardP.appendChild(rowDdtP);
+
+  var scopeWrap=document.createElement('div'); scopeWrap.className='scope-wrap';
+  scopeWrap.style.paddingLeft=(ANCHOR_IDX*(TILE_W+GAP))+'px';
+  var conn=document.createElement('div'); conn.className='conn';
+  conn.style.left=(ANCHOR_IDX*(TILE_W+GAP)+TILE_W/2)+'px';
+  var scope=document.createElement('div'); scope.className='scope'; scope.id='scopeP';
+  scope.innerHTML='<div class="scope-label">feat-123</div>';
+  var rowStr=document.createElement('div'); rowStr.className='row row--stream';
+  STREAM.forEach(function(s){var e=tileEl(s,true);rowStr.appendChild(e);pTiles[s.id]=e;});
+  scope.appendChild(rowStr);
+  scopeWrap.appendChild(conn); scopeWrap.appendChild(scope);
+  boardP.appendChild(scopeWrap);
+
+  // ---- Build Q board ----
+  var boardQ=document.getElementById('boardQ');
+  var rowStrip=document.createElement('div'); rowStrip.className='row row--strip';
+  var qOrder=[DDT[0],DDT[1],DDT[2],STREAM[0],STREAM[1],STREAM[2],DDT[3]];
+  var qTiles={};
+  qOrder.forEach(function(o){
+    var isS=STREAM.indexOf(o)>-1;
+    var e=tileEl(o,isS); if(isS)e.dataset.collapsible='1';
+    rowStrip.appendChild(e); qTiles[o.id]=e;
+  });
+  boardQ.appendChild(rowStrip);
+
+  // ---- Steps ----
+  var STEPS=[
+    {
+      title:"You're in your day-to-day desktops",
+      desc:"Focus is on the Web desktop. The feat-123 worktree is already anchored here, waiting.",
+      p:{focus:'web',stream:'resting',hud:'day-to-day · Web',inhud:false,keys:[],note:"feat-123 rests one level down — dimmed and out of the way until you want it."},
+      q:{focus:'web',spliced:false,query:false,hud:'strip · Web (3/4)',inhud:false,keys:[],note:"feat-123 is collapsed inline — present in the strip, just hidden for now."}
+    },
+    {
+      title:"Jump into feat-123 → its SPA desktop",
+      desc:"You want to work on the feature. Enter the scope and land on its first desktop.",
+      p:{focus:'spa',stream:'active',hud:'▸ feat-123 · SPA (1/3)',inhud:true,keys:['Win+↓'],note:"Win+↓ dives into the scope. Left/right now moves inside feat-123."},
+      q:{focus:'spa',spliced:true,query:false,hud:'strip · SPA (4/7)',inhud:false,keys:['Win+↓'],note:"Win+↓ expands the scope into the strip — it just got three desktops longer."}
+    },
+    {
+      title:"Move to the API desktop",
+      desc:"One step across, still working the feature.",
+      p:{focus:'api',stream:'active',hud:'▸ feat-123 · API (2/3)',inhud:true,keys:['Win+→'],note:"Still unmistakably inside feat-123."},
+      q:{focus:'api',spliced:true,query:false,hud:'strip · API (5/7)',inhud:false,keys:['Win+→'],note:"Same Win+→ — but are you “in” the scope or not? The strip doesn't say."}
+    },
+    {
+      title:"Pop out to a day-to-day desktop (Notes)",
+      desc:"The crux. You need to check something in Notes, then you'll come back.",
+      p:{focus:'notes',stream:'resting',hud:'day-to-day · Notes',inhud:false,keys:['Win+↑','Win+→'],crux:true,note:"Win+↑ surfaces to your anchor, then Win+→ to Notes. You feel the boundary you just crossed."},
+      q:{focus:'notes',spliced:true,query:false,hud:'strip · Notes (7/7)',inhud:false,keys:['Win+→','Win+→'],crux:true,note:"Just keep pressing Win+→, out past Mobile. Fluid — but nothing marked where feat-123 ended."}
+    },
+    {
+      title:"Later — jump back into feat-123, resume on API",
+      desc:"The second crux. You return to the feature and want to pick up where you left off.",
+      p:{focus:'api',stream:'active',hud:'▸ feat-123 · API (2/3)',inhud:true,keys:['Win+↓'],crux:true,note:"One Win+↓ lands you back on API — the scope remembered where you left off."},
+      q:{focus:'api',spliced:true,query:true,hud:'strip · which were feat-123?',inhud:false,keys:['Win+←','Win+←'],crux:true,note:"Which tiles were feat-123's? You Win+← back and re-find them by eye."}
+    },
+    {
+      title:"Same journey, two feelings",
+      desc:"P trades one keystroke for a boundary you feel and a scope that remembers itself. Q trades that memory for a single, mode-free axis. Read the cards below.",
+      p:{focus:'api',stream:'active',hud:'▸ feat-123 · API (2/3)',inhud:true,keys:[],note:"Clear depth · resumable scope · anchored in space."},
+      q:{focus:'api',spliced:true,query:false,hud:'strip · API (5/7)',inhud:false,keys:[],note:"One axis · no modes · a longer strip to scan."}
+    }
+  ];
+
+  var i=0, playing=false, timer=null;
+
+  // dots
+  var dotsWrap=document.getElementById('dots');
+  STEPS.forEach(function(_,idx){
+    var b=document.createElement('button'); b.className='dot'; b.setAttribute('role','tab');
+    b.setAttribute('aria-label','Step '+(idx+1));
+    b.addEventListener('click',function(){stop();go(idx);});
+    dotsWrap.appendChild(b);
+  });
+
+  function keysHTML(keys){
+    if(!keys.length) return '<span class="lbl">keys</span><span class="none">nothing to press</span>';
+    return '<span class="lbl">keys</span>'+keys.map(function(combo){
+      return '<span class="combo">'+combo.split('+').map(function(k){
+        var hot=(k==='↓'||k==='↑')?' class="hot"':'';
+        return '<kbd'+hot+'>'+k+'</kbd>';
+      }).join('<span class="plus">+</span>')+'</span>';
+    }).join('<span class="then">then</span>');
+  }
+  function setFocus(map,id){
+    Object.keys(map).forEach(function(k){map[k].classList.toggle('focus',k===id);});
+  }
+
+  function render(){
+    var s=STEPS[i];
+    document.getElementById('stTitle').textContent=s.title;
+    document.getElementById('stDesc').textContent=s.desc;
+    document.getElementById('count').textContent=('0'+(i+1)).slice(-2)+' / '+('0'+STEPS.length).slice(-2);
+
+    // P
+    scope.classList.toggle('resting',s.p.stream==='resting');
+    setFocus(pTiles,s.p.focus);
+    var hudP=document.getElementById('hudP');
+    hudP.textContent=s.p.hud; hudP.classList.toggle('instream',s.p.inhud);
+    document.getElementById('keysP').innerHTML=keysHTML(s.p.keys);
+    var noteP=document.getElementById('noteP'); noteP.textContent=s.p.note; noteP.classList.toggle('crux',!!s.p.crux);
+
+    // Q
+    STREAM.forEach(function(st){qTiles[st.id].classList.toggle('collapsed',!s.q.spliced);});
+    STREAM.forEach(function(st){qTiles[st.id].classList.toggle('query',!!s.q.query);});
+    setFocus(qTiles,s.q.focus);
+    var hudQ=document.getElementById('hudQ');
+    hudQ.textContent=s.q.hud; hudQ.classList.toggle('instream',s.q.inhud);
+    document.getElementById('keysQ').innerHTML=keysHTML(s.q.keys);
+    var noteQ=document.getElementById('noteQ'); noteQ.textContent=s.q.note; noteQ.classList.toggle('crux',!!s.q.crux);
+
+    // dots + nav
+    dotsWrap.querySelectorAll('.dot').forEach(function(d,idx){d.classList.toggle('on',idx===i);});
+    document.getElementById('prev').disabled=(i===0);
+    document.getElementById('next').disabled=(i===STEPS.length-1);
+  }
+
+  function go(n){ i=Math.max(0,Math.min(STEPS.length-1,n)); render(); }
+  function next(){ if(i<STEPS.length-1) go(i+1); else stop(); }
+  function prev(){ go(i-1); }
+
+  function play(){
+    playing=true; document.getElementById('play').innerHTML='&#10073;&#10073; Pause';
+    timer=setInterval(function(){ if(i>=STEPS.length-1){stop();return;} next(); },2300);
+  }
+  function stop(){
+    playing=false; document.getElementById('play').innerHTML='&#9654; Play';
+    if(timer){clearInterval(timer);timer=null;}
+  }
+
+  document.getElementById('next').addEventListener('click',function(){stop();next();});
+  document.getElementById('prev').addEventListener('click',function(){stop();prev();});
+  document.getElementById('play').addEventListener('click',function(){
+    if(playing){stop();} else { if(i>=STEPS.length-1) go(0); play(); }
+  });
+  document.addEventListener('keydown',function(e){
+    if(e.key==='ArrowRight'){stop();next();e.preventDefault();}
+    else if(e.key==='ArrowLeft'){stop();prev();e.preventDefault();}
+    else if(e.key===' '){document.getElementById('play').click();e.preventDefault();}
+  });
+
+  render();
+})();
+</script>
