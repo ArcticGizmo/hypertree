@@ -167,6 +167,11 @@ depth actually feels like a place before investing in M2/M3 (`PLAN.md` §9, risk
 ### Phase 1.4 — The HUD chip (load-bearing, `PLAN.md` §9 risk 3)
 - Owner-drawn overlay via perch's `OverlayCanvas`/`OverlayDraw` pattern, rendering the
   source-of-truth readout `▸ feat-123 · API (2/3)` (`PLAN.md` §3, sub-decision 4).
+- **Placement (decided):** a small chip **centered horizontally over the primary
+  monitor's taskbar** (bottom-center), so "where am I" sits where the eye already goes
+  for system state. Transparent, click-through, always-on-top, no activation/focus
+  steal. Position derives from the primary work-area vs. full-screen delta (taskbar
+  height) — recompute on DPI/resolution change. (Multi-monitor placement = M3.)
 - Flash-on-switch first (simplest); keep always-on as a config toggle for later.
 - Reuse perch's `HeadlessRenderer` `render <outDir>` mode so the HUD can be eyeballed
   at 1×/1.5× without a display — mandatory for any owner-drawn text (perch's line-height
