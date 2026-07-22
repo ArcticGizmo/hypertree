@@ -21,3 +21,19 @@ public sealed record NavMapAnchor(string Label, bool HasScope, bool IsCurrentCol
 /// <param name="Label">Display label (e.g. "API").</param>
 /// <param name="IsCurrent">Whether this is the desktop the user is on right now (only when dived).</param>
 public sealed record NavMapDesktop(string Label, bool IsCurrent);
+
+/// <summary>
+/// Full-topology snapshot for the interactive map/config overlay (every anchor and its scope, not
+/// just the current one). Distinct from <see cref="NavMap"/>, which is the current-focused flash.
+/// </summary>
+/// <param name="Index">The anchor's index (stable handle for add/remove operations).</param>
+/// <param name="AnchorLabel">Display label of the day-to-day desktop.</param>
+/// <param name="IsCurrentColumn">Whether the user is currently on this column.</param>
+/// <param name="ScopeName">The scope's name, or null if the anchor has no scope.</param>
+/// <param name="ScopeDesktops">The scope's desktop labels in order (empty if no scope).</param>
+public sealed record StreamInfo(
+    int Index,
+    string AnchorLabel,
+    bool IsCurrentColumn,
+    string? ScopeName,
+    IReadOnlyList<string> ScopeDesktops);

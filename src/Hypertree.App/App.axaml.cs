@@ -30,6 +30,8 @@ public sealed class App : Application
         (HotkeyKey.ArrowLeft,  NavAction.MoveLeft),
         (HotkeyKey.ArrowRight, NavAction.MoveRight),
     };
+    // Ctrl+Alt+Space toggles the interactive map/config overlay.
+    private const HotkeyKey MapKey = HotkeyKey.Space;
 
     private readonly List<IGlobalHotkey> _hotkeys = new();
     // Desktops Hypertree itself created (for scopes). Only these are ever torn down — the demo
@@ -38,6 +40,7 @@ public sealed class App : Application
     private IDesktopController? _desktops;
     private NavigationModel? _model;
     private HudWindow? _hud;
+    private MapOverlay? _overlay;
     private TrayIcon? _tray;
     private ScopeDialog? _dialog;
 
@@ -71,6 +74,10 @@ public sealed class App : Application
         _hud = new HudWindow();
         // HUD flashing is driven explicitly (Navigate / scope actions) so edge no-ops still show.
 
+        _overlay = new MapOverlay();
+        _overlay.AddScopeRequested += index => PromptNewScope(index);
+        _overlay.RemoveScopeRequested += index => RemoveScope(index);
+
         RegisterHotkeys();
         BuildTray();
     }
@@ -86,26 +93,42 @@ public sealed class App : Application
             if (ok) _hotkeys.Add(hk);
             else { hk.Dispose(); Console.Error.WriteLine($"Hotkey Ctrl+Alt+{key} was refused by the OS."); }
         }
+
+        var mapHk = PlatformServices.CreateGlobalHotkey();
+        if (mapHk.Register(Mods, MapKey, () => Dispatcher.UIThread.Post(ToggleMap))) _hotkeys.Add(mapHk);
+        else { mapHk.Dispose(); Console.Error.WriteLine("Hotkey Ctrl+Alt+Space (map) was refused by the OS."); }
     }
 
     // Apply the intent, then always flash the HUD map — so even a no-op at an edge still confirms
-    // "where am I" (the load-bearing promise of PLAN.md §9 risk 3).
+    // "where am I" (the load-bearing promise of PLAN.md §9 risk 3). Pressing a nav key while the
+    // interactive overlay is open closes it first (arrows exit the map and navigate).
     private void Navigate(NavAction action)
     {
         if (_model is null || _hud is null) return;
+        _overlay?.Close();
         _model.Apply(action);
         _hud.Flash(_model.BuildMap());
+    }
+
+    private void ToggleMap()
+    {
+        if (_model is null || _overlay is null) return;
+        if (_overlay.IsOpen) { _overlay.Close(); return; }
+
+        // Configure from the day-to-day row so we never edit a scope we're standing inside.
+        if (!_model.IsAtDayToDay) { _model.Apply(NavAction.Surface); _hud?.Flash(_model.BuildMap()); }
+        _overlay.Open(_model.BuildStreams());
     }
 
     private void BuildTray()
     {
         var header = new NativeMenuItem("Hypertree 0.1.0") { IsEnabled = false };
-        var where = new NativeMenuItem("Show map");
-        where.Click += (_, _) => { if (_model is not null) _hud?.Flash(_model.BuildMap()); };
+        var map = new NativeMenuItem("Open map (Ctrl+Alt+Space)");
+        map.Click += (_, _) => ToggleMap();
         var newScope = new NativeMenuItem("New scope here…");
-        newScope.Click += (_, _) => PromptNewScope();
+        newScope.Click += (_, _) => { if (_model is not null) PromptNewScope(_model.CurrentColumnIndex); };
         var removeScope = new NativeMenuItem("Remove scope here");
-        removeScope.Click += (_, _) => RemoveScopeHere();
+        removeScope.Click += (_, _) => { if (_model is not null) RemoveScope(_model.CurrentColumnIndex); };
         var exit = new NativeMenuItem("Exit");
         exit.Click += (_, _) => (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
 
@@ -117,7 +140,7 @@ public sealed class App : Application
             Menu = new NativeMenu
             {
                 header, new NativeMenuItemSeparator(),
-                where, newScope, removeScope, new NativeMenuItemSeparator(),
+                map, newScope, removeScope, new NativeMenuItemSeparator(),
                 exit,
             },
         };
@@ -126,23 +149,21 @@ public sealed class App : Application
 
     // ── Scope definition (M1 stand-in for M2's git-worktree flow) ─────────────────
 
-    private void PromptNewScope()
+    // Prompt for and create a scope on the anchor at <index>. Reached from the tray (current column)
+    // or the map overlay's "+ Add scope" (any column).
+    private void PromptNewScope(int index)
     {
         if (_model is null || _desktops is null) return;
-        if (!_model.IsAtDayToDay)
-        {
-            _hud?.Flash(_model.BuildMap()); // nudge: surface first
-            return;
-        }
         if (_dialog is not null) { _dialog.Activate(); return; } // one at a time
 
-        _dialog = new ScopeDialog(_model.Location.DesktopLabel);
+        string anchorLabel = _model.BuildStreams()[index].AnchorLabel;
+        _dialog = new ScopeDialog(anchorLabel);
         _dialog.Closed += (_, _) => _dialog = null;
-        _dialog.Confirmed += spec => CreateScope(spec);
+        _dialog.Confirmed += spec => CreateScope(index, spec);
         _dialog.Show();
     }
 
-    private void CreateScope(ScopeSpec spec)
+    private void CreateScope(int index, ScopeSpec spec)
     {
         if (_model is null || _desktops is null) return;
 
@@ -155,24 +176,31 @@ public sealed class App : Application
             refs.Add(new DesktopRef(id, label));
         }
 
-        HtScope? previous = _model.DefineScopeHere(new HtScope(spec.Name, refs));
-        TearDown(previous); // remove the desktops of a replaced scope (only ones we created)
-        _hud?.Flash(_model.BuildMap());
+        HtScope? previous = _model.SetScope(index, new HtScope(spec.Name, refs));
+        TearDown(previous, _model.AnchorDesktopId(index)); // remove a replaced scope's desktops
+        AfterConfigChange();
     }
 
-    private void RemoveScopeHere()
+    private void RemoveScope(int index)
     {
-        if (_model is null || !_model.IsAtDayToDay || !_model.CurrentAnchorHasScope) return;
-        TearDown(_model.RemoveScopeHere());
-        _hud?.Flash(_model.BuildMap());
+        if (_model is null) return;
+        TearDown(_model.SetScope(index, null), _model.AnchorDesktopId(index));
+        AfterConfigChange();
+    }
+
+    // Refresh whichever surface is showing after a config change.
+    private void AfterConfigChange()
+    {
+        if (_model is null) return;
+        if (_overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildStreams());
+        else _hud?.Flash(_model.BuildMap());
     }
 
     // Remove a scope's desktops — but ONLY ones Hypertree created, never the user's pre-existing
-    // desktops (the demo topology reuses those). Fallback is the current anchor's desktop.
-    private void TearDown(HtScope? scope)
+    // desktops (the demo topology reuses those). Windows on removed desktops fall back to <fallback>.
+    private void TearDown(HtScope? scope, DesktopId fallback)
     {
-        if (scope is null || _model is null || _desktops is null) return;
-        DesktopId fallback = _model.CurrentAnchorDesktopId;
+        if (scope is null || _desktops is null) return;
         foreach (DesktopRef d in scope.Desktops)
         {
             if (_created.Remove(d.Id.Value))
@@ -188,6 +216,7 @@ public sealed class App : Application
         _hotkeys.Clear();
         if (_tray is not null) _tray.IsVisible = false;
         _dialog?.Close();
+        _overlay?.Close();
         _hud?.Close();
     }
 }

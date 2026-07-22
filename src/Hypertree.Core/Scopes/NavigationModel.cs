@@ -122,6 +122,46 @@ public sealed class NavigationModel
         return removed;
     }
 
+    // ── Config surface (the interactive map overlay) ─────────────────────────────
+
+    public int AnchorCount => _topology.Anchors.Count;
+
+    /// <summary>Index of the anchor column the user is currently on.</summary>
+    public int CurrentColumnIndex => _anchorIndex;
+
+    /// <summary>The OS desktop id of an anchor by index — the fallback when tearing down its scope.</summary>
+    public DesktopId AnchorDesktopId(int index) => _topology.Anchors[index].Desktop.Id;
+
+    /// <summary>Whole-topology snapshot for the config overlay: every anchor and its scope.</summary>
+    public IReadOnlyList<StreamInfo> BuildStreams()
+    {
+        var streams = new List<StreamInfo>(_topology.Anchors.Count);
+        for (int i = 0; i < _topology.Anchors.Count; i++)
+        {
+            Anchor a = _topology.Anchors[i];
+            IReadOnlyList<string> labels = a.Scope is null
+                ? Array.Empty<string>()
+                : a.Scope.Desktops.Select(d => d.Label).ToList();
+            streams.Add(new StreamInfo(i, a.Desktop.Label, i == _anchorIndex, a.Scope?.Name, labels));
+        }
+        return streams;
+    }
+
+    /// <summary>
+    /// Set or clear the scope on an anchor by index (used by the config overlay, which operates on
+    /// any anchor). Returns the previous scope for teardown. Callers ensure the day-to-day row is
+    /// current before configuring, so this never disturbs a scope you're standing inside.
+    /// </summary>
+    public Scope? SetScope(int index, Scope? scope)
+    {
+        if (index < 0 || index >= _topology.Anchors.Count) throw new ArgumentOutOfRangeException(nameof(index));
+        Anchor a = _topology.Anchors[index];
+        Scope? previous = a.Scope;
+        a.Scope = scope;
+        Changed?.Invoke();
+        return previous;
+    }
+
     /// <summary>Apply a navigation intent. Returns true if location changed (and a switch was issued).</summary>
     public bool Apply(NavAction action)
     {

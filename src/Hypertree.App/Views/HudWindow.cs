@@ -150,8 +150,10 @@ internal sealed class HudWindow : Window
         PixelRect full = screen.Bounds;
         PixelRect work = screen.WorkingArea;   // excludes the taskbar
 
+        // Top-center: the bottom-center is taken by Windows' own "Desktop N" switch indicator, which
+        // the flash would fight with. Sit just below the top edge of the work area instead.
         int x = full.X + (full.Width - w) / 2;
-        int y = work.Bottom - h - 8;           // sit just above the taskbar, centered
+        int y = work.Y + 12;
         Position = new PixelPoint(x, y);
     }
 

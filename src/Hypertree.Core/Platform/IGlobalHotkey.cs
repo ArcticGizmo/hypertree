@@ -40,4 +40,5 @@ public enum HotkeyKey
     ArrowDown,
     ArrowLeft,
     ArrowRight,
+    Space,
 }

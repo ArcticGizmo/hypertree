@@ -92,6 +92,7 @@ public sealed class GlobalHotkey : IGlobalHotkey
         HotkeyKey.ArrowUp    => 0x26,
         HotkeyKey.ArrowRight => 0x27,
         HotkeyKey.ArrowDown  => 0x28,
+        HotkeyKey.Space      => 0x20,
         _ => throw new ArgumentOutOfRangeException(nameof(key)),
     };
 
