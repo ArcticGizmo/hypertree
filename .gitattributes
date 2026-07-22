@@ -1,15 +1,16 @@
-# Normalize line endings: store text as LF in the repo, check out native on each platform.
+# Normalize line endings. Store text as LF in the repo AND check out LF (eol=lf) so
+# Windows' core.autocrlf=true doesn't rewrite to CRLF and spam conversion warnings.
 * text=auto
 
-# Explicit text types (stored LF)
-*.cs      text
-*.csproj  text
-*.slnx    text
-*.json    text
-*.md      text
-*.yml     text
-*.yaml    text
-*.sln     text
+# Code/config: stored and checked out as LF
+*.cs      text eol=lf
+*.csproj  text eol=lf
+*.slnx    text eol=lf
+*.json    text eol=lf
+*.md      text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.sln     text eol=lf
 
 # Scripts that must keep a specific EOL
 *.sh   text eol=lf
@@ -19,4 +20,4 @@
 # Binary (never touch)
 *.png binary
 *.ico binary
-*.svg text
+*.svg text eol=lf
