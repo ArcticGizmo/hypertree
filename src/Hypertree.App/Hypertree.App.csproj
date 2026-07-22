@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The Hypertree app head (assembly/exe name: hypertree). A tray-only Avalonia app that captures
+    the global hotkeys, drives the NavigationModel, and paints the HUD chip. Windows-only for now;
+    the Core/Platform split keeps a future cross-platform head possible. Composition root is
+    PlatformServices (#if WINDOWS), mirroring perch.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Hypertree.App</RootNamespace>
+    <AssemblyName>hypertree</AssemblyName>
+    <Product>Hypertree</Product>
+    <Version>0.1.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <DefineConstants>$(DefineConstants);WINDOWS</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Hypertree.Core\Hypertree.Core.csproj" />
+    <ProjectReference Include="..\Hypertree.Platform.Windows\Hypertree.Platform.Windows.csproj" />
+  </ItemGroup>
+</Project>
