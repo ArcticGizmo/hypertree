@@ -35,13 +35,10 @@ internal static class BoardView
         double cx = viewportW / 2;
         double rowY = top + lift;
 
-        // ── Top row placement: centre the current top tile, else centre the whole row. ──
-        int topCur = -1;
-        for (int i = 0; i < map.TopRow.Count; i++) if (map.TopRow[i].IsCurrent) topCur = i;
-        double topRowW = map.TopRow.Count * tileW + Math.Max(0, map.TopRow.Count - 1) * gap;
-        double topOffset = topCur >= 0
-            ? cx - (topCur * (tileW + gap) + tileW / 2)
-            : cx - topRowW / 2;
+        // ── Every row is centred on its own cursor (the position you'd return to), so the "current"
+        //    tile of each row lines up on the centre column and moving between rows never slides
+        //    the layout sideways. ──
+        double topOffset = cx - (map.TopCursor * (tileW + gap) + tileW / 2);
 
         var canvas = new Canvas { Width = viewportW, ClipToBounds = true };
         double bottom = rowY + tileH;
@@ -62,15 +59,10 @@ internal static class BoardView
         {
             NavMapGroup g = map.Groups[d];
             int groupIndex = g.Index;
-            double contentW = g.Desktops.Count * tileW + Math.Max(0, g.Desktops.Count - 1) * gap;
-            double boxW = contentW + scopePad * 2;
 
-            int deskCur = -1;
-            for (int j = 0; j < g.Desktops.Count; j++) if (g.Desktops[j].IsCurrent) deskCur = j;
-
-            double boxX = (g.IsCurrentLevel && deskCur >= 0)
-                ? cx - (scopePad + deskCur * (tileW + gap) + tileW / 2)
-                : cx - boxW / 2;
+            // Centre each group on its own cursor (resume point), so returning to any group lands
+            // its remembered desktop on the centre column — aligned under the top-row cursor.
+            double boxX = cx - (scopePad + g.Cursor * (tileW + gap) + tileW / 2);
             double boxY = firstBoxY + d * ( labelH + 6 * s + tileH + scopePad * 2 + groupGap );
 
             Action<int>? clickForThisGroup = onGroupClick is null ? null : j => onGroupClick(groupIndex, j);

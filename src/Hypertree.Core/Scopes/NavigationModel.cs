@@ -65,10 +65,10 @@ public sealed class NavigationModel
             var tiles = new List<NavMapTile>(g.Desktops.Count);
             for (int j = 0; j < g.Desktops.Count; j++)
                 tiles.Add(new NavMapTile(g.Desktops[j].Label, currentLevel && j == g.LastUsedIndex));
-            groups.Add(new NavMapGroup(gi, g.Name, tiles, currentLevel));
+            groups.Add(new NavMapGroup(gi, g.Name, tiles, currentLevel, g.LastUsedIndex));
         }
 
-        return new NavMap(top, _onTop, groups);
+        return new NavMap(top, _topRow.Count == 0 ? 0 : _topIndex, _onTop, groups);
     }
 
     // ── Navigation ─────────────────────────────────────────────────────────────
