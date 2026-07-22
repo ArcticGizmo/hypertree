@@ -87,6 +87,7 @@ public sealed class App : Application
         _overlay.GoToGroupRequested += (g, d) => { _model!.GoToGroupDesktop(g, d); RefreshOverlay(); };
         _overlay.DeleteTopRequested += DeleteTopDesktop;
         _overlay.DeleteGroupDesktopRequested += DeleteGroupDesktop;
+        _overlay.DeleteCurrentRequested += DeleteCurrentDesktop;
         _overlay.NewGroupRequested += PromptNewGroup;
         _overlay.RemoveGroupRequested += RemoveGroup;
 
@@ -122,8 +123,10 @@ public sealed class App : Application
     private void ToggleMap()
     {
         if (_model is null || _overlay is null) return;
-        if (_overlay.IsOpen) _overlay.Close();
-        else _overlay.Open(_model.BuildMap());
+        if (_overlay.IsOpen) { _overlay.Close(); return; }
+
+        _model.PrepareForMapOpen(); // bring the last-used group to the top of the stack
+        _overlay.Open(_model.BuildMap());
     }
 
     private void RefreshOverlay()
@@ -196,6 +199,14 @@ public sealed class App : Application
     }
 
     // ── Delete a single desktop (map × badge) with a confirm prompt ───────────────
+
+    // Delete whatever desktop is currently selected (footer button).
+    private void DeleteCurrentDesktop()
+    {
+        if (_model is null) return;
+        if (_model.OnTop) DeleteTopDesktop(_model.CurrentTopIndex);
+        else if (_model.CurrentGroupDesktop is { } sel) DeleteGroupDesktop(sel.group, sel.desktop);
+    }
 
     private void DeleteTopDesktop(int index)
     {

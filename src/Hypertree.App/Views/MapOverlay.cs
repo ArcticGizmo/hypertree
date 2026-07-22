@@ -33,6 +33,7 @@ internal sealed class MapOverlay
     /// <summary>Footer actions.</summary>
     public event Action? NewGroupRequested;
     public event Action<int>? RemoveGroupRequested;
+    public event Action? DeleteCurrentRequested;
 
     public MapOverlay(IDesktopController desktops) => _desktops = desktops;
 
@@ -48,6 +49,7 @@ internal sealed class MapOverlay
         _map.DeleteGroupDesktopRequested += (g, d) => DeleteGroupDesktopRequested?.Invoke(g, d);
         _map.NewGroupRequested += () => NewGroupRequested?.Invoke();
         _map.RemoveGroupRequested += g => RemoveGroupRequested?.Invoke(g);
+        _map.DeleteCurrentRequested += () => DeleteCurrentRequested?.Invoke();
         _map.Render(map);
         _map.Show();
 
@@ -113,6 +115,7 @@ internal sealed class MapWindow : Window
     public event Action<int, int>? DeleteGroupDesktopRequested;
     public event Action? NewGroupRequested;
     public event Action<int>? RemoveGroupRequested;
+    public event Action? DeleteCurrentRequested;
 
     private readonly Border _card;
     private static readonly IBrush Fg = new SolidColorBrush(Color.Parse("#E8EDF5"));
@@ -170,12 +173,18 @@ internal sealed class MapWindow : Window
         var add = new Button { Content = "+ New group", FontSize = 12 };
         add.Click += (_, _) => NewGroupRequested?.Invoke();
         footer.Children.Add(add);
-        // Remove targets the active (nearest) group, if any.
+
+        // Delete the currently-selected desktop (also available per-tile via the × badge).
+        var deleteDesktop = new Button { Content = "Delete desktop", FontSize = 12 };
+        deleteDesktop.Click += (_, _) => DeleteCurrentRequested?.Invoke();
+        footer.Children.Add(deleteDesktop);
+
+        // Remove targets the top (nearest) group, if any.
         if (map.Groups.Count > 0)
         {
-            int activeIndex = map.Groups[0].Index;
+            int nearestIndex = map.Groups[0].Index;
             var remove = new Button { Content = $"Remove “{map.Groups[0].Name}”", FontSize = 12 };
-            remove.Click += (_, _) => RemoveGroupRequested?.Invoke(activeIndex);
+            remove.Click += (_, _) => RemoveGroupRequested?.Invoke(nearestIndex);
             footer.Children.Add(remove);
         }
 

@@ -95,45 +95,62 @@ public class NavigationModelTests
         Assert.Equal(D(11), c.Current); // resumed at b, not a
     }
 
-    // ── Carousel across multiple groups ─────────────────────────────────────────
+    // ── Fixed ladder across multiple groups ─────────────────────────────────────
 
     [Fact]
-    public void Added_group_becomes_active_and_dive_enters_it()
+    public void New_group_is_inserted_at_the_top_of_the_stack()
     {
         var (m, c) = New();
         m.AddGroup(G("one", G1));
-        m.AddGroup(G("two", G2)); // newest is active/nearest
-        Assert.Equal(1, m.ActiveGroupIndex);
-        m.Apply(NavAction.Dive);
-        Assert.Equal(D(20), c.Current); // entered "two"
-    }
-
-    [Fact]
-    public void Down_inside_a_group_rotates_to_the_next_group()
-    {
-        var (m, c) = New();
-        m.AddGroup(G("one", G1));
-        m.AddGroup(G("two", G2)); // active = two (index 1)
-        m.Apply(NavAction.Dive);  // into two -> x
+        m.AddGroup(G("two", G2)); // newest goes to the front (nearest)
+        m.Apply(NavAction.Dive);  // Down from top -> group 0 = "two"
         Assert.Equal(D(20), c.Current);
-        Assert.True(m.Apply(NavAction.Dive)); // rotate to one (index 0)
-        Assert.Equal(0, m.ActiveGroupIndex);
-        Assert.Equal(D(10), c.Current); // one's first desktop
-        m.Apply(NavAction.Dive); // wrap back to two
-        Assert.Equal(1, m.ActiveGroupIndex);
+        Assert.Equal("two", m.BuildMap().Groups[0].Name);
     }
 
     [Fact]
-    public void Up_from_any_group_surfaces_straight_to_the_top()
+    public void Down_steps_deeper_through_the_fixed_stack_without_reordering()
+    {
+        var (m, c) = New();
+        m.AddGroup(G("one", G1));
+        m.AddGroup(G("two", G2)); // stack: [two, one]
+        m.Apply(NavAction.Dive);  // -> two (level 1)
+        Assert.Equal(D(20), c.Current);
+        Assert.True(m.Apply(NavAction.Dive)); // -> one (level 2), stack unchanged
+        Assert.Equal(D(10), c.Current);
+        Assert.False(m.Apply(NavAction.Dive)); // at the bottom — no wrap
+        // Order never changed:
+        Assert.Equal(new[] { "two", "one" }, m.BuildMap().Groups.Select(g => g.Name));
+    }
+
+    [Fact]
+    public void Up_steps_back_one_level_at_a_time()
     {
         var (m, c) = New(current: 1);
         m.AddGroup(G("one", G1));
-        m.AddGroup(G("two", G2));
-        m.Apply(NavAction.Dive); // two
-        m.Apply(NavAction.Dive); // rotate to one
-        Assert.True(m.Apply(NavAction.Surface));
+        m.AddGroup(G("two", G2)); // stack: [two, one]
+        m.Apply(NavAction.Dive);  // two
+        m.Apply(NavAction.Dive);  // one
+        Assert.True(m.Apply(NavAction.Surface)); // back up to two
+        Assert.Equal(D(20), c.Current);
+        Assert.True(m.Apply(NavAction.Surface)); // back to the top row
         Assert.True(m.OnTop);
         Assert.Equal(T1, c.Current);
+    }
+
+    [Fact]
+    public void PrepareForMapOpen_brings_the_last_used_group_to_the_top()
+    {
+        var (m, _) = New();
+        m.AddGroup(G("one", G1));
+        m.AddGroup(G("two", G2)); // stack: [two, one]
+        m.Apply(NavAction.Dive);  // two
+        m.Apply(NavAction.Dive);  // one  -> last-used group is "one"
+        m.Apply(NavAction.Surface);
+        m.Apply(NavAction.Surface); // back on top
+
+        m.PrepareForMapOpen();
+        Assert.Equal("one", m.BuildMap().Groups[0].Name); // last-used floated to the top
     }
 
     // ── Click-to-navigate ────────────────────────────────────────────────────────
@@ -154,10 +171,10 @@ public class NavigationModelTests
     {
         var (m, c) = New();
         m.AddGroup(G("one", G1));
-        m.AddGroup(G("two", G2));
-        Assert.True(m.GoToGroupDesktop(0, 2)); // group "one", desktop c
+        m.AddGroup(G("two", G2)); // stack: [two(0), one(1)]
+        Assert.True(m.GoToGroupDesktop(1, 2)); // group "one", desktop c
         Assert.False(m.OnTop);
-        Assert.Equal(0, m.ActiveGroupIndex);
+        Assert.Equal((1, 2), m.CurrentGroupDesktop);
         Assert.Equal(D(12), c.Current);
     }
 

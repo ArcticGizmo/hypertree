@@ -47,6 +47,16 @@ internal static class BoardView
         int shown = Math.Min(map.Groups.Count, maxGroups);
         double firstBoxY = rowY + tileH + conn;
 
+        // When the view is capped (the compact flash), show a window of the stack that includes the
+        // group you're actually in — not just the topmost one.
+        int startIdx = 0;
+        if (shown < map.Groups.Count)
+        {
+            int cur = 0;
+            for (int i = 0; i < map.Groups.Count; i++) if (map.Groups[i].IsCurrentLevel) cur = i;
+            startIdx = Math.Min(cur, map.Groups.Count - shown);
+        }
+
         // Connector line down to the nearest group box (both centred → vertical at cx).
         if (shown > 0)
         {
@@ -58,7 +68,7 @@ internal static class BoardView
 
         for (int d = 0; d < shown; d++)
         {
-            NavMapGroup g = map.Groups[d];
+            NavMapGroup g = map.Groups[startIdx + d];
             int groupIndex = g.Index;
 
             // Centre each group on its own cursor (resume point), so returning to any group lands

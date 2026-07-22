@@ -27,18 +27,18 @@ public class NavMapTests
     }
 
     [Fact]
-    public void Groups_are_listed_in_carousel_order_active_first()
+    public void Groups_are_listed_in_fixed_stack_order_newest_on_top()
     {
         var m = New();
         m.AddGroup(G("one", (10, "a")));
-        m.AddGroup(G("two", (20, "x"))); // active
+        m.AddGroup(G("two", (20, "x"))); // inserted at the front (nearest)
         NavMap map = m.BuildMap();
 
         Assert.Equal(2, map.Groups.Count);
-        Assert.Equal("two", map.Groups[0].Name); // active/nearest first
-        Assert.Equal(1, map.Groups[0].Index);    // stable index preserved for click/remove
+        Assert.Equal("two", map.Groups[0].Name);
+        Assert.Equal(0, map.Groups[0].Index); // Index == list position (no rotation)
         Assert.Equal("one", map.Groups[1].Name);
-        Assert.Equal(0, map.Groups[1].Index);
+        Assert.Equal(1, map.Groups[1].Index);
     }
 
     [Fact]
