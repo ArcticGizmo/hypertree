@@ -7,6 +7,7 @@ using Hypertree.App.Views;
 using Hypertree.Desktops;
 using Hypertree.Platform;
 using Hypertree.Scopes;
+using HtScope = Hypertree.Scopes.Scope;
 
 namespace Hypertree.App;
 
@@ -31,10 +32,14 @@ public sealed class App : Application
     };
 
     private readonly List<IGlobalHotkey> _hotkeys = new();
+    // Desktops Hypertree itself created (for scopes). Only these are ever torn down — the demo
+    // topology maps onto the user's PRE-EXISTING desktops, which must never be removed.
+    private readonly HashSet<Guid> _created = new();
     private IDesktopController? _desktops;
     private NavigationModel? _model;
     private HudWindow? _hud;
     private TrayIcon? _tray;
+    private ScopeDialog? _dialog;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -64,7 +69,7 @@ public sealed class App : Application
         _model = new NavigationModel(topology, _desktops);
 
         _hud = new HudWindow();
-        _model.Changed += () => { /* HUD flash happens in the hotkey handler so edges show too */ };
+        // HUD flashing is driven explicitly (Navigate / scope actions) so edge no-ops still show.
 
         RegisterHotkeys();
         BuildTray();
@@ -83,20 +88,24 @@ public sealed class App : Application
         }
     }
 
-    // Apply the intent, then always flash the HUD with the current location — so even a no-op at an
-    // edge still confirms "where am I" (the load-bearing promise of PLAN.md §9 risk 3).
+    // Apply the intent, then always flash the HUD map — so even a no-op at an edge still confirms
+    // "where am I" (the load-bearing promise of PLAN.md §9 risk 3).
     private void Navigate(NavAction action)
     {
         if (_model is null || _hud is null) return;
         _model.Apply(action);
-        _hud.Flash(_model.Location.Format());
+        _hud.Flash(_model.BuildMap());
     }
 
     private void BuildTray()
     {
         var header = new NativeMenuItem("Hypertree 0.1.0") { IsEnabled = false };
-        var where = new NativeMenuItem("Where am I");
-        where.Click += (_, _) => { if (_model is not null) _hud?.Flash(_model.Location.Format()); };
+        var where = new NativeMenuItem("Show map");
+        where.Click += (_, _) => { if (_model is not null) _hud?.Flash(_model.BuildMap()); };
+        var newScope = new NativeMenuItem("New scope here…");
+        newScope.Click += (_, _) => PromptNewScope();
+        var removeScope = new NativeMenuItem("Remove scope here");
+        removeScope.Click += (_, _) => RemoveScopeHere();
         var exit = new NativeMenuItem("Exit");
         exit.Click += (_, _) => (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
 
@@ -105,9 +114,72 @@ public sealed class App : Application
             Icon = TrayIconFactory.Create(),
             ToolTipText = "Hypertree",
             IsVisible = true,
-            Menu = new NativeMenu { header, new NativeMenuItemSeparator(), where, new NativeMenuItemSeparator(), exit },
+            Menu = new NativeMenu
+            {
+                header, new NativeMenuItemSeparator(),
+                where, newScope, removeScope, new NativeMenuItemSeparator(),
+                exit,
+            },
         };
         TrayIcon.SetIcons(this, new TrayIcons { _tray });
+    }
+
+    // ── Scope definition (M1 stand-in for M2's git-worktree flow) ─────────────────
+
+    private void PromptNewScope()
+    {
+        if (_model is null || _desktops is null) return;
+        if (!_model.IsAtDayToDay)
+        {
+            _hud?.Flash(_model.BuildMap()); // nudge: surface first
+            return;
+        }
+        if (_dialog is not null) { _dialog.Activate(); return; } // one at a time
+
+        _dialog = new ScopeDialog(_model.Location.DesktopLabel);
+        _dialog.Closed += (_, _) => _dialog = null;
+        _dialog.Confirmed += spec => CreateScope(spec);
+        _dialog.Show();
+    }
+
+    private void CreateScope(ScopeSpec spec)
+    {
+        if (_model is null || _desktops is null) return;
+
+        // Provision one real desktop per label, named "<scope> · <label>", tracked as ours.
+        var refs = new List<DesktopRef>(spec.Labels.Count);
+        foreach (string label in spec.Labels)
+        {
+            DesktopId id = _desktops.Create($"{spec.Name} · {label}");
+            _created.Add(id.Value);
+            refs.Add(new DesktopRef(id, label));
+        }
+
+        HtScope? previous = _model.DefineScopeHere(new HtScope(spec.Name, refs));
+        TearDown(previous); // remove the desktops of a replaced scope (only ones we created)
+        _hud?.Flash(_model.BuildMap());
+    }
+
+    private void RemoveScopeHere()
+    {
+        if (_model is null || !_model.IsAtDayToDay || !_model.CurrentAnchorHasScope) return;
+        TearDown(_model.RemoveScopeHere());
+        _hud?.Flash(_model.BuildMap());
+    }
+
+    // Remove a scope's desktops — but ONLY ones Hypertree created, never the user's pre-existing
+    // desktops (the demo topology reuses those). Fallback is the current anchor's desktop.
+    private void TearDown(HtScope? scope)
+    {
+        if (scope is null || _model is null || _desktops is null) return;
+        DesktopId fallback = _model.CurrentAnchorDesktopId;
+        foreach (DesktopRef d in scope.Desktops)
+        {
+            if (_created.Remove(d.Id.Value))
+            {
+                try { _desktops.Remove(d.Id, fallback); } catch { /* already gone — best-effort */ }
+            }
+        }
     }
 
     private void Teardown()
@@ -115,6 +187,7 @@ public sealed class App : Application
         foreach (var hk in _hotkeys) hk.Dispose();
         _hotkeys.Clear();
         if (_tray is not null) _tray.IsVisible = false;
+        _dialog?.Close();
         _hud?.Close();
     }
 }

@@ -63,6 +63,65 @@ public sealed class NavigationModel
         }
     }
 
+    /// <summary>True when the user is on the day-to-day row (scopes can be defined/removed here).</summary>
+    public bool IsAtDayToDay => !_inScope;
+
+    /// <summary>The OS id of the current anchor's desktop — the fallback when removing scope desktops.</summary>
+    public DesktopId CurrentAnchorDesktopId => CurrentAnchor.Desktop.Id;
+
+    /// <summary>Whether the current anchor already has a scope.</summary>
+    public bool CurrentAnchorHasScope => CurrentAnchor.Scope is not null;
+
+    /// <summary>
+    /// A render-ready snapshot of the whole map for the HUD (anchor row + the current anchor's scope,
+    /// with "you are here" marked). The scope of the current column is always included when present,
+    /// so the overlay can show a dive target dimmed while on the top row.
+    /// </summary>
+    public NavMap BuildMap()
+    {
+        var anchors = new List<NavMapAnchor>(_topology.Anchors.Count);
+        for (int i = 0; i < _topology.Anchors.Count; i++)
+        {
+            Anchor a = _topology.Anchors[i];
+            anchors.Add(new NavMapAnchor(a.Desktop.Label, a.Scope is not null, i == _anchorIndex));
+        }
+
+        Scope? scope = CurrentAnchor.Scope;
+        IReadOnlyList<NavMapDesktop>? scopeDesktops = null;
+        if (scope is not null)
+        {
+            var list = new List<NavMapDesktop>(scope.Desktops.Count);
+            for (int i = 0; i < scope.Desktops.Count; i++)
+                list.Add(new NavMapDesktop(scope.Desktops[i].Label, _inScope && i == scope.LastUsedIndex));
+            scopeDesktops = list;
+        }
+
+        return new NavMap(anchors, _inScope, scope?.Name, scopeDesktops);
+    }
+
+    /// <summary>
+    /// Attach (or replace) the scope on the current anchor. Only valid from the day-to-day row.
+    /// Returns the previous scope, if any, so the caller can tear down its desktops.
+    /// </summary>
+    public Scope? DefineScopeHere(Scope scope)
+    {
+        if (_inScope) throw new InvalidOperationException("Surface to the day-to-day row before defining a scope.");
+        Scope? previous = CurrentAnchor.Scope;
+        CurrentAnchor.Scope = scope;
+        Changed?.Invoke();
+        return previous;
+    }
+
+    /// <summary>Remove the current anchor's scope (if any) and return it so its desktops can be torn down.</summary>
+    public Scope? RemoveScopeHere()
+    {
+        if (_inScope) throw new InvalidOperationException("Surface to the day-to-day row before removing a scope.");
+        Scope? removed = CurrentAnchor.Scope;
+        CurrentAnchor.Scope = null;
+        if (removed is not null) Changed?.Invoke();
+        return removed;
+    }
+
     /// <summary>Apply a navigation intent. Returns true if location changed (and a switch was issued).</summary>
     public bool Apply(NavAction action)
     {

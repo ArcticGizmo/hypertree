@@ -40,7 +40,12 @@ public sealed class Scope
 public sealed class Anchor
 {
     public DesktopRef Desktop { get; }
-    public Scope? Scope { get; }
+
+    /// <summary>
+    /// The scope hanging beneath this anchor, or null. Mutable so a scope can be defined/removed at
+    /// runtime (the navigation model attaches it via <see cref="NavigationModel.DefineScopeHere"/>).
+    /// </summary>
+    public Scope? Scope { get; set; }
 
     public Anchor(DesktopRef desktop, Scope? scope = null)
     {
