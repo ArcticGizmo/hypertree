@@ -1,7 +1,6 @@
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Threading;
@@ -20,16 +19,6 @@ internal sealed class HudWindow : Window
 {
     private readonly Border _chip;
     private readonly DispatcherTimer _hideTimer;
-
-    // Palette — a small, consistent set so the map reads as one thing.
-    private static readonly IBrush Current = new SolidColorBrush(Color.Parse("#2D7D46")); // you-are-here (bright)
-    private static readonly IBrush Owning  = new SolidColorBrush(Color.Parse("#38513F")); // current column while dived
-    private static readonly IBrush Normal  = new SolidColorBrush(Color.Parse("#3A3A3A"));
-    private static readonly IBrush Dim      = new SolidColorBrush(Color.Parse("#282828"));
-    private static readonly IBrush FgBright = Brushes.White;
-    private static readonly IBrush FgNormal = new SolidColorBrush(Color.Parse("#E6E6E6"));
-    private static readonly IBrush FgDim    = new SolidColorBrush(Color.Parse("#8A8A8A"));
-    private static readonly IBrush Accent   = new SolidColorBrush(Color.Parse("#6FD08C"));
 
     public HudWindow()
     {
@@ -63,10 +52,10 @@ internal sealed class HudWindow : Window
         MakeClickThrough();
     }
 
-    /// <summary>Render <paramref name="map"/>, show the chip, and restart the auto-hide timer.</summary>
+    /// <summary>Render <paramref name="map"/> as the board, show the chip, and restart the auto-hide timer.</summary>
     public void Flash(NavMap map)
     {
-        _chip.Child = BuildVisual(map);
+        _chip.Child = BoardView.Render(map, 0.8); // compact board for the transient flash
 
         if (!IsVisible) Show(); // first show creates the handle (OnOpened → click-through)
         Reposition();
@@ -76,67 +65,7 @@ internal sealed class HudWindow : Window
         _hideTimer.Start();
     }
 
-    // ── Map rendering ────────────────────────────────────────────────────────────
-
-    private Control BuildVisual(NavMap map)
-    {
-        var root = new StackPanel { Orientation = Orientation.Vertical, Spacing = 4, HorizontalAlignment = HorizontalAlignment.Center };
-
-        // Scope row (above) — the depth axis. Shown whenever the current anchor has a scope; bright
-        // when dived into it, dimmed when still on the top row (a visible dive target).
-        if (map.ScopeDesktops is not null)
-        {
-            var scopeRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, HorizontalAlignment = HorizontalAlignment.Center };
-            scopeRow.Children.Add(new TextBlock
-            {
-                Text = "▸ " + map.ScopeName,
-                Foreground = map.InScope ? Accent : FgDim,
-                FontSize = 12,
-                FontWeight = FontWeight.SemiBold,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 4, 0),
-            });
-            foreach (var d in map.ScopeDesktops)
-                scopeRow.Children.Add(Pill(d.Label, d.IsCurrent ? Current : (map.InScope ? Normal : Dim),
-                                                    d.IsCurrent ? FgBright : (map.InScope ? FgNormal : FgDim), small: true));
-            root.Children.Add(scopeRow);
-
-            // Connector: a downward chevron showing the scope hangs beneath the anchor row.
-            root.Children.Add(new TextBlock
-            {
-                Text = "▾", Foreground = FgDim, FontSize = 11,
-                HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, -2, 0, -2),
-            });
-        }
-
-        // Anchor row (the day-to-day line).
-        var anchorRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Center };
-        foreach (var a in map.Anchors)
-        {
-            IBrush bg = a.IsCurrentColumn ? (map.InScope ? Owning : Current) : Normal;
-            IBrush fg = a.IsCurrentColumn && !map.InScope ? FgBright : FgNormal;
-            anchorRow.Children.Add(Pill(a.HasScope ? a.Label + "  ▾" : a.Label, bg, fg, small: false));
-        }
-        root.Children.Add(anchorRow);
-
-        return root;
-    }
-
-    private static Border Pill(string text, IBrush bg, IBrush fg, bool small) => new()
-    {
-        Background = bg,
-        CornerRadius = new CornerRadius(6),
-        Padding = small ? new Thickness(9, 3) : new Thickness(12, 5),
-        Child = new TextBlock
-        {
-            Text = text,
-            Foreground = fg,
-            FontSize = small ? 12 : 13,
-            FontWeight = small ? FontWeight.Normal : FontWeight.SemiBold,
-        },
-    };
-
-    // ── Placement: centered horizontally, just above the primary taskbar ───────────
+    // ── Placement: centered horizontally, just below the top of the primary screen ─
 
     private void Reposition()
     {

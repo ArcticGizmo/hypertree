@@ -51,8 +51,19 @@ public sealed class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown; // tray app — outlives its windows
-            desktop.Exit += (_, _) => Teardown();
 
+            // Offscreen board render for design verification: `hypertree --shot <dir>`.
+            string[] args = Environment.GetCommandLineArgs();
+            int shot = Array.IndexOf(args, "--shot");
+            if (shot >= 0)
+            {
+                string dir = shot + 1 < args.Length ? args[shot + 1] : "captures";
+                Dispatcher.UIThread.Post(() => { DesignShot.Capture(dir); desktop.Shutdown(); });
+                base.OnFrameworkInitializationCompleted();
+                return;
+            }
+
+            desktop.Exit += (_, _) => Teardown();
             try { Startup(); }
             catch (Exception ex)
             {
@@ -116,8 +127,8 @@ public sealed class App : Application
         if (_overlay.IsOpen) { _overlay.Close(); return; }
 
         // Configure from the day-to-day row so we never edit a scope we're standing inside.
-        if (!_model.IsAtDayToDay) { _model.Apply(NavAction.Surface); _hud?.Flash(_model.BuildMap()); }
-        _overlay.Open(_model.BuildStreams());
+        if (!_model.IsAtDayToDay) _model.Apply(NavAction.Surface);
+        _overlay.Open(_model.BuildMap());
     }
 
     private void BuildTray()
@@ -158,6 +169,8 @@ public sealed class App : Application
 
         string anchorLabel = _model.BuildStreams()[index].AnchorLabel;
         _dialog = new ScopeDialog(anchorLabel);
+        // Keep the dialog above the dimmed overlay if it's open.
+        if (_overlay is { IsOpen: true }) _dialog.Topmost = true;
         _dialog.Closed += (_, _) => _dialog = null;
         _dialog.Confirmed += spec => CreateScope(index, spec);
         _dialog.Show();
@@ -192,7 +205,7 @@ public sealed class App : Application
     private void AfterConfigChange()
     {
         if (_model is null) return;
-        if (_overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildStreams());
+        if (_overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap());
         else _hud?.Flash(_model.BuildMap());
     }
 
