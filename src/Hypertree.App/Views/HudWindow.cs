@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Threading;
@@ -9,40 +10,31 @@ using Hypertree.Scopes;
 namespace Hypertree.App.Views;
 
 /// <summary>
-/// The HUD overlay — the source-of-truth "where am I" (PLAN.md §3.4), rendered as a small MAP of the
-/// 2-D structure rather than a single line: the day-to-day anchor row, and the scope hanging off the
-/// current anchor above it, with "you are here" highlighted. Native Task View can't show the depth
-/// axis, so this is what makes Model P legible. Borderless, transparent, click-through, never steals
-/// focus; centered horizontally and sitting just above the primary taskbar. Flash-on-navigation (M1).
+/// The transient navigation HUD. On each hotkey move it shows the full Model-P board pinned to the
+/// top of the primary screen over a dimmed backdrop (the same board the interactive overlay draws —
+/// not a small chip), then auto-hides. Covers the whole primary screen and is laid out with plain
+/// alignment (no manual pixel maths), so the board is reliably top-centred — which also fixes the
+/// occasional "stuck at top-left" glitch the old size-to-content chip had. Click-through and
+/// non-activating: it never blocks input or steals focus.
 /// </summary>
 internal sealed class HudWindow : Window
 {
-    private readonly Border _chip;
     private readonly DispatcherTimer _hideTimer;
 
     public HudWindow()
     {
         WindowDecorations = WindowDecorations.None;
-        Background = Brushes.Transparent;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Background = new SolidColorBrush(Color.FromArgb(0x66, 0x10, 0x10, 0x10)); // dim backdrop
         TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
         CanResize = false;
         ShowInTaskbar = false;
         Topmost = true;
         ShowActivated = false;
-        SizeToContent = SizeToContent.WidthAndHeight;
         IsVisible = false;
+        Position = new PixelPoint(0, 0);
 
-        _chip = new Border
-        {
-            Background = new SolidColorBrush(Color.FromArgb(0xEA, 0x18, 0x18, 0x18)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(12, 9),
-        };
-        Content = _chip;
-
-        _hideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1600) };
+        _hideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
         _hideTimer.Tick += (_, _) => { _hideTimer.Stop(); IsVisible = false; };
     }
 
@@ -52,38 +44,30 @@ internal sealed class HudWindow : Window
         MakeClickThrough();
     }
 
-    /// <summary>Render <paramref name="map"/> as the board, show the chip, and restart the auto-hide timer.</summary>
+    /// <summary>Show the board at the top of the primary screen and restart the auto-hide timer.</summary>
     public void Flash(NavMap map)
     {
-        _chip.Child = BoardView.Render(map, 0.8, maxGroups: 1); // compact: nearest group only
+        Control board = BoardView.Render(map, 1.0);
+        board.HorizontalAlignment = HorizontalAlignment.Center; // centred by layout — no Bounds maths
+        board.VerticalAlignment = VerticalAlignment.Top;
+        board.Margin = new Thickness(0, 40, 0, 0);
+        Content = board;
 
-        if (!IsVisible) Show(); // first show creates the handle (OnOpened → click-through)
-        Reposition();
+        if (!IsVisible) Show();   // realizes the handle so Screens is available
+        CoverPrimary();
         Topmost = true;
 
         _hideTimer.Stop();
         _hideTimer.Start();
     }
 
-    // ── Placement: centered horizontally, just below the top of the primary screen ─
-
-    private void Reposition()
+    private void CoverPrimary()
     {
         Screen? screen = Screens.Primary ?? (Screens.All.Count > 0 ? Screens.All[0] : null);
         if (screen is null) return;
-
-        double scale = screen.Scaling;
-        int w = (int)Math.Ceiling(Bounds.Width * scale);
-        int h = (int)Math.Ceiling(Bounds.Height * scale);
-
-        PixelRect full = screen.Bounds;
-        PixelRect work = screen.WorkingArea;   // excludes the taskbar
-
-        // Top-center: the bottom-center is taken by Windows' own "Desktop N" switch indicator, which
-        // the flash would fight with. Sit just below the top edge of the work area instead.
-        int x = full.X + (full.Width - w) / 2;
-        int y = work.Y + 12;
-        Position = new PixelPoint(x, y);
+        Position = screen.Bounds.Position;
+        Width = screen.Bounds.Width / screen.Scaling;
+        Height = screen.Bounds.Height / screen.Scaling;
     }
 
     // ── Click-through + no focus steal ─────────────────────────────────────────────
