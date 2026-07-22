@@ -4,26 +4,34 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform;
+using Hypertree.Desktops;
 using Hypertree.Scopes;
 
 namespace Hypertree.App.Views;
 
 /// <summary>
 /// The interactive map/command surface, opened on a dedicated hotkey. Dims every screen with a grey
-/// backdrop to pull focus, then shows the full Model-P board on the primary monitor (via
-/// <see cref="BoardView"/>) with a footer for configuring the current stream. The place to eyeball
-/// the whole structure and add/remove scopes while debugging. Click a backdrop or press Esc to close.
+/// backdrop to pull focus, then shows the full board on the primary monitor. Tiles are clickable
+/// (jump to that desktop). All overlay windows are PINNED to every desktop so they stay visible while
+/// you navigate underneath — the map only closes on Esc, a backdrop click, or toggling the hotkey.
 /// </summary>
 internal sealed class MapOverlay
 {
+    private readonly IDesktopController _desktops;
     private readonly List<Window> _dims = new();
     private MapWindow? _map;
 
     public bool IsOpen => _map is not null;
 
-    /// <summary>Requested creation/removal of a scope on the anchor with this index.</summary>
-    public event Action<int>? AddScopeRequested;
-    public event Action<int>? RemoveScopeRequested;
+    /// <summary>Click a top-row desktop (index) to jump there.</summary>
+    public event Action<int>? GoToTopRequested;
+    /// <summary>Click a group desktop (group index, desktop index) to jump there.</summary>
+    public event Action<int, int>? GoToGroupRequested;
+    /// <summary>Footer actions.</summary>
+    public event Action? NewGroupRequested;
+    public event Action<int>? RemoveGroupRequested;
+
+    public MapOverlay(IDesktopController desktops) => _desktops = desktops;
 
     public void Open(NavMap map)
     {
@@ -31,10 +39,12 @@ internal sealed class MapOverlay
 
         _map = new MapWindow();
         _map.CloseRequested += Close;
-        _map.AddScopeRequested += i => AddScopeRequested?.Invoke(i);
-        _map.RemoveScopeRequested += i => RemoveScopeRequested?.Invoke(i);
+        _map.GoToTopRequested += i => GoToTopRequested?.Invoke(i);
+        _map.GoToGroupRequested += (g, d) => GoToGroupRequested?.Invoke(g, d);
+        _map.NewGroupRequested += () => NewGroupRequested?.Invoke();
+        _map.RemoveGroupRequested += g => RemoveGroupRequested?.Invoke(g);
         _map.Render(map);
-        _map.Show();   // realizes the handle so Screens is populated
+        _map.Show();
 
         foreach (Screen s in _map.Screens.All)
         {
@@ -43,10 +53,13 @@ internal sealed class MapOverlay
             _dims.Add(dim);
         }
 
-        // Re-raise the map above the just-shown backdrops and give it focus for Esc.
         _map.Topmost = false;
         _map.Topmost = true;
         _map.Activate();
+
+        // Pin every overlay window so the desktop switch (from navigating) doesn't hide them.
+        Pin(_map);
+        foreach (Window d in _dims) Pin(d);
     }
 
     public void Refresh(NavMap map) => _map?.Render(map);
@@ -59,6 +72,15 @@ internal sealed class MapOverlay
         _map = null;
     }
 
+    private void Pin(Window w)
+    {
+        nint h = w.TryGetPlatformHandle()?.Handle ?? 0;
+        if (h != 0)
+        {
+            try { _desktops.PinWindow(h); } catch { /* best-effort */ }
+        }
+    }
+
     private Window MakeDim(Screen s)
     {
         double scale = s.Scaling;
@@ -68,25 +90,22 @@ internal sealed class MapOverlay
             WindowStartupLocation = WindowStartupLocation.Manual,
             Background = new SolidColorBrush(Color.FromArgb(0x82, 0x10, 0x10, 0x10)),
             TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
-            CanResize = false,
-            ShowInTaskbar = false,
-            ShowActivated = false,
-            Topmost = true,
-            Position = s.Bounds.Position,
-            Width = s.Bounds.Width / scale,
-            Height = s.Bounds.Height / scale,
+            CanResize = false, ShowInTaskbar = false, ShowActivated = false, Topmost = true,
+            Position = s.Bounds.Position, Width = s.Bounds.Width / scale, Height = s.Bounds.Height / scale,
         };
         dim.PointerPressed += (_, _) => Close();
         return dim;
     }
 }
 
-/// <summary>The primary-monitor card: the Model-P board plus a footer to configure the current stream.</summary>
+/// <summary>The primary-monitor card: the board (clickable) plus a footer to add/remove groups.</summary>
 internal sealed class MapWindow : Window
 {
     public event Action? CloseRequested;
-    public event Action<int>? AddScopeRequested;
-    public event Action<int>? RemoveScopeRequested;
+    public event Action<int>? GoToTopRequested;
+    public event Action<int, int>? GoToGroupRequested;
+    public event Action? NewGroupRequested;
+    public event Action<int>? RemoveGroupRequested;
 
     private readonly Border _card;
     private static readonly IBrush Fg = new SolidColorBrush(Color.Parse("#E8EDF5"));
@@ -122,11 +141,6 @@ internal sealed class MapWindow : Window
 
     public void Render(NavMap map)
     {
-        int cur = 0;
-        for (int i = 0; i < map.Anchors.Count; i++) if (map.Anchors[i].IsCurrentColumn) cur = i;
-        bool hasScope = map.ScopeDesktops is not null;
-        string anchorLabel = map.Anchors[cur].Label;
-
         var header = new DockPanel { LastChildFill = false };
         header.Children.Add(new TextBlock
         {
@@ -135,31 +149,25 @@ internal sealed class MapWindow : Window
         });
         header.Children.Add(new TextBlock
         {
-            Text = "Esc to close", FontSize = 12, Foreground = FgDim,
+            Text = "click a desktop to jump · Esc to close", FontSize = 12, Foreground = FgDim,
             VerticalAlignment = VerticalAlignment.Center, [DockPanel.DockProperty] = Dock.Right,
         });
 
-        Control board = BoardView.Render(map, 1.0);
+        Control board = BoardView.Render(map, 1.0,
+            onTopClick: i => GoToTopRequested?.Invoke(i),
+            onGroupClick: (g, d) => GoToGroupRequested?.Invoke(g, d));
 
-        // Footer: configure the current stream. (Navigate to another column, then reopen, to
-        // configure it — arrows close the overlay and move you there.)
-        var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
-        footer.Children.Add(new TextBlock
+        var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        var add = new Button { Content = "+ New group", FontSize = 12 };
+        add.Click += (_, _) => NewGroupRequested?.Invoke();
+        footer.Children.Add(add);
+        // Remove targets the active (nearest) group, if any.
+        if (map.Groups.Count > 0)
         {
-            Text = $"“{anchorLabel}”", Foreground = FgDim, FontSize = 13,
-            VerticalAlignment = VerticalAlignment.Center,
-        });
-        if (hasScope)
-        {
-            var remove = new Button { Content = "Remove scope", FontSize = 12 };
-            remove.Click += (_, _) => RemoveScopeRequested?.Invoke(cur);
+            int activeIndex = map.Groups[0].Index;
+            var remove = new Button { Content = $"Remove “{map.Groups[0].Name}”", FontSize = 12 };
+            remove.Click += (_, _) => RemoveGroupRequested?.Invoke(activeIndex);
             footer.Children.Add(remove);
-        }
-        else
-        {
-            var add = new Button { Content = "+ Add scope", FontSize = 12 };
-            add.Click += (_, _) => AddScopeRequested?.Invoke(cur);
-            footer.Children.Add(add);
         }
 
         _card.Child = new StackPanel

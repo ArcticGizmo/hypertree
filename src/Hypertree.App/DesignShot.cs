@@ -20,16 +20,24 @@ internal static class DesignShot
     {
         Directory.CreateDirectory(outDir);
 
-        var anchors = new List<NavMapAnchor>
+        List<NavMapTile> Top(int current) => new()
         {
-            new("Home", false, false), new("Comms", false, false),
-            new("Web", true, true),    new("Notes", false, false),
+            new("Home", current == 0), new("Comms", current == 1),
+            new("Web", current == 2), new("Notes", current == 3),
         };
-        var resting = new List<NavMapDesktop> { new("SPA", false), new("API", false), new("Mobile", false) };
-        var dived   = new List<NavMapDesktop> { new("SPA", true),  new("API", false), new("Mobile", false) };
+        NavMapGroup Feat(bool live, int cur) => new(0, "FEAT-123", new List<NavMapTile>
+        {
+            new("SPA", live && cur == 0), new("API", live && cur == 1), new("Mobile", live && cur == 2),
+        }, live);
+        NavMapGroup Hotfix() => new(1, "hotfix", new List<NavMapTile> { new("db", false), new("api", false) }, false);
 
-        Save(new NavMap(anchors, false, "FEAT-123", resting), Path.Combine(outDir, "board-top-row.png"));
-        Save(new NavMap(anchors, true,  "FEAT-123", dived),   Path.Combine(outDir, "board-dived.png"));
+        // On the top row: Web current, groups resting beneath.
+        Save(new NavMap(Top(2), true, new List<NavMapGroup> { Feat(false, -1), Hotfix() }),
+             Path.Combine(outDir, "board-top-row.png"));
+
+        // Dived into the active group (FEAT-123, on API); hotfix rests below.
+        Save(new NavMap(Top(-1), false, new List<NavMapGroup> { Feat(true, 1), Hotfix() }),
+             Path.Combine(outDir, "board-dived.png"));
     }
 
     private static void Save(NavMap map, string path)

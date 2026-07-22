@@ -55,7 +55,7 @@ internal sealed class HudWindow : Window
     /// <summary>Render <paramref name="map"/> as the board, show the chip, and restart the auto-hide timer.</summary>
     public void Flash(NavMap map)
     {
-        _chip.Child = BoardView.Render(map, 0.8); // compact board for the transient flash
+        _chip.Child = BoardView.Render(map, 0.8, maxGroups: 1); // compact: nearest group only
 
         if (!IsVisible) Show(); // first show creates the handle (OnOpened → click-through)
         Reposition();

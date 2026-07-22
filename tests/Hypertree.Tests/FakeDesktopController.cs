@@ -36,4 +36,6 @@ internal sealed class FakeDesktopController : IDesktopController
     public void Remove(DesktopId id, DesktopId fallback) => throw new NotSupportedException();
     public string GetName(DesktopId id) => _desktops.First(d => d.Id == id).Name;
     public void MoveWindowToDesktop(nint hwnd, DesktopId id) => throw new NotSupportedException();
+    public void PinWindow(nint hwnd) { }
+    public void UnpinWindow(nint hwnd) { }
 }

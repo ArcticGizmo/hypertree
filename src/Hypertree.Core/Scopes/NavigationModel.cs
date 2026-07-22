@@ -3,212 +3,147 @@ using Hypertree.Desktops;
 namespace Hypertree.Scopes;
 
 /// <summary>
-/// Model P as pure state (PLAN.md §3). Tracks where you are on the 2-D map — which anchor column
-/// on the day-to-day row, and whether you've dived into that anchor's scope — and translates the
-/// four <see cref="NavAction"/>s into desktop switches via <see cref="IDesktopController"/>.
-///
-/// It holds no Win32 and no UI, so the entire *feel* of the model (dive/surface/resume/edges) is
-/// unit-testable against a fake controller. The locked sub-decisions live here:
-///   • Surface always returns to the current scope's anchor — the entry point (§3.2).
-///   • Dive resumes the scope's last-used desktop, not its first (§3.3).
-///   • Edges clamp; Surface at day-to-day and Dive on a scope-less anchor are no-ops (§5).
+/// Model P as pure state. The <b>top row</b> is every OS desktop not assigned to a group, in natural
+/// order (rebuilt from the controller). <b>Groups</b> hang below as a wrapping carousel:
+///   • Down from the top row dives into the active group (nearest the top), resuming its last-used desktop.
+///   • Down again rotates to the next group (it becomes active/nearest; the one you left wraps to the bottom).
+///   • Up surfaces straight back to the top row from any group.
+///   • Left/Right moves within the current row (clamped).
+/// Holds no Win32/UI, so the whole feel is unit-testable against a fake controller.
 /// </summary>
 public sealed class NavigationModel
 {
-    private readonly Topology _topology;
     private readonly IDesktopController _desktops;
+    private readonly List<Group> _groups = new();
 
-    private int _anchorIndex;   // current column on the day-to-day row; also the owning anchor when in a scope
-    private bool _inScope;      // false = on the day-to-day row, true = inside _anchorIndex's scope
-    private DesktopId _target;  // the desktop the model believes is current (what it last switched to)
+    private List<DesktopRef> _topRow = new();
+    private bool _onTop = true;
+    private int _topIndex;      // position within the top row
+    private int _activeGroup;   // index of the active (nearest) group
+    private DesktopId _target;  // desktop the model last switched to
 
-    /// <summary>Raised after an action that actually changed location (drives the HUD flash).</summary>
     public event Action? Changed;
 
-    public NavigationModel(Topology topology, IDesktopController desktops)
+    public NavigationModel(IDesktopController desktops)
     {
-        _topology = topology;
         _desktops = desktops;
-
-        // Start on the day-to-day row, on whichever anchor the OS is currently showing (so launching
-        // Hypertree doesn't teleport you); fall back to the first anchor. Does NOT switch on init.
-        DesktopId current = desktops.Current;
-        _anchorIndex = 0;
-        for (int i = 0; i < topology.Anchors.Count; i++)
-        {
-            if (topology.Anchors[i].Desktop.Id == current) { _anchorIndex = i; break; }
-        }
+        SyncTopRow();
+        // Start on whichever top-row desktop the OS is showing, if any.
+        int idx = _topRow.FindIndex(d => d.Id == desktops.Current);
+        if (idx >= 0) _topIndex = idx;
         _target = CurrentDesktop().Id;
     }
 
-    /// <summary>The anchor whose column we're on (and whose scope we're in, when dived).</summary>
-    private Anchor CurrentAnchor => _topology.Anchors[_anchorIndex];
+    // ── Queries ──────────────────────────────────────────────────────────────────
 
-    /// <summary>The desktop the model considers current, given level + position.</summary>
+    public bool OnTop => _onTop;
+    public int GroupCount => _groups.Count;
+    public int ActiveGroupIndex => _activeGroup;
+
+    /// <summary>A top-row desktop id to use as a fallback when tearing a group's desktops down.</summary>
+    public DesktopId FallbackDesktopId =>
+        _topRow.Count > 0 ? _topRow[Math.Clamp(_topIndex, 0, _topRow.Count - 1)].Id : _desktops.Current;
+
     private DesktopRef CurrentDesktop()
-        => _inScope ? CurrentAnchor.Scope!.Desktops[CurrentAnchor.Scope!.LastUsedIndex]
-                    : CurrentAnchor.Desktop;
+        => _onTop
+            ? _topRow[Math.Clamp(_topIndex, 0, Math.Max(0, _topRow.Count - 1))]
+            : _groups[_activeGroup].Desktops[_groups[_activeGroup].LastUsedIndex];
 
-    /// <summary>Where the user is, formatted for the HUD (source of truth — PLAN.md §3.4).</summary>
-    public NavLocation Location
-    {
-        get
-        {
-            if (_inScope)
-            {
-                Scope s = CurrentAnchor.Scope!;
-                return new NavLocation(true, s.Name, s.Desktops[s.LastUsedIndex].Label, s.LastUsedIndex + 1, s.Desktops.Count);
-            }
-            return new NavLocation(false, null, CurrentAnchor.Desktop.Label, _anchorIndex + 1, _topology.Anchors.Count);
-        }
-    }
-
-    /// <summary>True when the user is on the day-to-day row (scopes can be defined/removed here).</summary>
-    public bool IsAtDayToDay => !_inScope;
-
-    /// <summary>The OS id of the current anchor's desktop — the fallback when removing scope desktops.</summary>
-    public DesktopId CurrentAnchorDesktopId => CurrentAnchor.Desktop.Id;
-
-    /// <summary>Whether the current anchor already has a scope.</summary>
-    public bool CurrentAnchorHasScope => CurrentAnchor.Scope is not null;
-
-    /// <summary>
-    /// A render-ready snapshot of the whole map for the HUD (anchor row + the current anchor's scope,
-    /// with "you are here" marked). The scope of the current column is always included when present,
-    /// so the overlay can show a dive target dimmed while on the top row.
-    /// </summary>
+    /// <summary>Render-ready snapshot: top row + groups in carousel order (active first).</summary>
     public NavMap BuildMap()
     {
-        var anchors = new List<NavMapAnchor>(_topology.Anchors.Count);
-        for (int i = 0; i < _topology.Anchors.Count; i++)
+        var top = new List<NavMapTile>(_topRow.Count);
+        for (int i = 0; i < _topRow.Count; i++)
+            top.Add(new NavMapTile(_topRow[i].Label, _onTop && i == _topIndex));
+
+        var groups = new List<NavMapGroup>(_groups.Count);
+        for (int k = 0; k < _groups.Count; k++)
         {
-            Anchor a = _topology.Anchors[i];
-            anchors.Add(new NavMapAnchor(a.Desktop.Label, a.Scope is not null, i == _anchorIndex));
+            int gi = (_activeGroup + k) % _groups.Count; // carousel: active first, then wrap
+            Group g = _groups[gi];
+            bool currentLevel = !_onTop && gi == _activeGroup;
+            var tiles = new List<NavMapTile>(g.Desktops.Count);
+            for (int j = 0; j < g.Desktops.Count; j++)
+                tiles.Add(new NavMapTile(g.Desktops[j].Label, currentLevel && j == g.LastUsedIndex));
+            groups.Add(new NavMapGroup(gi, g.Name, tiles, currentLevel));
         }
 
-        Scope? scope = CurrentAnchor.Scope;
-        IReadOnlyList<NavMapDesktop>? scopeDesktops = null;
-        if (scope is not null)
-        {
-            var list = new List<NavMapDesktop>(scope.Desktops.Count);
-            for (int i = 0; i < scope.Desktops.Count; i++)
-                list.Add(new NavMapDesktop(scope.Desktops[i].Label, _inScope && i == scope.LastUsedIndex));
-            scopeDesktops = list;
-        }
-
-        return new NavMap(anchors, _inScope, scope?.Name, scopeDesktops);
+        return new NavMap(top, _onTop, groups);
     }
 
-    /// <summary>
-    /// Attach (or replace) the scope on the current anchor. Only valid from the day-to-day row.
-    /// Returns the previous scope, if any, so the caller can tear down its desktops.
-    /// </summary>
-    public Scope? DefineScopeHere(Scope scope)
+    // ── Navigation ─────────────────────────────────────────────────────────────
+
+    public bool Apply(NavAction action) => action switch
     {
-        if (_inScope) throw new InvalidOperationException("Surface to the day-to-day row before defining a scope.");
-        Scope? previous = CurrentAnchor.Scope;
-        CurrentAnchor.Scope = scope;
-        Changed?.Invoke();
-        return previous;
-    }
-
-    /// <summary>Remove the current anchor's scope (if any) and return it so its desktops can be torn down.</summary>
-    public Scope? RemoveScopeHere()
-    {
-        if (_inScope) throw new InvalidOperationException("Surface to the day-to-day row before removing a scope.");
-        Scope? removed = CurrentAnchor.Scope;
-        CurrentAnchor.Scope = null;
-        if (removed is not null) Changed?.Invoke();
-        return removed;
-    }
-
-    // ── Config surface (the interactive map overlay) ─────────────────────────────
-
-    public int AnchorCount => _topology.Anchors.Count;
-
-    /// <summary>Index of the anchor column the user is currently on.</summary>
-    public int CurrentColumnIndex => _anchorIndex;
-
-    /// <summary>The OS desktop id of an anchor by index — the fallback when tearing down its scope.</summary>
-    public DesktopId AnchorDesktopId(int index) => _topology.Anchors[index].Desktop.Id;
-
-    /// <summary>Whole-topology snapshot for the config overlay: every anchor and its scope.</summary>
-    public IReadOnlyList<StreamInfo> BuildStreams()
-    {
-        var streams = new List<StreamInfo>(_topology.Anchors.Count);
-        for (int i = 0; i < _topology.Anchors.Count; i++)
-        {
-            Anchor a = _topology.Anchors[i];
-            IReadOnlyList<string> labels = a.Scope is null
-                ? Array.Empty<string>()
-                : a.Scope.Desktops.Select(d => d.Label).ToList();
-            streams.Add(new StreamInfo(i, a.Desktop.Label, i == _anchorIndex, a.Scope?.Name, labels));
-        }
-        return streams;
-    }
-
-    /// <summary>
-    /// Set or clear the scope on an anchor by index (used by the config overlay, which operates on
-    /// any anchor). Returns the previous scope for teardown. Callers ensure the day-to-day row is
-    /// current before configuring, so this never disturbs a scope you're standing inside.
-    /// </summary>
-    public Scope? SetScope(int index, Scope? scope)
-    {
-        if (index < 0 || index >= _topology.Anchors.Count) throw new ArgumentOutOfRangeException(nameof(index));
-        Anchor a = _topology.Anchors[index];
-        Scope? previous = a.Scope;
-        a.Scope = scope;
-        Changed?.Invoke();
-        return previous;
-    }
-
-    /// <summary>Apply a navigation intent. Returns true if location changed (and a switch was issued).</summary>
-    public bool Apply(NavAction action)
-    {
-        switch (action)
-        {
-            case NavAction.MoveLeft:  return Move(-1);
-            case NavAction.MoveRight: return Move(+1);
-            case NavAction.Dive:      return Dive();
-            case NavAction.Surface:   return Surface();
-            default:                  return false;
-        }
-    }
+        NavAction.MoveLeft => Move(-1),
+        NavAction.MoveRight => Move(+1),
+        NavAction.Dive => Dive(),
+        NavAction.Surface => Surface(),
+        _ => false,
+    };
 
     private bool Move(int delta)
     {
-        if (_inScope)
+        if (_onTop)
         {
-            Scope s = CurrentAnchor.Scope!;
-            int next = Math.Clamp(s.LastUsedIndex + delta, 0, s.Desktops.Count - 1);
-            if (next == s.LastUsedIndex) return false;   // at an edge — clamp, no switch
-            s.LastUsedIndex = next;                       // remember position for resume
+            if (_topRow.Count == 0) return false;
+            int next = Math.Clamp(_topIndex + delta, 0, _topRow.Count - 1);
+            if (next == _topIndex) return false;
+            _topIndex = next;
         }
         else
         {
-            int next = Math.Clamp(_anchorIndex + delta, 0, _topology.Anchors.Count - 1);
-            if (next == _anchorIndex) return false;
-            _anchorIndex = next;
+            Group g = _groups[_activeGroup];
+            int next = Math.Clamp(g.LastUsedIndex + delta, 0, g.Desktops.Count - 1);
+            if (next == g.LastUsedIndex) return false;
+            g.LastUsedIndex = next;
         }
         return Commit();
     }
 
     private bool Dive()
     {
-        if (_inScope) return false;                 // already inside a scope
-        if (CurrentAnchor.Scope is null) return false; // scope-less anchor — no-op (M2: offer to create)
-        _inScope = true;                            // position stays at the scope's LastUsedIndex → resume
+        if (_groups.Count == 0) return false;
+        if (_onTop)
+        {
+            _onTop = false; // enter the active group, resuming its last-used desktop
+        }
+        else
+        {
+            if (_groups.Count <= 1) return false;              // nothing to rotate to
+            _activeGroup = (_activeGroup + 1) % _groups.Count; // next group becomes active/nearest
+        }
         return Commit();
     }
 
     private bool Surface()
     {
-        if (!_inScope) return false;                // already on the day-to-day row
-        _inScope = false;                           // land back on the anchor — the entry point
+        if (_onTop) return false;
+        _onTop = true; // straight back to the top row (to the desktop we left)
         return Commit();
     }
 
-    /// <summary>Switch to the model's current desktop if it differs, and signal the change.</summary>
+    /// <summary>Click-to-navigate: jump to a specific top-row desktop.</summary>
+    public bool GoToTop(int index)
+    {
+        if (index < 0 || index >= _topRow.Count) return false;
+        _onTop = true;
+        _topIndex = index;
+        return Commit();
+    }
+
+    /// <summary>Click-to-navigate: jump to a specific desktop within a specific group.</summary>
+    public bool GoToGroupDesktop(int groupIndex, int desktopIndex)
+    {
+        if (groupIndex < 0 || groupIndex >= _groups.Count) return false;
+        Group g = _groups[groupIndex];
+        if (desktopIndex < 0 || desktopIndex >= g.Desktops.Count) return false;
+        _onTop = false;
+        _activeGroup = groupIndex;
+        g.LastUsedIndex = desktopIndex;
+        return Commit();
+    }
+
     private bool Commit()
     {
         DesktopId id = CurrentDesktop().Id;
@@ -218,16 +153,42 @@ public sealed class NavigationModel
         Changed?.Invoke();
         return true;
     }
-}
 
-/// <summary>
-/// A HUD-ready snapshot of the current location. <see cref="Format"/> renders the source-of-truth
-/// readout, e.g. <c>▸ feat-123 · API (2/3)</c> inside a scope, or <c>Web (1/3)</c> on the top row.
-/// </summary>
-public sealed record NavLocation(bool InScope, string? ScopeName, string DesktopLabel, int Position, int Count)
-{
-    public string Format()
-        => InScope
-            ? $"▸ {ScopeName} · {DesktopLabel} ({Position}/{Count})"
-            : $"{DesktopLabel} ({Position}/{Count})";
+    // ── Group management ─────────────────────────────────────────────────────────
+
+    /// <summary>Rebuild the top row from the OS: every desktop not in a group, in natural order.</summary>
+    public void SyncTopRow()
+    {
+        var grouped = _groups.SelectMany(g => g.Desktops).Select(d => d.Id.Value).ToHashSet();
+        _topRow = _desktops.List()
+            .Where(d => !grouped.Contains(d.Id.Value))
+            .Select(d => new DesktopRef(d.Id, string.IsNullOrEmpty(d.Name) ? $"Desktop {d.Index + 1}" : d.Name))
+            .ToList();
+
+        if (_groups.Count == 0) _onTop = true;
+        _activeGroup = _groups.Count == 0 ? 0 : Math.Clamp(_activeGroup, 0, _groups.Count - 1);
+        _topIndex = _topRow.Count == 0 ? 0 : Math.Clamp(_topIndex, 0, _topRow.Count - 1);
+    }
+
+    /// <summary>Add a group and make it the active (nearest) one. Refreshes the top row.</summary>
+    public void AddGroup(Group group)
+    {
+        _groups.Add(group);
+        _activeGroup = _groups.Count - 1;
+        SyncTopRow();
+        Changed?.Invoke();
+    }
+
+    /// <summary>Remove the group at <paramref name="index"/> and return it (for desktop teardown).</summary>
+    public Group? RemoveGroup(int index)
+    {
+        if (index < 0 || index >= _groups.Count) return null;
+        Group removed = _groups[index];
+        _groups.RemoveAt(index);
+        if (_groups.Count == 0) _onTop = true;
+        _activeGroup = _groups.Count == 0 ? 0 : Math.Clamp(_activeGroup, 0, _groups.Count - 1);
+        SyncTopRow();
+        Changed?.Invoke();
+        return removed;
+    }
 }

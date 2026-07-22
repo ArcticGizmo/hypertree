@@ -16,6 +16,7 @@ public sealed class VirtualDesktopController : IDesktopController
 {
     private readonly IVirtualDesktopManagerInternal _vdm;
     private readonly IApplicationViewCollection _views;
+    private readonly IVirtualDesktopPinnedApps _pinned;
 
     public VirtualDesktopController()
     {
@@ -29,6 +30,10 @@ public sealed class VirtualDesktopController : IDesktopController
 
         Guid avc = typeof(IApplicationViewCollection).GUID;
         _views = (IApplicationViewCollection)shell.QueryService(ref avc, ref avc);
+
+        Guid pin = Guids.CLSID_VirtualDesktopPinnedApps;
+        Guid pinIid = typeof(IVirtualDesktopPinnedApps).GUID;
+        _pinned = (IVirtualDesktopPinnedApps)shell.QueryService(ref pin, ref pinIid);
     }
 
     public int Count => _vdm.GetCount();
@@ -66,11 +71,18 @@ public sealed class VirtualDesktopController : IDesktopController
     public string GetName(DesktopId id) => HString.Read(Resolve(id).GetName());
 
     public void MoveWindowToDesktop(nint hwnd, DesktopId id)
+        => _vdm.MoveViewToDesktop(ViewFor(hwnd), Resolve(id));
+
+    public void PinWindow(nint hwnd) => _pinned.PinView(ViewFor(hwnd));
+
+    public void UnpinWindow(nint hwnd) => _pinned.UnpinView(ViewFor(hwnd));
+
+    private IApplicationView ViewFor(nint hwnd)
     {
         int hr = _views.GetViewForHwnd(hwnd, out IApplicationView view);
         if (hr != 0 || view is null)
             throw new COMException($"GetViewForHwnd failed for hwnd 0x{hwnd:X}", hr);
-        _vdm.MoveViewToDesktop(view, Resolve(id));
+        return view;
     }
 
     /// <summary>Resolve a Core <see cref="DesktopId"/> to the live COM desktop object.</summary>

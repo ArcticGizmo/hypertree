@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Hypertree.Scopes;
@@ -8,101 +9,126 @@ using Hypertree.Scopes;
 namespace Hypertree.App.Views;
 
 /// <summary>
-/// Renders the Model-P board exactly like docs/design/p-vs-q.html: a day-to-day row of desktop
-/// "tiles" (a screen with mini-window bars + a caption), and the current anchor's scope as an amber
-/// box hanging beneath it — greyed/resting when you're on the top row, lit when you've dived in. The
-/// current desktop is outlined (focus ring) and the whole board is translated so that tile stays
-/// centred, so navigating doesn't make the layout jump around. Shared by the transient flash
-/// (<see cref="HudWindow"/>) and the interactive overlay (<see cref="MapOverlay"/>).
+/// Renders the Model-P board in the docs/design/p-vs-q.html style: a top row of desktop "tiles" (a
+/// screen with mini-window bars + a caption) for the ungrouped desktops, and the groups as amber
+/// boxes stacked beneath in carousel order (active/nearest first). The current desktop is outlined
+/// and the board is translated so it stays centred as you navigate. Non-current groups are dimmed
+/// ("resting"). Tiles can be made clickable (overlay) to jump straight to a desktop.
+/// Shared by the flash (<see cref="HudWindow"/>) and the interactive overlay (<see cref="MapOverlay"/>).
 /// </summary>
 internal static class BoardView
 {
-    // Dark palette — the p-vs-q.html dark theme values.
     private static readonly Color TileBg = Color.Parse("#1F2836"), TileBorder = Color.Parse("#2A3444"), TileWin = Color.Parse("#374357");
     private static readonly Color StrBg = Color.Parse("#3A2E18"), StrBorder = Color.Parse("#6A5124"), StrWin = Color.Parse("#C9922F"), StrInk = Color.Parse("#E8A23D");
     private static readonly Color CapBg = Color.Parse("#161C27"), Ink = Color.Parse("#E8EDF5"), InkSoft = Color.Parse("#9AA6B8"), InkFaint = Color.Parse("#69748A");
     private static readonly Color Focus = Color.Parse("#6EA8FF");
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
 
-    public static Control Render(NavMap map, double s = 1.0)
+    public static Control Render(NavMap map, double s = 1.0, int maxGroups = int.MaxValue,
+                                 Action<int>? onTopClick = null, Action<int, int>? onGroupClick = null)
     {
         double tileW = 96 * s, screenH = 50 * s, capH = 22 * s, gap = 14 * s, conn = 22 * s;
         double tileH = screenH + capH, lift = 6 * s, top = 14 * s, pad = 22 * s;
-        double scopePad = 10 * s, labelH = 22 * s;
+        double scopePad = 10 * s, labelH = 20 * s, groupGap = 12 * s;
 
-        int n = map.Anchors.Count;
-        int cur = 0;
-        for (int i = 0; i < n; i++) if (map.Anchors[i].IsCurrentColumn) cur = i;
+        double viewportW = (tileW + gap) * 6 + pad * 2;
+        double cx = viewportW / 2;
+        double rowY = top + lift;
 
-        double Ax(int i) => i * (tileW + gap);
-        double rowY = top + lift; // leave room above for the focused tile to lift into
+        // ── Top row placement: centre the current top tile, else centre the whole row. ──
+        int topCur = -1;
+        for (int i = 0; i < map.TopRow.Count; i++) if (map.TopRow[i].IsCurrent) topCur = i;
+        double topRowW = map.TopRow.Count * tileW + Math.Max(0, map.TopRow.Count - 1) * gap;
+        double topOffset = topCur >= 0
+            ? cx - (topCur * (tileW + gap) + tileW / 2)
+            : cx - topRowW / 2;
 
-        bool hasScope = map.ScopeDesktops is not null;
-        int scopeCur = -1;
-        double scopeBoxX = 0, scopeBoxY = 0, scopeBoxW = 0, scopeBoxH = 0;
-        if (hasScope)
+        var canvas = new Canvas { Width = viewportW, ClipToBounds = true };
+        double bottom = rowY + tileH;
+
+        int shown = Math.Min(map.Groups.Count, maxGroups);
+        double firstBoxY = rowY + tileH + conn;
+
+        // Connector line down to the nearest group box (both centred → vertical at cx).
+        if (shown > 0)
         {
-            var sd = map.ScopeDesktops!;
-            for (int j = 0; j < sd.Count; j++) if (sd[j].IsCurrent) scopeCur = j;
-            scopeBoxX = Ax(cur) - scopePad;
-            scopeBoxY = rowY + tileH + conn;
-            scopeBoxW = scopePad * 2 + sd.Count * tileW + (sd.Count - 1) * gap;
-            scopeBoxH = labelH + lift + tileH + scopePad * 2;
-        }
-
-        // The tile that must stay centred: the current scope desktop when dived, else the anchor.
-        double fx = (map.InScope && hasScope && scopeCur >= 0)
-            ? Ax(cur) + scopeCur * (tileW + gap) + tileW / 2
-            : Ax(cur) + tileW / 2;
-
-        double viewportW = Math.Max((tileW + gap) * 5 + pad * 2, (hasScope ? scopeBoxW : 0) + pad * 2);
-        double offsetX = viewportW / 2 - fx;
-        double viewportH = (hasScope ? scopeBoxY + scopeBoxH : rowY + tileH) + pad;
-
-        var canvas = new Canvas { Width = viewportW, Height = viewportH, ClipToBounds = true };
-
-        if (hasScope)
-        {
-            // Connector line from the anchor down into the scope box.
             var line = new Rectangle { Width = Math.Max(2, 2 * s), Height = conn, Fill = new SolidColorBrush(StrBorder) };
-            Canvas.SetLeft(line, Ax(cur) + tileW / 2 - 1 + offsetX);
+            Canvas.SetLeft(line, cx - 1);
             Canvas.SetTop(line, rowY + tileH);
             canvas.Children.Add(line);
-
-            Control box = BuildScopeBox(map, s, tileW, screenH, capH, gap, scopePad, lift);
-            box.Opacity = map.InScope ? 1.0 : 0.42; // resting = greyed/dimmed until you dive in
-            Canvas.SetLeft(box, scopeBoxX + offsetX);
-            Canvas.SetTop(box, scopeBoxY);
-            canvas.Children.Add(box);
         }
 
-        for (int i = 0; i < n; i++)
+        for (int d = 0; d < shown; d++)
         {
-            NavMapAnchor a = map.Anchors[i];
-            bool focused = a.IsCurrentColumn && !map.InScope;
-            Control tile = Tile(a.Label, isStream: false, focused, s, tileW, screenH, capH);
-            Canvas.SetLeft(tile, Ax(i) + offsetX);
+            NavMapGroup g = map.Groups[d];
+            int groupIndex = g.Index;
+            double contentW = g.Desktops.Count * tileW + Math.Max(0, g.Desktops.Count - 1) * gap;
+            double boxW = contentW + scopePad * 2;
+
+            int deskCur = -1;
+            for (int j = 0; j < g.Desktops.Count; j++) if (g.Desktops[j].IsCurrent) deskCur = j;
+
+            double boxX = (g.IsCurrentLevel && deskCur >= 0)
+                ? cx - (scopePad + deskCur * (tileW + gap) + tileW / 2)
+                : cx - boxW / 2;
+            double boxY = firstBoxY + d * ( labelH + 6 * s + tileH + scopePad * 2 + groupGap );
+
+            Action<int>? clickForThisGroup = onGroupClick is null ? null : j => onGroupClick(groupIndex, j);
+            Control box = BuildGroupBox(g, s, tileW, screenH, capH, gap, scopePad, clickForThisGroup);
+            box.Opacity = g.IsCurrentLevel ? 1.0 : Math.Max(0.22, (map.OnTop ? 0.55 : 0.4) - d * 0.12);
+            Canvas.SetLeft(box, boxX);
+            Canvas.SetTop(box, boxY);
+            canvas.Children.Add(box);
+
+            bottom = boxY + labelH + 6 * s + tileH + scopePad * 2;
+        }
+
+        if (map.Groups.Count > shown)
+        {
+            var more = new TextBlock
+            {
+                Text = $"+{map.Groups.Count - shown} more", FontFamily = Mono, FontSize = 10 * s,
+                Foreground = new SolidColorBrush(InkFaint),
+            };
+            Canvas.SetLeft(more, cx - 30 * s);
+            Canvas.SetTop(more, bottom + 4 * s);
+            canvas.Children.Add(more);
+            bottom += 16 * s;
+        }
+
+        // ── Top-row tiles (drawn last so they sit above the connector). ──
+        for (int i = 0; i < map.TopRow.Count; i++)
+        {
+            bool focused = map.OnTop && map.TopRow[i].IsCurrent;
+            int idx = i;
+            Control tile = Tile(map.TopRow[i].Label, isStream: false, focused, s, tileW, screenH, capH,
+                                onTopClick is null ? null : () => onTopClick(idx));
+            Canvas.SetLeft(tile, i * (tileW + gap) + topOffset);
             Canvas.SetTop(tile, rowY);
             canvas.Children.Add(tile);
         }
 
+        canvas.Height = bottom + pad;
         return canvas;
     }
 
-    private static Control BuildScopeBox(NavMap map, double s, double tileW, double screenH, double capH,
-                                         double gap, double scopePad, double lift)
+    private static Control BuildGroupBox(NavMapGroup g, double s, double tileW, double screenH, double capH,
+                                         double gap, double scopePad, Action<int>? onDeskClick)
     {
         var label = new TextBlock
         {
-            Text = "● " + map.ScopeName + (map.InScope ? "" : "  · resting"),
+            Text = "● " + g.Name + (g.IsCurrentLevel ? "" : "  · resting"),
             FontFamily = Mono, FontSize = 11 * s, FontWeight = FontWeight.Bold,
             Foreground = new SolidColorBrush(StrInk), Margin = new Thickness(2 * s, 0, 0, 6 * s),
         };
 
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = gap };
-        var sd = map.ScopeDesktops!;
-        for (int j = 0; j < sd.Count; j++)
-            row.Children.Add(Tile(sd[j].Label, isStream: true, sd[j].IsCurrent && map.InScope, s, tileW, screenH, capH));
+        for (int j = 0; j < g.Desktops.Count; j++)
+        {
+            int idx = j;
+            row.Children.Add(Tile(g.Desktops[j].Label, isStream: true, g.Desktops[j].IsCurrent, s,
+                                  tileW, screenH, capH, onDeskClick is null ? null : () => onDeskClick(idx)));
+        }
 
         return new Border
         {
@@ -116,12 +142,11 @@ internal static class BoardView
     }
 
     private static Control Tile(string caption, bool isStream, bool focused, double s,
-                                double tileW, double screenH, double capH)
+                                double tileW, double screenH, double capH, Action? onClick)
     {
         Color border = focused ? Focus : (isStream ? StrBorder : TileBorder);
         double bt = focused ? 2 : 1;
 
-        // Screen with mini windows.
         var winCanvas = new Canvas { Width = tileW, Height = screenH };
         Color win = isStream ? StrWin : TileWin;
         AddWin(winCanvas, 9 * s, 9 * s, 44 * s, 14 * s, win, 1.0);
@@ -132,19 +157,14 @@ internal static class BoardView
         {
             Width = tileW, Height = screenH,
             Background = new SolidColorBrush(isStream ? StrBg : TileBg),
-            BorderBrush = new SolidColorBrush(border),
-            BorderThickness = new Thickness(bt, bt, bt, 0),
-            CornerRadius = new CornerRadius(8 * s, 8 * s, 0, 0),
-            ClipToBounds = true,
-            Child = winCanvas,
+            BorderBrush = new SolidColorBrush(border), BorderThickness = new Thickness(bt, bt, bt, 0),
+            CornerRadius = new CornerRadius(8 * s, 8 * s, 0, 0), ClipToBounds = true, Child = winCanvas,
         };
-
         var cap = new Border
         {
             Width = tileW, Height = capH,
             Background = new SolidColorBrush(CapBg),
-            BorderBrush = new SolidColorBrush(border),
-            BorderThickness = new Thickness(bt, 0, bt, bt),
+            BorderBrush = new SolidColorBrush(border), BorderThickness = new Thickness(bt, 0, bt, bt),
             CornerRadius = new CornerRadius(0, 0, 8 * s, 8 * s),
             Child = new TextBlock
             {
@@ -155,17 +175,18 @@ internal static class BoardView
         };
 
         var stack = new StackPanel { Orientation = Orientation.Vertical, Width = tileW, Children = { screen, cap } };
-        if (focused) stack.RenderTransform = new TranslateTransform(0, -6 * s); // lift the current desktop
+        if (focused) stack.RenderTransform = new TranslateTransform(0, -6 * s);
+        if (onClick is not null)
+        {
+            stack.Cursor = new Cursor(StandardCursorType.Hand);
+            stack.PointerPressed += (_, _) => onClick();
+        }
         return stack;
     }
 
     private static void AddWin(Canvas c, double x, double y, double w, double h, Color color, double opacity)
     {
-        var r = new Rectangle
-        {
-            Width = w, Height = h, RadiusX = 3, RadiusY = 3,
-            Fill = new SolidColorBrush(color), Opacity = opacity,
-        };
+        var r = new Rectangle { Width = w, Height = h, RadiusX = 3, RadiusY = 3, Fill = new SolidColorBrush(color), Opacity = opacity };
         Canvas.SetLeft(r, x);
         Canvas.SetTop(r, y);
         c.Children.Add(r);

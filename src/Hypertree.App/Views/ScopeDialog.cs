@@ -5,21 +5,21 @@ using Avalonia.Media;
 
 namespace Hypertree.App.Views;
 
-/// <summary>Result of the new-scope dialog: a scope name and its ordered desktop labels.</summary>
+/// <summary>Result of the new-group dialog: a group name and its ordered desktop labels.</summary>
 internal sealed record ScopeSpec(string Name, IReadOnlyList<string> Labels);
 
 /// <summary>
-/// A tiny modal-less prompt for defining a scope: its name and a comma-separated list of desktop
+/// A tiny modal-less prompt for defining a group: its name and a comma-separated list of desktop
 /// labels. Raises <see cref="Confirmed"/> with the parsed spec, then closes. M1's stand-in for the
-/// M2 git-worktree-driven flow — enough to feel scope creation.
+/// M2 git-worktree-driven flow — enough to feel group creation.
 /// </summary>
 internal sealed class ScopeDialog : Window
 {
     public event Action<ScopeSpec>? Confirmed;
 
-    public ScopeDialog(string anchorLabel)
+    public ScopeDialog()
     {
-        Title = "New scope";
+        Title = "New group";
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         SizeToContent = SizeToContent.WidthAndHeight;
         CanResize = false;
@@ -47,8 +47,8 @@ internal sealed class ScopeDialog : Window
             Spacing = 8,
             Children =
             {
-                new TextBlock { Text = $"Define a scope under “{anchorLabel}”", FontWeight = FontWeight.SemiBold },
-                new TextBlock { Text = "This provisions one virtual desktop per label and hangs them beneath the anchor.",
+                new TextBlock { Text = "Define a group", FontWeight = FontWeight.SemiBold },
+                new TextBlock { Text = "Provisions one virtual desktop per label and adds them as a new group in the stack.",
                                 TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.Parse("#999")), FontSize = 12 },
                 new TextBlock { Text = "Name", FontSize = 12, Margin = new Thickness(0, 4, 0, 0) },
                 name,

@@ -41,4 +41,13 @@ public interface IDesktopController
     /// (terminals, editors) — the whole point of provisioning a scope's window set.
     /// </summary>
     void MoveWindowToDesktop(nint hwnd, DesktopId id);
+
+    /// <summary>
+    /// Pin a window to all virtual desktops so it stays visible when the desktop switches. Used to
+    /// keep the map overlay on screen while you navigate underneath it.
+    /// </summary>
+    void PinWindow(nint hwnd);
+
+    /// <summary>Undo <see cref="PinWindow"/>.</summary>
+    void UnpinWindow(nint hwnd);
 }

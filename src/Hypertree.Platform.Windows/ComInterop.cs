@@ -19,6 +19,7 @@ internal static class Guids
 {
     public static readonly Guid CLSID_ImmersiveShell = new("C2F03A33-21F5-47FA-B4BB-156362A2F239");
     public static readonly Guid CLSID_VirtualDesktopManagerInternal = new("C5E0CDCA-7B6E-41B2-9FC4-D93975CC467B");
+    public static readonly Guid CLSID_VirtualDesktopPinnedApps = new("B5A399E7-1C87-46B8-88E9-FC5747B171BD");
 }
 
 [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -78,7 +79,20 @@ internal interface IApplicationViewCollection
     [PreserveSig] int GetViewForHwnd(nint hwnd, out IApplicationView view);
 }
 
-// Opaque — only obtained and passed back to MoveViewToDesktop; no methods called.
+// Opaque — only obtained and passed back to MoveViewToDesktop / PinView; no methods called.
 [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
 [Guid("372E1D3B-38D3-42E4-A15B-8AB2B178F513")]
 internal interface IApplicationView { }
+
+// Pin/unpin a window (via its view) to all desktops — keeps the overlay visible across switches.
+[ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+[Guid("4CE81583-1E4C-4632-A621-07A53543148F")]
+internal interface IVirtualDesktopPinnedApps
+{
+    bool IsAppIdPinned([MarshalAs(UnmanagedType.LPWStr)] string appId);
+    void PinAppID([MarshalAs(UnmanagedType.LPWStr)] string appId);
+    void UnpinAppID([MarshalAs(UnmanagedType.LPWStr)] string appId);
+    bool IsViewPinned(IApplicationView view);
+    void PinView(IApplicationView view);
+    void UnpinView(IApplicationView view);
+}

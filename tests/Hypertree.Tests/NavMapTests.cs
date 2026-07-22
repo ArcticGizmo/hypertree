@@ -4,115 +4,66 @@ using Xunit;
 
 namespace Hypertree.Tests;
 
-/// <summary>
-/// Covers the render-ready map snapshot and runtime scope define/remove — the data the HUD overlay
-/// draws, and the operations behind the tray's "New/Remove scope here".
-/// </summary>
+/// <summary>Covers the render-ready snapshot the overlay/flash draw from.</summary>
 public class NavMapTests
 {
     private static DesktopId D(int n) => new(new Guid($"{n:D8}-0000-0000-0000-000000000000"));
-    private static readonly DesktopId Web = D(0), Api = D(1), Mob = D(2), Spa = D(10), ScApi = D(11), ScMob = D(12);
-    private static readonly DesktopId[] All = { Web, Api, Mob, Spa, ScApi, ScMob };
+    private static readonly DesktopId[] TopIds = { D(0), D(1), D(2) };
 
-    private static (NavigationModel model, FakeDesktopController ctrl) New(int current = 0)
+    private static Group G(string name, params (int id, string label)[] desks)
+        => new(name, desks.Select(d => new DesktopRef(D(d.id), d.label)).ToList());
+
+    private static NavigationModel New(int current = 0) => new(new FakeDesktopController(TopIds, current));
+
+    [Fact]
+    public void Top_row_lists_all_ungrouped_desktops_with_current_marked()
     {
-        var topo = new Topology(new[]
-        {
-            new Anchor(new DesktopRef(Web, "Web"), new Scope("feat-123", new[]
-            {
-                new DesktopRef(Spa, "SPA"), new DesktopRef(ScApi, "API"), new DesktopRef(ScMob, "Mobile"),
-            })),
-            new Anchor(new DesktopRef(Api, "API")),
-        });
-        var ctrl = new FakeDesktopController(All, current);
-        return (new NavigationModel(topo, ctrl), ctrl);
+        var m = New(current: 1);
+        NavMap map = m.BuildMap();
+        Assert.True(map.OnTop);
+        Assert.Equal(3, map.TopRow.Count);
+        Assert.Equal(new[] { false, true, false }, map.TopRow.Select(t => t.IsCurrent));
+        Assert.Empty(map.Groups);
     }
 
     [Fact]
-    public void Map_on_top_row_marks_current_anchor_and_shows_scope_dimmed()
+    public void Groups_are_listed_in_carousel_order_active_first()
     {
-        var (model, _) = New();
-        NavMap m = model.BuildMap();
+        var m = New();
+        m.AddGroup(G("one", (10, "a")));
+        m.AddGroup(G("two", (20, "x"))); // active
+        NavMap map = m.BuildMap();
 
-        Assert.False(m.InScope);
-        Assert.Equal(2, m.Anchors.Count);
-        Assert.True(m.Anchors[0].IsCurrentColumn);
-        Assert.True(m.Anchors[0].HasScope);
-        Assert.False(m.Anchors[1].IsCurrentColumn);
-
-        // Scope is shown (a dive target) but nothing in it is "current" while on the top row.
-        Assert.NotNull(m.ScopeDesktops);
-        Assert.Equal("feat-123", m.ScopeName);
-        Assert.All(m.ScopeDesktops!, d => Assert.False(d.IsCurrent));
+        Assert.Equal(2, map.Groups.Count);
+        Assert.Equal("two", map.Groups[0].Name); // active/nearest first
+        Assert.Equal(1, map.Groups[0].Index);    // stable index preserved for click/remove
+        Assert.Equal("one", map.Groups[1].Name);
+        Assert.Equal(0, map.Groups[1].Index);
     }
 
     [Fact]
-    public void Map_when_dived_marks_the_current_scope_desktop()
+    public void On_top_no_group_is_current_level()
     {
-        var (model, _) = New();
-        model.Apply(NavAction.Dive);
-        model.Apply(NavAction.MoveRight); // scope API
-        NavMap m = model.BuildMap();
-
-        Assert.True(m.InScope);
-        Assert.Equal(new[] { false, true, false }, m.ScopeDesktops!.Select(d => d.IsCurrent));
-        Assert.True(m.Anchors[0].IsCurrentColumn); // still the owning column
+        var m = New();
+        m.AddGroup(G("one", (10, "a"), (11, "b")));
+        NavMap map = m.BuildMap();
+        Assert.True(map.OnTop);
+        Assert.All(map.Groups, g => Assert.False(g.IsCurrentLevel));
+        Assert.All(map.Groups[0].Desktops, d => Assert.False(d.IsCurrent));
     }
 
     [Fact]
-    public void Map_has_no_scope_row_for_a_scopeless_anchor()
+    public void Dived_marks_the_active_group_and_its_current_desktop()
     {
-        var (model, _) = New();
-        model.Apply(NavAction.MoveRight); // to API anchor (no scope)
-        NavMap m = model.BuildMap();
-        Assert.Null(m.ScopeDesktops);
-        Assert.Null(m.ScopeName);
-    }
+        var m = New();
+        m.AddGroup(G("one", (10, "a"), (11, "b")));
+        m.Apply(NavAction.Dive);
+        m.Apply(NavAction.MoveRight); // b
+        NavMap map = m.BuildMap();
 
-    [Fact]
-    public void DefineScopeHere_attaches_a_scope_that_can_be_dived()
-    {
-        var (model, ctrl) = New();
-        model.Apply(NavAction.MoveRight); // API anchor, scope-less
-        Assert.False(model.CurrentAnchorHasScope);
-
-        var previous = model.DefineScopeHere(new Scope("hotfix", new[]
-        {
-            new DesktopRef(D(30), "one"), new DesktopRef(D(31), "two"),
-        }));
-        Assert.Null(previous);
-        Assert.True(model.CurrentAnchorHasScope);
-
-        Assert.True(model.Apply(NavAction.Dive));
-        Assert.Equal(D(30), ctrl.Current);
-        Assert.Equal("▸ hotfix · one (1/2)", model.Location.Format());
-    }
-
-    [Fact]
-    public void DefineScopeHere_returns_the_replaced_scope_for_teardown()
-    {
-        var (model, _) = New(); // Web anchor already has feat-123
-        Scope? previous = model.DefineScopeHere(new Scope("new", new[] { new DesktopRef(D(40), "x") }));
-        Assert.NotNull(previous);
-        Assert.Equal("feat-123", previous!.Name);
-    }
-
-    [Fact]
-    public void RemoveScopeHere_detaches_and_returns_the_scope()
-    {
-        var (model, _) = New();
-        Scope? removed = model.RemoveScopeHere();
-        Assert.Equal("feat-123", removed!.Name);
-        Assert.False(model.CurrentAnchorHasScope);
-        Assert.False(model.Apply(NavAction.Dive)); // now a no-op — nothing to dive into
-    }
-
-    [Fact]
-    public void Defining_a_scope_while_dived_is_rejected()
-    {
-        var (model, _) = New();
-        model.Apply(NavAction.Dive);
-        Assert.Throws<InvalidOperationException>(() =>
-            model.DefineScopeHere(new Scope("x", new[] { new DesktopRef(D(50), "y") })));
+        Assert.False(map.OnTop);
+        Assert.True(map.Groups[0].IsCurrentLevel);
+        Assert.Equal(new[] { false, true }, map.Groups[0].Desktops.Select(d => d.IsCurrent));
+        Assert.All(map.TopRow, t => Assert.False(t.IsCurrent)); // nothing on the top row is current
     }
 }
