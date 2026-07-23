@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Hypertree.Platform;
 
@@ -65,6 +66,7 @@ internal sealed class PaletteWindow : Window
         _filtered = items.ToList();
 
         WindowDecorations = WindowDecorations.None;
+        RequestedThemeVariant = ThemeVariant.Dark; // else the themed search box renders light (app is FluentTheme light)
         Background = Brushes.Transparent;
         TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
         Topmost = true;
