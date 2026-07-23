@@ -184,6 +184,25 @@ depth actually feels like a place before investing in M2/M3 (`PLAN.md` §9, risk
 - **Gate:** if the feel doesn't survive contact, iterate the model here — cheaply —
   before spending M2/M3. If it does, proceed.
 
+> **Note — the model evolved during M1.5.** Live feedback moved Model P well past the
+> original anchor description above: anchors gave way to a **top row of ungrouped
+> desktops + a vertical stack of groups**; the overlay became a design-matched interactive
+> map (`Ctrl+Alt+Space`) with per-tile delete; and state now persists to `%APPDATA%`. The
+> phases above are kept as historical intent; the shipped behaviour is what's in the code
+> and the `docs/design/` notes + commit history.
+
+### Phase 1.6 — UX iteration 2 (before M2)
+Detailed spec: **[`docs/design/ux-iteration-2.md`](design/ux-iteration-2.md)**. Summary:
+- **F1** standard navigation shows the *centred* map (not the top strip).
+- **F2** vertical model — main timeline as pivot, groups fixed, "main above current"
+  (`↑` passes through main); replaces the ladder + reorder-on-open. *(decided)*
+- **F3** no bounding box — board uses the full screen width.
+- **F4** spotlight `Ctrl+Alt+P` — filter existing desktops, always offer create.
+- **F5** command palette `Ctrl+Alt+Shift+P` — same look/feel; bones only.
+- New shared `PaletteWindow` (perch `SessionSwitcherWindow` pattern) + an
+  `IForegroundActivator` focus-grab primitive.
+- Build order in the design doc; do F2 (Core, tested) first, then the rendering unify.
+
 ---
 
 ## M2 — Worktree integration
