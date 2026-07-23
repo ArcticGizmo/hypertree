@@ -24,6 +24,7 @@ internal static class BoardView
     private static readonly Color StrBg = Color.Parse("#3A2E18"), StrBorder = Color.Parse("#6A5124"), StrWin = Color.Parse("#C9922F"), StrInk = Color.Parse("#E8A23D");
     private static readonly Color CapBg = Color.Parse("#161C27"), Ink = Color.Parse("#E8EDF5"), InkSoft = Color.Parse("#9AA6B8"), InkFaint = Color.Parse("#69748A");
     private static readonly Color Focus = Color.Parse("#6EA8FF");
+    private static readonly Color Here = Color.Parse("#34D399"); // "you are here" — distinct from the blue target
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
 
     /// <summary>
@@ -113,8 +114,8 @@ internal static class BoardView
             for (int i = 0; i < map.TopRow.Count; i++)
             {
                 int idx = i;
-                Control tile = Tile(map.TopRow[i].Label, isStream: false, map.OnTop && map.TopRow[i].IsCurrent, s,
-                                    tileW, scrH, capH,
+                Control tile = Tile(map.TopRow[i].Label, isStream: false, map.OnTop && map.TopRow[i].IsCurrent,
+                                    map.TopRow[i].IsHere, s, tileW, scrH, capH,
                                     onClick is null ? null : () => onClick(idx),
                                     onDelete is null ? null : () => onDelete(idx));
                 Canvas.SetLeft(tile, originX + i * (tileW + gap));
@@ -160,8 +161,8 @@ internal static class BoardView
         for (int j = 0; j < g.Desktops.Count; j++)
         {
             int idx = j;
-            row.Children.Add(Tile(g.Desktops[j].Label, isStream: true, g.Desktops[j].IsCurrent, s,
-                                  tileW, screenH, capH,
+            row.Children.Add(Tile(g.Desktops[j].Label, isStream: true, g.Desktops[j].IsCurrent,
+                                  g.Desktops[j].IsHere, s, tileW, screenH, capH,
                                   onDeskClick is null ? null : () => onDeskClick(idx),
                                   onDeskDelete is null ? null : () => onDeskDelete(idx)));
         }
@@ -177,11 +178,13 @@ internal static class BoardView
         };
     }
 
-    private static Control Tile(string caption, bool isStream, bool focused, double s,
+    private static Control Tile(string caption, bool isStream, bool focused, bool here, double s,
                                 double tileW, double screenH, double capH, Action? onClick, Action? onDelete = null)
     {
-        Color border = focused ? Focus : (isStream ? StrBorder : TileBorder);
-        double bt = focused ? 2 : 1;
+        // The focused/target tile wins the border colour; a non-target "here" tile gets the green
+        // marker so current-vs-destination (and the distance between) reads at a glance.
+        Color border = focused ? Focus : here ? Here : (isStream ? StrBorder : TileBorder);
+        double bt = focused || here ? 2 : 1;
 
         var winCanvas = new Canvas { Width = tileW, Height = screenH };
         Color win = isStream ? StrWin : TileWin;
@@ -218,29 +221,47 @@ internal static class BoardView
         }
 
         Control result = stack;
-        if (onDelete is not null)
+        if (here || onDelete is not null)
         {
-            // Overlay a small delete badge in the screen's top-right corner. Its own pointer handler is
-            // marked handled so it doesn't also trigger the tile's click-to-navigate.
-            var badge = new Border
-            {
-                Width = 17 * s, Height = 17 * s,
-                CornerRadius = new CornerRadius(9 * s),
-                Background = new SolidColorBrush(Color.FromArgb(0xE0, 0xC0, 0x3A, 0x2E)),
-                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
-                Margin = new Thickness(0, 3 * s, 3 * s, 0),
-                Cursor = new Cursor(StandardCursorType.Hand),
-                Child = new TextBlock
-                {
-                    Text = "×", FontSize = 12 * s, FontWeight = FontWeight.Bold, Foreground = Brushes.White,
-                    HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-                },
-            };
-            badge.PointerPressed += (_, e) => { e.Handled = true; onDelete(); };
-
             var grid = new Grid { Width = tileW };
             grid.Children.Add(stack);
-            grid.Children.Add(badge);
+
+            // "You are here" marker: a green pip in the top-left corner (non-interactive), paired with
+            // the green border above — so the current desktop stands apart from the blue target.
+            if (here)
+            {
+                grid.Children.Add(new Border
+                {
+                    Width = 15 * s, Height = 15 * s, CornerRadius = new CornerRadius(8 * s),
+                    Background = new SolidColorBrush(Here),
+                    BorderBrush = new SolidColorBrush(CapBg), BorderThickness = new Thickness(1.5 * s),
+                    HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(3 * s, 3 * s, 0, 0), IsHitTestVisible = false,
+                });
+            }
+
+            // Delete badge in the top-right corner. Its pointer handler is marked handled so it doesn't
+            // also trigger the tile's click-to-navigate.
+            if (onDelete is not null)
+            {
+                var badge = new Border
+                {
+                    Width = 17 * s, Height = 17 * s,
+                    CornerRadius = new CornerRadius(9 * s),
+                    Background = new SolidColorBrush(Color.FromArgb(0xE0, 0xC0, 0x3A, 0x2E)),
+                    HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(0, 3 * s, 3 * s, 0),
+                    Cursor = new Cursor(StandardCursorType.Hand),
+                    Child = new TextBlock
+                    {
+                        Text = "×", FontSize = 12 * s, FontWeight = FontWeight.Bold, Foreground = Brushes.White,
+                        HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                    },
+                };
+                badge.PointerPressed += (_, e) => { e.Handled = true; onDelete(); };
+                grid.Children.Add(badge);
+            }
+
             result = grid;
         }
 

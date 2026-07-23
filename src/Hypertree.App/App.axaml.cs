@@ -192,7 +192,7 @@ public sealed class App : Application
             }
         }
 
-        OpenPalette("Jump to or create a desktop…", "↑↓ move · ↵ jump/create · Esc close", items,
+        OpenPalette("Jump to or create a desktop…", "↑↓ move · ↵ jump/create · Esc close · green = you are here", items,
             query => new PaletteItem($"Create desktop “{query}”", "new · main", "+",
                 () => CreateAndGoToDesktop(query),
                 Preview: () => _model!.BuildMap()), // no target tile yet — show the current board
@@ -205,10 +205,20 @@ public sealed class App : Application
     private NavMap PreviewMap(bool onMain, int topIndex, int groupIndex, int desktopIndex)
     {
         NavMap b = _model!.BuildMap();
-        var top = b.TopRow.Select((t, i) => new NavMapTile(t.Label, onMain && i == topIndex)).ToList();
+
+        // Where the user actually is right now, so the preview can mark it distinctly from the target.
+        bool hereMain = _model.OnTop;
+        int hereTop = _model.CurrentTopIndex;
+        (int hereGroup, int hereDesktop) = _model.CurrentGroupDesktop ?? (-1, -1);
+
+        var top = b.TopRow.Select((t, i) => new NavMapTile(
+            t.Label, onMain && i == topIndex, hereMain && i == hereTop)).ToList();
         var groups = b.Groups.Select(g => new NavMapGroup(
             g.Index, g.Name,
-            g.Desktops.Select((d, j) => new NavMapTile(d.Label, !onMain && g.Index == groupIndex && j == desktopIndex)).ToList(),
+            g.Desktops.Select((d, j) => new NavMapTile(
+                d.Label,
+                !onMain && g.Index == groupIndex && j == desktopIndex,
+                !hereMain && g.Index == hereGroup && j == hereDesktop)).ToList(),
             !onMain && g.Index == groupIndex,
             g.Index == groupIndex ? desktopIndex : g.Cursor)).ToList();
         int topCursor = onMain ? topIndex : b.TopCursor;

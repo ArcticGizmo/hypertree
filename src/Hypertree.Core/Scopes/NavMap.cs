@@ -22,8 +22,12 @@ public sealed record NavMap(
 
 /// <summary>One desktop tile.</summary>
 /// <param name="Label">Display label.</param>
-/// <param name="IsCurrent">Whether this is the desktop the user is on right now.</param>
-public sealed record NavMapTile(string Label, bool IsCurrent);
+/// <param name="IsCurrent">Whether this tile is the focused/selected one (where a jump would land, or
+/// the desktop you're on in the normal board).</param>
+/// <param name="IsHere">Whether this is the desktop the user is <em>actually</em> on right now. Used by
+/// the jump preview to mark the current position distinctly from the selected target, so relative
+/// distance is legible. Normally false (the normal board uses <see cref="IsCurrent"/> for "here").</param>
+public sealed record NavMapTile(string Label, bool IsCurrent, bool IsHere = false);
 
 /// <summary>One group in the fixed stack, in listed order (index 0 first). Its position relative to
 /// the main timeline is given by <see cref="NavMap.TopPosition"/>, not by reordering.</summary>
