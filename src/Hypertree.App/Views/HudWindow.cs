@@ -21,8 +21,8 @@ internal sealed class HudWindow : Window
 {
     // Poll the modifier state (no focused window ⇒ no key-up events) and keep the flash up while
     // Ctrl+Alt is held; once released, hide after a short grace so the final position lingers.
-    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(100);
-    private const int GraceTicks = 6; // ~600ms after release before hiding
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(50);
+    private const int GraceTicks = 2; // ~100ms after release before hiding (snappy, with a little debounce)
     private readonly DispatcherTimer _poll;
     private int _grace;
 
