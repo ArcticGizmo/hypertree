@@ -30,17 +30,20 @@ public sealed class App : Application
         (HotkeyKey.ArrowRight, NavAction.MoveRight),
     };
     private const HotkeyKey MapKey = HotkeyKey.Space; // Ctrl+Alt+Space toggles the map overlay
+    private const HotkeyKey PaletteKey = HotkeyKey.P; // Ctrl+Alt+P spotlight; Ctrl+Alt+Shift+P command palette
 
     private readonly List<IGlobalHotkey> _hotkeys = new();
     // Desktops Hypertree created (for groups). Only these are ever torn down — the top row is the
     // user's own desktops and must never be removed.
     private readonly HashSet<Guid> _created = new();
     private IDesktopController? _desktops;
+    private IForegroundActivator? _activator;
     private NavigationModel? _model;
     private HudWindow? _hud;
     private MapOverlay? _overlay;
     private TrayIcon? _tray;
     private ScopeDialog? _dialog;
+    private PaletteWindow? _palette;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -75,6 +78,7 @@ public sealed class App : Application
     private void Startup()
     {
         _desktops = PlatformServices.CreateDesktopController();
+        _activator = PlatformServices.CreateForegroundActivator();
         _model = new NavigationModel(_desktops, new FileStateStore());
         // Desktops restored from persisted groups were created by Hypertree — track them so the
         // teardown guard still only ever destroys our own desktops.
@@ -108,6 +112,11 @@ public sealed class App : Application
         var mapHk = PlatformServices.CreateGlobalHotkey();
         if (mapHk.Register(Mods, MapKey, () => Dispatcher.UIThread.Post(ToggleMap))) _hotkeys.Add(mapHk);
         else { mapHk.Dispose(); Console.Error.WriteLine("Hotkey Ctrl+Alt+Space (map) was refused by the OS."); }
+
+        // Ctrl+Alt+P — spotlight (jump/create desktop).
+        var spotHk = PlatformServices.CreateGlobalHotkey();
+        if (spotHk.Register(Mods, PaletteKey, () => Dispatcher.UIThread.Post(ToggleSpotlight))) _hotkeys.Add(spotHk);
+        else { spotHk.Dispose(); Console.Error.WriteLine("Hotkey Ctrl+Alt+P (spotlight) was refused by the OS."); }
     }
 
     // Navigate. While the map overlay is open it stays open (its windows are pinned across the
@@ -131,6 +140,60 @@ public sealed class App : Application
     private void RefreshOverlay()
     {
         if (_model is not null && _overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap());
+    }
+
+    // ── Spotlight (F4): jump to any existing desktop, or create one named the query ─────
+
+    private void ToggleSpotlight()
+    {
+        if (_model is null || _activator is null) return;
+        if (_palette is not null) { _palette.Close(); return; } // re-press toggles closed
+
+        NavMap map = _model.BuildMap();
+        var items = new List<PaletteItem>();
+
+        // Every main-timeline desktop, then every group's desktops (group name in the detail so
+        // typing a group name filters to its desktops).
+        for (int i = 0; i < map.TopRow.Count; i++)
+        {
+            int idx = i;
+            items.Add(new PaletteItem(map.TopRow[i].Label, "main", "→", () => { _model.GoToTop(idx); RefreshOrFlash(); }));
+        }
+        foreach (NavMapGroup g in map.Groups)
+        {
+            int gi = g.Index;
+            for (int j = 0; j < g.Desktops.Count; j++)
+            {
+                int dj = j;
+                items.Add(new PaletteItem(g.Desktops[j].Label, g.Name, "→",
+                    () => { _model.GoToGroupDesktop(gi, dj); RefreshOrFlash(); }));
+            }
+        }
+
+        OpenPalette("Jump to or create a desktop…", "↑↓ move · ↵ jump/create · Esc close", items,
+            query => new PaletteItem($"Create desktop “{query}”", "new · main", "+", () => CreateAndGoToDesktop(query)));
+    }
+
+    // Create a new ungrouped desktop named the query and jump straight to it.
+    private void CreateAndGoToDesktop(string name)
+    {
+        if (_model is null || _desktops is null) return;
+        DesktopId id = _desktops.Create(name);
+        _created.Add(id.Value);
+        _model.SyncTopRow();
+        _desktops.SwitchTo(id);
+        _model.Resync(); // land the model on the freshly-created desktop
+        RefreshOrFlash();
+    }
+
+    private void OpenPalette(string placeholder, string hint, IReadOnlyList<PaletteItem> items,
+                             Func<string, PaletteItem?>? createRow = null)
+    {
+        if (_activator is null) return;
+        _palette = new PaletteWindow(placeholder, hint, items, _activator, createRow);
+        _palette.Closed += (_, _) => _palette = null;
+        _palette.Show();
+        _palette.TakeFocus();
     }
 
     private void RefreshOrFlash()
@@ -281,5 +344,6 @@ public sealed class App : Application
         _dialog?.Close();
         _overlay?.Close();
         _hud?.Close();
+        _palette?.Close();
     }
 }
