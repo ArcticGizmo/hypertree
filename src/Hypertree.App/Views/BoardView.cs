@@ -52,14 +52,14 @@ internal static class BoardView
         rows.Add(MainRow(map, s, tileW, scrH, capH, gap, lift, mainLabelH, onTopClick, onTopDelete));
         for (int gi = split; gi < map.Groups.Count; gi++) rows.Add(GroupRow(map.Groups[gi], s, tileW, scrH, capH, gap, scopePad, labelH, lift, onGroupClick, onGroupDelete));
 
-        // Which row is the user actually on? main when OnTop, else the current group — which may be
-        // above OR below main. A group above main maps to a row before mainRowIndex; one below maps to
-        // gi+1 (main occupies the slot at `split`). This row gets centred on screen.
+        // Which row do we centre on? The row holding the current (IsCurrent) tile — main when OnTop,
+        // else the group that contains it (which may be above OR below main: a group above main maps to
+        // a row before mainRowIndex, one below to gi+1, since main occupies the slot at `split`).
         int currentRow = mainRowIndex;
         if (!map.OnTop)
         {
             for (int gi = 0; gi < map.Groups.Count; gi++)
-                if (map.Groups[gi].IsCurrentLevel) { currentRow = gi < split ? gi : gi + 1; break; }
+                if (map.Groups[gi].Desktops.Any(d => d.IsCurrent)) { currentRow = gi < split ? gi : gi + 1; break; }
         }
         currentRow = Math.Clamp(currentRow, 0, rows.Count - 1);
 

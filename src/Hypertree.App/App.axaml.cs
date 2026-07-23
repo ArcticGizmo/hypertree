@@ -256,7 +256,7 @@ public sealed class App : Application
             items.Insert(0, lastItem);
         }
 
-        OpenPalette("Jump to or create a desktop…", "↑↓ move · ↵ jump/create · Esc close · green = you are here", items,
+        OpenPalette("Jump to or create a desktop…", "↑↓ move · ↵ jump/create · Esc close · blue = you are here", items,
             query => new PaletteItem($"Create desktop “{query}”", "new · main", "+",
                 () => CreateAndGoToDesktop(query),
                 Preview: () => _model!.BuildMap()), // no target tile yet — show the current board
@@ -266,27 +266,33 @@ public sealed class App : Application
     // Build a board snapshot that marks a specific desktop as current (for the jump palette's preview),
     // without moving the model. Rebuilds the tiles from the live map with the target highlighted and
     // centred on its own row.
+    // Build a preview board for the jump palette. IsCurrent (blue) marks where you ARE now; IsHere
+    // (green) marks the selected target (which defaults to the last-visited desktop). The board is
+    // centred on your current position, so the green target shows the direction/distance of the jump.
+    // (onMain/topIndex/groupIndex/desktopIndex describe the target row.)
     private NavMap PreviewMap(bool onMain, int topIndex, int groupIndex, int desktopIndex)
     {
         NavMap b = _model!.BuildMap();
 
-        // Where the user actually is right now, so the preview can mark it distinctly from the target.
         bool hereMain = _model.OnTop;
         int hereTop = _model.CurrentTopIndex;
         (int hereGroup, int hereDesktop) = _model.CurrentGroupDesktop ?? (-1, -1);
 
         var top = b.TopRow.Select((t, i) => new NavMapTile(
-            t.Label, onMain && i == topIndex, hereMain && i == hereTop)).ToList();
+            t.Label,
+            hereMain && i == hereTop,      // IsCurrent (blue) = you are here
+            onMain && i == topIndex)).ToList(); // IsHere (green) = the target
         var groups = b.Groups.Select(g => new NavMapGroup(
             g.Index, g.Name,
             g.Desktops.Select((d, j) => new NavMapTile(
                 d.Label,
-                !onMain && g.Index == groupIndex && j == desktopIndex,
-                !hereMain && g.Index == hereGroup && j == hereDesktop)).ToList(),
-            !onMain && g.Index == groupIndex,
-            g.Index == groupIndex ? desktopIndex : g.Cursor)).ToList();
-        int topCursor = onMain ? topIndex : b.TopCursor;
-        return new NavMap(top, topCursor, onMain, groups, b.TopPosition);
+                !hereMain && g.Index == hereGroup && j == hereDesktop,   // blue = current
+                !onMain && g.Index == groupIndex && j == desktopIndex)).ToList(), // green = target
+            // Keep both the current group and the target group bright (un-rested).
+            (!hereMain && g.Index == hereGroup) || (!onMain && g.Index == groupIndex),
+            g.Index == hereGroup ? hereDesktop : g.Index == groupIndex ? desktopIndex : g.Cursor)).ToList();
+        int topCursor = hereMain ? hereTop : b.TopCursor;
+        return new NavMap(top, topCursor, hereMain, groups, b.TopPosition);
     }
 
     // Create a new ungrouped desktop named the query and jump straight to it.
