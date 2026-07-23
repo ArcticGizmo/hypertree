@@ -51,13 +51,18 @@ internal static class BoardView
         rows.Add(MainRow(map, s, tileW, scrH, capH, gap, lift, mainLabelH, onTopClick, onTopDelete));
         for (int gi = split; gi < map.Groups.Count; gi++) rows.Add(GroupRow(map.Groups[gi], s, tileW, scrH, capH, gap, scopePad, labelH, lift, onGroupClick, onGroupDelete));
 
-        // Which row is the user actually on? main when OnTop, else the current group (the one directly
-        // below main, i.e. the first group after the split).
-        int currentRow = map.OnTop ? mainRowIndex : mainRowIndex + 1;
-        currentRow = Math.Min(currentRow, rows.Count - 1);
+        // Which row is the user actually on? main when OnTop, else the current group — which may be
+        // above OR below main. A group above main maps to a row before mainRowIndex; one below maps to
+        // gi+1 (main occupies the slot at `split`). This row gets centred on screen.
+        int currentRow = mainRowIndex;
+        if (!map.OnTop)
+        {
+            for (int gi = 0; gi < map.Groups.Count; gi++)
+                if (map.Groups[gi].IsCurrentLevel) { currentRow = gi < split ? gi : gi + 1; break; }
+        }
+        currentRow = Math.Clamp(currentRow, 0, rows.Count - 1);
 
         // Stack rows top→bottom, then shift the whole column so the current row is centred on screen.
-        double stackH = rows.Sum(r => r.Height) + vgap * Math.Max(0, rows.Count - 1);
         var yTop = new double[rows.Count];
         double run = 0;
         for (int i = 0; i < rows.Count; i++) { yTop[i] = run; run += rows[i].Height + vgap; }
