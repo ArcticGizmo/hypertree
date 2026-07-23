@@ -162,22 +162,16 @@ internal sealed class MapWindow : Window
         };
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-        var add = new Button { Content = "+ New group", FontSize = 12 };
-        add.Click += (_, _) => NewGroupRequested?.Invoke();
-        buttons.Children.Add(add);
+        buttons.Children.Add(ActionButton("+ New group", () => NewGroupRequested?.Invoke()));
 
         // Delete the currently-selected desktop (also available per-tile via the × badge).
-        var deleteDesktop = new Button { Content = "Delete desktop", FontSize = 12 };
-        deleteDesktop.Click += (_, _) => DeleteCurrentRequested?.Invoke();
-        buttons.Children.Add(deleteDesktop);
+        buttons.Children.Add(ActionButton("Delete desktop", () => DeleteCurrentRequested?.Invoke()));
 
         // Remove targets the first group in the stack, if any.
         if (map.Groups.Count > 0)
         {
             int firstIndex = map.Groups[0].Index;
-            var remove = new Button { Content = $"Remove “{map.Groups[0].Name}”", FontSize = 12 };
-            remove.Click += (_, _) => RemoveGroupRequested?.Invoke(firstIndex);
-            buttons.Children.Add(remove);
+            buttons.Children.Add(ActionButton($"Remove “{map.Groups[0].Name}”", () => RemoveGroupRequested?.Invoke(firstIndex)));
         }
 
         var footer = new Border
@@ -189,6 +183,30 @@ internal sealed class MapWindow : Window
         };
 
         Content = new Grid { Children = { board, hint, footer } };
+    }
+
+    private static readonly Color BtnBg = Color.Parse("#2A3444"), BtnBgHover = Color.Parse("#37455B"), BtnBorder = Color.Parse("#3C4A5E");
+
+    // A clearly-visible action control for the footer. The default themed Button renders dark-on-dark
+    // against the dim backdrop, so — like the board — we draw our own with an explicit hover state.
+    private static Control ActionButton(string text, Action onClick)
+    {
+        var border = new Border
+        {
+            Background = new SolidColorBrush(BtnBg),
+            BorderBrush = new SolidColorBrush(BtnBorder), BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8), Padding = new Thickness(14, 8),
+            Cursor = new Cursor(StandardCursorType.Hand),
+            Child = new TextBlock
+            {
+                Text = text, FontSize = 12, Foreground = Fg,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+        border.PointerEntered += (_, _) => border.Background = new SolidColorBrush(BtnBgHover);
+        border.PointerExited += (_, _) => border.Background = new SolidColorBrush(BtnBg);
+        border.PointerPressed += (_, e) => { e.Handled = true; onClick(); };
+        return border;
     }
 
     // Fill the primary monitor (DIPs), matching the flash so both modes present identically.
