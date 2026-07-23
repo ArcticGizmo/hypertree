@@ -7,6 +7,7 @@ using Hypertree.App.Views;
 using Hypertree.Desktops;
 using Hypertree.Platform;
 using Hypertree.Scopes;
+using Hypertree.Settings;
 using Hypertree.Store;
 
 namespace Hypertree.App;
@@ -38,12 +39,16 @@ public sealed class App : Application
     private readonly HashSet<Guid> _created = new();
     private IDesktopController? _desktops;
     private IForegroundActivator? _activator;
+    private IStartupManager? _startup;
     private NavigationModel? _model;
     private HudWindow? _hud;
     private MapOverlay? _overlay;
     private TrayIcon? _tray;
     private ScopeDialog? _dialog;
     private PaletteWindow? _palette;
+    private SettingsWindow? _settingsWindow;
+    private ISettingsStore? _settingsStore;
+    private AppSettings _settings = new();
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -79,12 +84,17 @@ public sealed class App : Application
     {
         _desktops = PlatformServices.CreateDesktopController();
         _activator = PlatformServices.CreateForegroundActivator();
+        _startup = PlatformServices.CreateStartupManager();
         _model = new NavigationModel(_desktops, new FileStateStore());
         // Desktops restored from persisted groups were created by Hypertree — track them so the
         // teardown guard still only ever destroys our own desktops.
         foreach (DesktopId id in _model.GroupDesktopIds()) _created.Add(id.Value);
 
+        _settingsStore = new FileSettingsStore();
+        _settings = _settingsStore.Load();
+
         _hud = new HudWindow();
+        ApplyFlashSettings();
 
         _overlay = new MapOverlay(_desktops);
         _overlay.GoToTopRequested += i => { _model!.GoToTop(i); RefreshOverlay(); };
@@ -94,6 +104,7 @@ public sealed class App : Application
         _overlay.DeleteCurrentRequested += DeleteCurrentDesktop;
         _overlay.NewGroupRequested += PromptNewGroup;
         _overlay.RemoveGroupRequested += RemoveGroup;
+        _overlay.SettingsRequested += OpenSettings;
 
         RegisterHotkeys();
         BuildTray();
@@ -221,6 +232,7 @@ public sealed class App : Application
         Action stub(string name) => () => Console.Error.WriteLine($"Command “{name}” is not implemented yet.");
         return new List<Command>
         {
+            new("Settings", OpenSettings),
             new("New group…", PromptNewGroup),
             new("Delete current desktop", DeleteCurrentDesktop),
             new("Remove current group", RemoveCurrentGroup),
@@ -237,6 +249,31 @@ public sealed class App : Application
         if (index >= 0) RemoveGroup(index);
     }
 
+    // ── Settings (tray · map cog · command palette "settings") ──────────────────────
+
+    private void OpenSettings()
+    {
+        if (_activator is null || _startup is null) return;
+        if (_settingsWindow is not null) { _settingsWindow.Activate(); return; }
+
+        _settingsWindow = new SettingsWindow(_settings, _startup.IsEnabled, SaveSettings, _activator);
+        _settingsWindow.Topmost = true; // sit above the map/flash if one is showing
+        _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+        _settingsWindow.Show();
+        _settingsWindow.TakeFocus();
+    }
+
+    private void SaveSettings(AppSettings settings, bool startOnLogin)
+    {
+        _settings = settings;
+        _settingsStore?.Save(settings);
+        ApplyFlashSettings();
+        _startup?.SetEnabled(startOnLogin);
+    }
+
+    private void ApplyFlashSettings()
+        => _hud?.Configure(_settings.FlashHoldToKeep, _settings.FlashGraceMs, _settings.FlashTimeoutMs);
+
     private void RefreshOrFlash()
     {
         if (_model is null) return;
@@ -251,6 +288,8 @@ public sealed class App : Application
         map.Click += (_, _) => ToggleMap();
         var newGroup = new NativeMenuItem("New group…");
         newGroup.Click += (_, _) => PromptNewGroup();
+        var settings = new NativeMenuItem("Settings…");
+        settings.Click += (_, _) => OpenSettings();
         var exit = new NativeMenuItem("Exit");
         exit.Click += (_, _) => (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
 
@@ -259,7 +298,7 @@ public sealed class App : Application
             Icon = TrayIconFactory.Create(),
             ToolTipText = "Hypertree",
             IsVisible = true,
-            Menu = new NativeMenu { header, new NativeMenuItemSeparator(), map, newGroup, new NativeMenuItemSeparator(), exit },
+            Menu = new NativeMenu { header, new NativeMenuItemSeparator(), map, newGroup, settings, new NativeMenuItemSeparator(), exit },
         };
         TrayIcon.SetIcons(this, new TrayIcons { _tray });
     }
@@ -386,5 +425,6 @@ public sealed class App : Application
         _overlay?.Close();
         _hud?.Close();
         _palette?.Close();
+        _settingsWindow?.Close();
     }
 }

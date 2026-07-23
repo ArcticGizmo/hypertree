@@ -19,12 +19,16 @@ namespace Hypertree.App.Views;
 /// </summary>
 internal sealed class HudWindow : Window
 {
-    // Poll the modifier state (no focused window ⇒ no key-up events) and keep the flash up while
-    // Ctrl+Alt is held; once released, hide after a short grace so the final position lingers.
-    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(50);
-    private const int GraceTicks = 2; // ~100ms after release before hiding (snappy, with a little debounce)
+    // Poll the modifier state (no focused window ⇒ no key-up events). In hold-to-keep mode the flash
+    // stays up while Ctrl+Alt is held and hides a short grace after release; otherwise it hides after
+    // a fixed timeout. Both timings come from settings (see Configure).
+    private const int PollMs = 50;
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(PollMs);
     private readonly DispatcherTimer _poll;
-    private int _grace;
+    private bool _holdToKeep = true;
+    private int _graceTicks = 2;    // ~100ms after release before hiding
+    private int _timeoutTicks = 30; // ~1500ms fixed on-screen time
+    private int _remaining;
 
     public HudWindow()
     {
@@ -43,12 +47,20 @@ internal sealed class HudWindow : Window
         _poll.Tick += (_, _) => Poll();
     }
 
-    // While the nav modifiers are held, keep the flash up (and re-arm the grace). Once they're
-    // released, count the grace down and hide.
+    /// <summary>Apply flash timing from settings. Grace/timeout are in ms; converted to poll ticks.</summary>
+    public void Configure(bool holdToKeep, int graceMs, int timeoutMs)
+    {
+        _holdToKeep = holdToKeep;
+        _graceTicks = Math.Max(1, graceMs / PollMs);
+        _timeoutTicks = Math.Max(1, timeoutMs / PollMs);
+    }
+
+    // Hold-to-keep: re-arm the grace while Ctrl+Alt is held, then count down after release. Fixed
+    // mode: just count the timeout down regardless of the modifiers.
     private void Poll()
     {
-        if (ModifiersHeld()) { _grace = GraceTicks; return; }
-        if (--_grace <= 0) { _poll.Stop(); IsVisible = false; }
+        if (_holdToKeep && ModifiersHeld()) { _remaining = _graceTicks; return; }
+        if (--_remaining <= 0) { _poll.Stop(); IsVisible = false; }
     }
 
     protected override void OnOpened(EventArgs e)
@@ -66,7 +78,7 @@ internal sealed class HudWindow : Window
         Topmost = true;
         BringToTop();             // the desktop switch can briefly surface the target window over us
 
-        _grace = GraceTicks;
+        _remaining = _holdToKeep ? _graceTicks : _timeoutTicks;
         if (!_poll.IsEnabled) _poll.Start();
     }
 

@@ -35,6 +35,8 @@ internal sealed class MapOverlay
     public event Action? NewGroupRequested;
     public event Action<int>? RemoveGroupRequested;
     public event Action? DeleteCurrentRequested;
+    /// <summary>The cog icon — open settings.</summary>
+    public event Action? SettingsRequested;
 
     public MapOverlay(IDesktopController desktops) => _desktops = desktops;
 
@@ -51,6 +53,7 @@ internal sealed class MapOverlay
         _map.NewGroupRequested += () => NewGroupRequested?.Invoke();
         _map.RemoveGroupRequested += g => RemoveGroupRequested?.Invoke(g);
         _map.DeleteCurrentRequested += () => DeleteCurrentRequested?.Invoke();
+        _map.SettingsRequested += () => SettingsRequested?.Invoke();
         _map.Show();          // realize the handle so Screens is available, then size + fill it
         _map.Render(map);
 
@@ -148,6 +151,7 @@ internal sealed class MapWindow : Window
     public event Action? NewGroupRequested;
     public event Action<int>? RemoveGroupRequested;
     public event Action? DeleteCurrentRequested;
+    public event Action? SettingsRequested;
 
     private static readonly IBrush Fg = new SolidColorBrush(Color.Parse("#E8EDF5"));
     private static readonly IBrush FgDim = new SolidColorBrush(Color.Parse("#9AA6B8"));
@@ -188,6 +192,24 @@ internal sealed class MapWindow : Window
             Margin = new Thickness(0, 24, 0, 0),
         };
 
+        // Cog in the top-right corner — open settings.
+        var cog = new Border
+        {
+            Width = 34, Height = 34, CornerRadius = new CornerRadius(17),
+            Background = new SolidColorBrush(BtnBg), BorderBrush = new SolidColorBrush(BtnBorder),
+            BorderThickness = new Thickness(1), Cursor = new Cursor(StandardCursorType.Hand),
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 20, 24, 0),
+            Child = new TextBlock
+            {
+                Text = "⚙", FontSize = 17, Foreground = Fg,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+        cog.PointerEntered += (_, _) => cog.Background = new SolidColorBrush(BtnBgHover);
+        cog.PointerExited += (_, _) => cog.Background = new SolidColorBrush(BtnBg);
+        cog.PointerPressed += (_, e) => { e.Handled = true; SettingsRequested?.Invoke(); };
+
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         buttons.Children.Add(ActionButton("+ New group", () => NewGroupRequested?.Invoke()));
 
@@ -209,7 +231,7 @@ internal sealed class MapWindow : Window
             Margin = new Thickness(0, 0, 0, 28), Child = buttons,
         };
 
-        Content = new Grid { Children = { board, hint, footer } };
+        Content = new Grid { Children = { board, hint, footer, cog } };
     }
 
     private static readonly Color BtnBg = Color.Parse("#2A3444"), BtnBgHover = Color.Parse("#37455B"), BtnBorder = Color.Parse("#3C4A5E");
