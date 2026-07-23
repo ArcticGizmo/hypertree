@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -50,6 +51,12 @@ public sealed class App : Application
     private ISettingsStore? _settingsStore;
     private AppSettings _settings = new();
 
+    // "Last visited" = the desktop you came from, committed when a navigation completes (Ctrl+Alt
+    // released) or on a discrete jump. Surfaced first in the jump palette so you can hop back.
+    private DesktopId? _lastVisited;
+    private DesktopId? _gestureFrom; // where the in-progress keyboard gesture started
+    private DispatcherTimer? _gesturePoll;
+
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
     public override void OnFrameworkInitializationCompleted()
@@ -97,8 +104,8 @@ public sealed class App : Application
         ApplyFlashSettings();
 
         _overlay = new MapOverlay(_desktops);
-        _overlay.GoToTopRequested += i => { _model!.GoToTop(i); RefreshOverlay(); };
-        _overlay.GoToGroupRequested += (g, d) => { _model!.GoToGroupDesktop(g, d); RefreshOverlay(); };
+        _overlay.GoToTopRequested += i => Jump(() => _model!.GoToTop(i));
+        _overlay.GoToGroupRequested += (g, d) => Jump(() => _model!.GoToGroupDesktop(g, d));
         _overlay.DeleteTopRequested += DeleteTopDesktop;
         _overlay.DeleteGroupDesktopRequested += DeleteGroupDesktop;
         _overlay.DeleteCurrentRequested += DeleteCurrentDesktop;
@@ -139,11 +146,50 @@ public sealed class App : Application
     // desktop switch) and just refreshes; otherwise the transient flash shows.
     private void Navigate(NavAction action)
     {
-        if (_model is null) return;
+        if (_model is null || _desktops is null) return;
+        // Start of a gesture: remember where we came from, so releasing Ctrl+Alt can record it as
+        // "last visited". A poll watches for the release (works whether flashing or in the map).
+        _gestureFrom ??= _desktops.Current;
         _model.Apply(action);
         if (_overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap());
         else _hud?.Flash(_model.BuildMap());
+        StartGesturePoll();
     }
+
+    private void StartGesturePoll()
+    {
+        if (_gesturePoll is null)
+        {
+            _gesturePoll = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(80) };
+            _gesturePoll.Tick += (_, _) => { if (!CtrlAltHeld()) CompleteGesture(); };
+        }
+        if (!_gesturePoll.IsEnabled) _gesturePoll.Start();
+    }
+
+    // The gesture is over once Ctrl+Alt is released: if we actually moved, the desktop we started on
+    // becomes "last visited".
+    private void CompleteGesture()
+    {
+        _gesturePoll?.Stop();
+        if (_gestureFrom is { } from && _desktops is not null && _desktops.Current != from)
+            _lastVisited = from;
+        _gestureFrom = null;
+    }
+
+    // A discrete jump (palette / map click): record where we came from immediately.
+    private void Jump(Func<bool> doJump)
+    {
+        if (_desktops is null) return;
+        DesktopId from = _desktops.Current;
+        doJump();
+        if (_desktops.Current != from) _lastVisited = from;
+        RefreshOverlay();
+    }
+
+    private const int VK_CONTROL = 0x11, VK_MENU = 0x12;
+    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vKey);
+    private static bool CtrlAltHeld()
+        => (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
 
     private void ToggleMap()
     {
@@ -169,6 +215,12 @@ public sealed class App : Application
         _model.Reconcile(); // drop any desktops deleted out from under us before offering jumps
         NavMap map = _model.BuildMap();
         var items = new List<PaletteItem>();
+        int lastIndex = -1; // the last-visited row, to float to the top
+
+        // Is this desktop the last-visited one? Decorated with "(last)" + a ↩ icon and moved first.
+        bool IsLast(DesktopId? id) => _lastVisited is { } lv && id is { } tid && tid == lv;
+        string Detail(string ctx, bool last) => last ? $"{ctx} · (last)" : ctx;
+        string Icon(bool last) => last ? "↩" : "→";
 
         // Every main-timeline desktop, then every group's desktops (group name in the detail so
         // typing a group name filters to its desktops). Each carries a Preview board that highlights
@@ -176,9 +228,11 @@ public sealed class App : Application
         for (int i = 0; i < map.TopRow.Count; i++)
         {
             int idx = i;
-            items.Add(new PaletteItem(map.TopRow[i].Label, "main", "→",
-                () => { _model.GoToTop(idx); RefreshOverlay(); }, // no flash — the preview already showed it
+            bool last = IsLast(_model.PeekTopDesktop(i)?.id);
+            items.Add(new PaletteItem(map.TopRow[i].Label, Detail("main", last), Icon(last),
+                () => Jump(() => _model!.GoToTop(idx)), // no flash — the preview already showed it
                 Preview: () => PreviewMap(onMain: true, topIndex: idx, groupIndex: -1, desktopIndex: -1)));
+            if (last) lastIndex = items.Count - 1;
         }
         foreach (NavMapGroup g in map.Groups)
         {
@@ -186,10 +240,20 @@ public sealed class App : Application
             for (int j = 0; j < g.Desktops.Count; j++)
             {
                 int dj = j;
-                items.Add(new PaletteItem(g.Desktops[j].Label, g.Name, "→",
-                    () => { _model.GoToGroupDesktop(gi, dj); RefreshOverlay(); }, // no flash — see above
+                bool last = IsLast(_model.PeekGroupDesktop(gi, dj)?.id);
+                items.Add(new PaletteItem(g.Desktops[j].Label, Detail(g.Name, last), Icon(last),
+                    () => Jump(() => _model!.GoToGroupDesktop(gi, dj)),
                     Preview: () => PreviewMap(onMain: false, topIndex: -1, groupIndex: gi, desktopIndex: dj)));
+                if (last) lastIndex = items.Count - 1;
             }
+        }
+
+        // Float the last-visited desktop to the top so it's the default (empty-query) selection.
+        if (lastIndex >= 0)
+        {
+            PaletteItem lastItem = items[lastIndex];
+            items.RemoveAt(lastIndex);
+            items.Insert(0, lastItem);
         }
 
         OpenPalette("Jump to or create a desktop…", "↑↓ move · ↵ jump/create · Esc close · green = you are here", items,
@@ -229,11 +293,13 @@ public sealed class App : Application
     private void CreateAndGoToDesktop(string name)
     {
         if (_model is null || _desktops is null) return;
+        DesktopId from = _desktops.Current;
         DesktopId id = _desktops.Create(name);
         _created.Add(id.Value);
         _model.SyncTopRow();
         _desktops.SwitchTo(id);
         _model.Resync(); // land the model on the freshly-created desktop
+        if (_desktops.Current != from) _lastVisited = from;
         RefreshOverlay(); // no flash — the jump/create is decisive on its own
     }
 
@@ -453,6 +519,7 @@ public sealed class App : Application
 
     private void Teardown()
     {
+        _gesturePoll?.Stop();
         foreach (var hk in _hotkeys) hk.Dispose();
         _hotkeys.Clear();
         if (_tray is not null) _tray.IsVisible = false;
