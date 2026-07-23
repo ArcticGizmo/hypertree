@@ -5,9 +5,10 @@ using Xunit;
 namespace Hypertree.Tests;
 
 /// <summary>
-/// Exercises the carousel Model P against a fake controller: a top row of ungrouped desktops, groups
-/// you dive into from anywhere, wrapping rotation between groups, resume-last-used, surface-to-top,
-/// and click-to-navigate — before any hotkey/Win32 exists.
+/// Exercises the vertical "main-above-current" Model P (F2) against a fake controller: a main
+/// timeline of ungrouped desktops as the pivot, a fixed group stack that never reorders, the
+/// asymmetric Up/Down transitions (Up passes through main, Down goes straight to the next group),
+/// resume-last-used, edge clamps, and click-to-navigate — before any hotkey/Win32 exists.
 /// </summary>
 public class NavigationModelTests
 {
@@ -20,6 +21,7 @@ public class NavigationModelTests
 
     private static readonly (int, string)[] G1 = { (10, "a"), (11, "b"), (12, "c") };
     private static readonly (int, string)[] G2 = { (20, "x"), (21, "y") };
+    private static readonly (int, string)[] G3 = { (30, "p"), (31, "q") };
 
     private static (NavigationModel m, FakeDesktopController c) New(int current = 0)
     {
@@ -27,10 +29,18 @@ public class NavigationModelTests
         return (new NavigationModel(c), c);
     }
 
-    // ── Top row ──────────────────────────────────────────────────────────────────
+    // Build stack [A, B, C] (fixed listed order). AddGroup inserts at the front, so add C, B, A.
+    private static void ThreeGroups(NavigationModel m)
+    {
+        m.AddGroup(G("C", G3));
+        m.AddGroup(G("B", G2));
+        m.AddGroup(G("A", G1)); // stack now [A, B, C]
+    }
+
+    // ── Main timeline ─────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Starts_on_the_os_current_top_desktop()
+    public void Starts_on_the_os_current_main_desktop()
     {
         var (m, c) = New(current: 1);
         Assert.True(m.OnTop);
@@ -39,12 +49,12 @@ public class NavigationModelTests
     }
 
     [Fact]
-    public void MoveRight_and_left_walk_the_top_row_and_clamp()
+    public void MoveRight_and_left_walk_the_main_timeline_and_clamp()
     {
         var (m, c) = New(current: 0);
         Assert.True(m.Apply(NavAction.MoveRight));
         Assert.Equal(T1, c.Current);
-        Assert.True(m.Apply(NavAction.MoveLeft)); // move back to T0
+        Assert.True(m.Apply(NavAction.MoveLeft));
         Assert.Equal(T0, c.Current);
         Assert.False(m.Apply(NavAction.MoveLeft)); // clamp at left edge — no-op
     }
@@ -58,12 +68,21 @@ public class NavigationModelTests
         Assert.True(m.OnTop);
     }
 
-    // ── Dive / surface into a single group ──────────────────────────────────────
+    [Fact]
+    public void Surface_from_main_with_no_group_above_is_a_noop()
+    {
+        var (m, _) = New();
+        m.AddGroup(G("only", G1)); // currentGroup = 0, nothing above main
+        Assert.False(m.Apply(NavAction.Surface));
+        Assert.True(m.OnTop);
+    }
+
+    // ── Down / Up into a single group ───────────────────────────────────────────
 
     [Fact]
-    public void Dive_enters_the_active_group_from_any_top_desktop()
+    public void Down_from_main_enters_the_current_group_from_any_desktop()
     {
-        var (m, c) = New(current: 2); // on T2, not any "anchor"
+        var (m, c) = New(current: 2); // on T2
         m.AddGroup(G("feat", G1));
         Assert.True(m.Apply(NavAction.Dive));
         Assert.False(m.OnTop);
@@ -71,7 +90,7 @@ public class NavigationModelTests
     }
 
     [Fact]
-    public void Surface_returns_to_the_top_desktop_you_left()
+    public void Surface_returns_to_the_main_desktop_you_left()
     {
         var (m, c) = New(current: 2);
         m.AddGroup(G("feat", G1));
@@ -95,68 +114,86 @@ public class NavigationModelTests
         Assert.Equal(D(11), c.Current); // resumed at b, not a
     }
 
-    // ── Fixed ladder across multiple groups ─────────────────────────────────────
+    // ── The vertical model across a fixed [A, B, C] stack ────────────────────────
 
     [Fact]
-    public void New_group_is_inserted_at_the_top_of_the_stack()
+    public void New_group_becomes_the_dive_target_directly_below_main()
     {
         var (m, c) = New();
         m.AddGroup(G("one", G1));
-        m.AddGroup(G("two", G2)); // newest goes to the front (nearest)
-        m.Apply(NavAction.Dive);  // Down from top -> group 0 = "two"
+        m.AddGroup(G("two", G2)); // newest inserted at the front
+        Assert.True(m.Apply(NavAction.Dive)); // Down from main enters the group below main = "two"
         Assert.Equal(D(20), c.Current);
         Assert.Equal("two", m.BuildMap().Groups[0].Name);
     }
 
     [Fact]
-    public void Down_steps_deeper_through_the_fixed_stack_without_reordering()
+    public void Down_in_a_group_goes_straight_to_the_next_group_without_recrossing_main()
     {
         var (m, c) = New();
-        m.AddGroup(G("one", G1));
-        m.AddGroup(G("two", G2)); // stack: [two, one]
-        m.Apply(NavAction.Dive);  // -> two (level 1)
-        Assert.Equal(D(20), c.Current);
-        Assert.True(m.Apply(NavAction.Dive)); // -> one (level 2), stack unchanged
-        Assert.Equal(D(10), c.Current);
-        Assert.False(m.Apply(NavAction.Dive)); // at the bottom — no wrap
-        // Order never changed:
-        Assert.Equal(new[] { "two", "one" }, m.BuildMap().Groups.Select(g => g.Name));
+        ThreeGroups(m); // [A, B, C], currentGroup = 0 (A below main)
+        m.GoToGroupDesktop(1, 0); // sit in B (current-below-main = A/MAIN/B/C? no — GoTo sets currentGroup=1)
+        c.Switches.Clear();
+        Assert.True(m.Apply(NavAction.Dive)); // Down from B → C, straight (no main)
+        Assert.Equal(D(30), c.Current);       // C's first desktop
+        Assert.Equal((2, 0), m.CurrentGroupDesktop);
     }
 
     [Fact]
-    public void Up_steps_back_one_level_at_a_time()
+    public void Up_from_a_group_passes_through_main_before_the_previous_group()
     {
-        var (m, c) = New(current: 1);
-        m.AddGroup(G("one", G1));
-        m.AddGroup(G("two", G2)); // stack: [two, one]
-        m.Apply(NavAction.Dive);  // two
-        m.Apply(NavAction.Dive);  // one
-        Assert.True(m.Apply(NavAction.Surface)); // back up to two
-        Assert.Equal(D(20), c.Current);
-        Assert.True(m.Apply(NavAction.Surface)); // back to the top row
+        var (m, c) = New();
+        ThreeGroups(m);
+        m.GoToGroupDesktop(1, 0); // in B, currentGroup = 1
+        c.Switches.Clear();
+
+        Assert.True(m.Apply(NavAction.Surface)); // B → MAIN
         Assert.True(m.OnTop);
-        Assert.Equal(T1, c.Current);
+        Assert.True(m.Apply(NavAction.Surface)); // MAIN → A (previous group)
+        Assert.False(m.OnTop);
+        Assert.Equal(D(10), c.Current);          // A's resume desktop
+        Assert.Equal((0, 0), m.CurrentGroupDesktop);
     }
 
     [Fact]
-    public void PrepareForMapOpen_brings_the_last_used_group_to_the_top()
+    public void Down_at_the_last_group_clamps()
     {
         var (m, _) = New();
-        m.AddGroup(G("one", G1));
-        m.AddGroup(G("two", G2)); // stack: [two, one]
-        m.Apply(NavAction.Dive);  // two
-        m.Apply(NavAction.Dive);  // one  -> last-used group is "one"
-        m.Apply(NavAction.Surface);
-        m.Apply(NavAction.Surface); // back on top
+        ThreeGroups(m);
+        m.GoToGroupDesktop(2, 0); // in C (the last group)
+        Assert.False(m.Apply(NavAction.Dive)); // no wrap past the bottom
+        Assert.Equal((2, 0), m.CurrentGroupDesktop);
+    }
 
-        m.PrepareForMapOpen();
-        Assert.Equal("one", m.BuildMap().Groups[0].Name); // last-used floated to the top
+    [Fact]
+    public void Stack_never_reorders_as_you_navigate()
+    {
+        var (m, _) = New();
+        ThreeGroups(m);
+        m.Apply(NavAction.Dive);
+        m.Apply(NavAction.Dive);
+        m.Apply(NavAction.Surface);
+        Assert.Equal(new[] { "A", "B", "C" }, m.BuildMap().Groups.Select(g => g.Name));
+    }
+
+    [Fact]
+    public void TopPosition_tracks_the_current_group_so_main_sits_directly_above_it()
+    {
+        var (m, _) = New();
+        ThreeGroups(m); // currentGroup = 0
+        Assert.Equal(0, m.BuildMap().TopPosition); // MAIN / A / B / C
+
+        m.GoToGroupDesktop(1, 0);
+        Assert.Equal(1, m.BuildMap().TopPosition); // A / MAIN / B / C
+
+        m.GoToGroupDesktop(2, 0);
+        Assert.Equal(2, m.BuildMap().TopPosition); // A / B / MAIN / C
     }
 
     // ── Click-to-navigate ────────────────────────────────────────────────────────
 
     [Fact]
-    public void GoToTop_jumps_to_a_specific_top_desktop()
+    public void GoToTop_jumps_to_a_specific_main_desktop()
     {
         var (m, c) = New();
         m.AddGroup(G("feat", G1));
@@ -171,7 +208,7 @@ public class NavigationModelTests
     {
         var (m, c) = New();
         m.AddGroup(G("one", G1));
-        m.AddGroup(G("two", G2)); // stack: [two(0), one(1)]
+        m.AddGroup(G("two", G2)); // stack [two(0), one(1)]
         Assert.True(m.GoToGroupDesktop(1, 2)); // group "one", desktop c
         Assert.False(m.OnTop);
         Assert.Equal((1, 2), m.CurrentGroupDesktop);
@@ -191,6 +228,28 @@ public class NavigationModelTests
         Assert.Equal(0, m.GroupCount);
         Assert.True(m.OnTop);
         Assert.False(m.Apply(NavAction.Dive)); // nothing to dive into now
+    }
+
+    [Fact]
+    public void RemoveGroup_above_the_current_one_keeps_you_on_the_same_group()
+    {
+        var (m, _) = New();
+        ThreeGroups(m);
+        m.GoToGroupDesktop(2, 1); // in C, currentGroup = 2
+        m.RemoveGroup(0);         // drop A → stack [B, C], C now at index 1
+        Assert.False(m.OnTop);
+        Assert.Equal((1, 1), m.CurrentGroupDesktop); // still C, still on its resume desktop
+    }
+
+    [Fact]
+    public void RemoveGroup_you_are_inside_surfaces_to_main()
+    {
+        var (m, _) = New();
+        ThreeGroups(m);
+        m.GoToGroupDesktop(1, 0); // in B
+        m.RemoveGroup(1);         // remove B
+        Assert.True(m.OnTop);
+        Assert.Equal(new[] { "A", "C" }, m.BuildMap().Groups.Select(g => g.Name));
     }
 
     // ── Single-desktop deletion ──────────────────────────────────────────────────

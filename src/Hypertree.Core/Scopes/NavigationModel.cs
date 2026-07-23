@@ -4,14 +4,22 @@ using Hypertree.Store;
 namespace Hypertree.Scopes;
 
 /// <summary>
-/// Model P as pure state. The <b>top row</b> is every OS desktop not assigned to a group, in natural
-/// order (rebuilt from the controller). <b>Groups</b> hang below in a fixed vertical stack — they do
-/// NOT reorder as you navigate:
-///   • Down steps one level deeper (top → group 0 → group 1 → …); Up steps back toward the top.
-///   • Left/Right moves within the current row (top desktops, or the current group's desktops).
-///   • The stack is only reordered when the map (re)opens — the last-used group moves to the top
-///     (nearest), so you re-enter where you left off (<see cref="PrepareForMapOpen"/>).
-/// Holds no Win32/UI, so the whole feel is unit-testable against a fake controller.
+/// Model P as pure state, vertical model (F2 — "main above current"). The <b>main timeline</b>
+/// (<see cref="_topRow"/>) is every OS desktop not assigned to a group, in natural order; it is the
+/// pivot. <b>Groups</b> are a fixed vertical stack that never reorders — the current group sits
+/// directly <em>below</em> the main timeline, groups listed before it stack above main (in order),
+/// groups listed after it stack below the current group. So for groups [A,B,C] with current B, the
+/// vertical sequence is: A / MAIN / B / C.
+///
+/// Navigation:
+///   • <b>Up</b>: inside a group → the main timeline; on main → the previous group (currentGroup−1),
+///     entering it. No-op past the first group.
+///   • <b>Down</b>: on main → re-enter the current group; inside a group → the next group
+///     (currentGroup+1). No-op past the last group.
+///   • <b>Left/Right</b>: within the current row (main desktops, or the current group's desktops).
+/// The accepted asymmetry: Up from B passes through MAIN before reaching A, but Down from B goes
+/// straight to C (main is always directly above the current group, so it isn't re-crossed going down).
+/// Ends clamp (no wrap). Holds no Win32/UI, so the whole feel is unit-testable against a fake controller.
 /// </summary>
 public sealed class NavigationModel
 {
@@ -20,10 +28,10 @@ public sealed class NavigationModel
     private readonly List<Group> _groups = new();
 
     private List<DesktopRef> _topRow = new();
-    private int _level;         // 0 = top row; 1..n = _groups[_level - 1]
-    private int _topIndex;      // cursor within the top row
-    private int _lastGroup;     // index of the most-recently-used group (for reorder-on-open)
-    private DesktopId _target;  // desktop the model last switched to
+    private bool _onMain = true;    // true = on the main timeline; false = inside _groups[_currentGroup]
+    private int _currentGroup;      // the group directly below main (the Down/Up pivot). Always clamped valid.
+    private int _topIndex;          // cursor within the main timeline
+    private DesktopId _target;      // desktop the model last switched to
 
     public event Action? Changed;
 
@@ -41,47 +49,49 @@ public sealed class NavigationModel
 
     // ── Queries ──────────────────────────────────────────────────────────────────
 
-    public bool OnTop => _level == 0;
+    public bool OnTop => _onMain;
     public int GroupCount => _groups.Count;
     public int CurrentTopIndex => _topIndex;
 
-    /// <summary>The (group, desktop) currently selected, or null when on the top row.</summary>
+    /// <summary>The (group, desktop) currently selected, or null when on the main timeline.</summary>
     public (int group, int desktop)? CurrentGroupDesktop
-        => _level == 0 ? null : (_level - 1, _groups[_level - 1].LastUsedIndex);
+        => _onMain || _groups.Count == 0 ? null : (_currentGroup, _groups[_currentGroup].LastUsedIndex);
 
-    /// <summary>A top-row desktop id to use as a fallback when tearing a group's desktops down.</summary>
+    /// <summary>A main-timeline desktop id to use as a fallback when tearing a group's desktops down.</summary>
     public DesktopId FallbackDesktopId =>
         _topRow.Count > 0 ? _topRow[Math.Clamp(_topIndex, 0, _topRow.Count - 1)].Id : _desktops.Current;
 
     public IEnumerable<DesktopId> GroupDesktopIds() => _groups.SelectMany(g => g.Desktops).Select(d => d.Id);
 
     private DesktopRef CurrentDesktop()
-        => _level == 0
+        => _onMain || _groups.Count == 0
             ? _topRow[Math.Clamp(_topIndex, 0, Math.Max(0, _topRow.Count - 1))]
-            : _groups[_level - 1].Desktops[_groups[_level - 1].LastUsedIndex];
+            : _groups[_currentGroup].Desktops[_groups[_currentGroup].LastUsedIndex];
 
-    /// <summary>Render-ready snapshot: top row + groups in their fixed stack order (no rotation).</summary>
+    /// <summary>Render-ready snapshot: main timeline + groups in their fixed stack order, split around
+    /// main at <see cref="_currentGroup"/> (the groups before it render above main, the rest below).</summary>
     public NavMap BuildMap()
     {
         var top = new List<NavMapTile>(_topRow.Count);
         for (int i = 0; i < _topRow.Count; i++)
-            top.Add(new NavMapTile(_topRow[i].Label, _level == 0 && i == _topIndex));
+            top.Add(new NavMapTile(_topRow[i].Label, _onMain && i == _topIndex));
 
         var groups = new List<NavMapGroup>(_groups.Count);
         for (int gi = 0; gi < _groups.Count; gi++)
         {
             Group g = _groups[gi];
-            bool currentLevel = _level == gi + 1;
+            bool current = !_onMain && gi == _currentGroup;
             var tiles = new List<NavMapTile>(g.Desktops.Count);
             for (int j = 0; j < g.Desktops.Count; j++)
-                tiles.Add(new NavMapTile(g.Desktops[j].Label, currentLevel && j == g.LastUsedIndex));
-            groups.Add(new NavMapGroup(gi, g.Name, tiles, currentLevel, g.LastUsedIndex));
+                tiles.Add(new NavMapTile(g.Desktops[j].Label, current && j == g.LastUsedIndex));
+            groups.Add(new NavMapGroup(gi, g.Name, tiles, current, g.LastUsedIndex));
         }
 
-        return new NavMap(top, _topRow.Count == 0 ? 0 : _topIndex, _level == 0, groups);
+        int topPosition = _groups.Count == 0 ? 0 : Math.Clamp(_currentGroup, 0, _groups.Count);
+        return new NavMap(top, _topRow.Count == 0 ? 0 : _topIndex, _onMain, groups, topPosition);
     }
 
-    // ── Navigation (fixed ladder) ─────────────────────────────────────────────────
+    // ── Navigation (vertical "main above current") ─────────────────────────────────
 
     public bool Apply(NavAction action) => action switch
     {
@@ -94,7 +104,7 @@ public sealed class NavigationModel
 
     private bool Move(int delta)
     {
-        if (_level == 0)
+        if (_onMain || _groups.Count == 0)
         {
             if (_topRow.Count == 0) return false;
             int next = Math.Clamp(_topIndex + delta, 0, _topRow.Count - 1);
@@ -103,7 +113,7 @@ public sealed class NavigationModel
         }
         else
         {
-            Group g = _groups[_level - 1];
+            Group g = _groups[_currentGroup];
             int next = Math.Clamp(g.LastUsedIndex + delta, 0, g.Desktops.Count - 1);
             if (next == g.LastUsedIndex) return false;
             g.LastUsedIndex = next;
@@ -111,26 +121,43 @@ public sealed class NavigationModel
         return Commit();
     }
 
+    // Down: on main → re-enter the current group; in a group → advance to the next group (no main re-cross).
     private bool Down()
     {
-        if (_level >= _groups.Count) return false; // at the bottom of the stack — no wrap
-        _level++;
-        _lastGroup = _level - 1;
+        if (_groups.Count == 0) return false;
+        if (_onMain)
+        {
+            _onMain = false;                       // re-enter the group directly below main
+        }
+        else
+        {
+            if (_currentGroup + 1 >= _groups.Count) return false; // at the bottom — no wrap
+            _currentGroup++;
+        }
         return Commit();
     }
 
+    // Up: in a group → surface to main; on main → step into the group above main (currentGroup−1).
     private bool Up()
     {
-        if (_level == 0) return false;
-        _level--;
+        if (!_onMain)
+        {
+            _onMain = true;                        // surface to the main timeline
+        }
+        else
+        {
+            if (_currentGroup <= 0 || _groups.Count == 0) return false; // no group above main — no-op
+            _currentGroup--;
+            _onMain = false;                       // enter it
+        }
         return Commit();
     }
 
-    /// <summary>Click-to-navigate: jump to a specific top-row desktop.</summary>
+    /// <summary>Click-to-navigate: jump to a specific main-timeline desktop.</summary>
     public bool GoToTop(int index)
     {
         if (index < 0 || index >= _topRow.Count) return false;
-        _level = 0;
+        _onMain = true;
         _topIndex = index;
         return Commit();
     }
@@ -141,8 +168,8 @@ public sealed class NavigationModel
         if (groupIndex < 0 || groupIndex >= _groups.Count) return false;
         Group g = _groups[groupIndex];
         if (desktopIndex < 0 || desktopIndex >= g.Desktops.Count) return false;
-        _level = groupIndex + 1;
-        _lastGroup = groupIndex;
+        _onMain = false;
+        _currentGroup = groupIndex;
         g.LastUsedIndex = desktopIndex;
         return Commit();
     }
@@ -158,23 +185,6 @@ public sealed class NavigationModel
         return true;
     }
 
-    // ── Map open: put the last-used group on top (nearest), without disturbing position ──
-    public void PrepareForMapOpen()
-    {
-        if (_groups.Count <= 1) return;
-        int sel = Math.Clamp(_lastGroup, 0, _groups.Count - 1);
-        if (sel == 0) return;
-
-        Group? current = _level >= 1 ? _groups[_level - 1] : null;
-        Group g = _groups[sel];
-        _groups.RemoveAt(sel);
-        _groups.Insert(0, g);
-        _lastGroup = 0;
-        if (current is not null) _level = _groups.IndexOf(current) + 1; // keep pointing at the same group
-        Save();
-        Changed?.Invoke();
-    }
-
     // ── Group management ─────────────────────────────────────────────────────────
 
     public void SyncTopRow()
@@ -185,17 +195,18 @@ public sealed class NavigationModel
             .Select(d => new DesktopRef(d.Id, string.IsNullOrEmpty(d.Name) ? $"Desktop {d.Index + 1}" : d.Name))
             .ToList();
 
-        _level = Math.Clamp(_level, 0, _groups.Count);
         _topIndex = _topRow.Count == 0 ? 0 : Math.Clamp(_topIndex, 0, _topRow.Count - 1);
-        _lastGroup = _groups.Count == 0 ? 0 : Math.Clamp(_lastGroup, 0, _groups.Count - 1);
+        ClampCurrentGroup();
     }
 
-    /// <summary>Add a group at the top of the stack (nearest) and mark it last-used. Keeps position.</summary>
+    /// <summary>Add a group at the top of the stack and make it the pivot below main. Diving from main
+    /// enters it. Keeps the OS position: if inside another group, shift the pivot to stay on it.</summary>
     public void AddGroup(Group group)
     {
         _groups.Insert(0, group);
-        if (_level >= 1) _level++;   // existing selection shifts down one
-        _lastGroup = 0;
+        if (_onMain) _currentGroup = 0;   // the new group becomes the dive target directly below main
+        else _currentGroup++;             // existing selection shifted down one — keep pointing at it
+        ClampCurrentGroup();
         SyncTopRow();
         Save();
         Changed?.Invoke();
@@ -207,7 +218,7 @@ public sealed class NavigationModel
         if (index < 0 || index >= _groups.Count) return null;
         Group removed = _groups[index];
         _groups.RemoveAt(index);
-        AdjustLevelForRemoval(index);
+        AdjustForRemoval(index);
         SyncTopRow();
         Save();
         Changed?.Invoke();
@@ -245,7 +256,7 @@ public sealed class NavigationModel
         if (g.Count == 1)
         {
             _groups.RemoveAt(groupIndex);
-            AdjustLevelForRemoval(groupIndex);
+            AdjustForRemoval(groupIndex);
         }
         else
         {
@@ -254,12 +265,25 @@ public sealed class NavigationModel
         return id;
     }
 
-    private void AdjustLevelForRemoval(int removedGroupIndex)
+    // Keep _onMain/_currentGroup coherent after a group at removedIndex disappears.
+    private void AdjustForRemoval(int removedIndex)
     {
-        if (_level - 1 == removedGroupIndex) _level = 0;        // we were in it → back to top
-        else if (_level - 1 > removedGroupIndex) _level--;      // shift up
-        _level = Math.Clamp(_level, 0, _groups.Count);
-        _lastGroup = _groups.Count == 0 ? 0 : Math.Clamp(_lastGroup, 0, _groups.Count - 1);
+        if (!_onMain)
+        {
+            if (_currentGroup == removedIndex) _onMain = true;   // we were in it → surface to main
+            else if (_currentGroup > removedIndex) _currentGroup--;
+        }
+        else if (_currentGroup > removedIndex)
+        {
+            _currentGroup--;                                     // keep the pivot on the same group
+        }
+        ClampCurrentGroup();
+    }
+
+    private void ClampCurrentGroup()
+    {
+        if (_groups.Count == 0) { _currentGroup = 0; _onMain = true; }
+        else _currentGroup = Math.Clamp(_currentGroup, 0, _groups.Count - 1);
     }
 
     /// <summary>Re-anchor to whatever desktop the OS is now showing (after a create/destroy).</summary>
@@ -269,16 +293,17 @@ public sealed class NavigationModel
         DesktopId cur = _desktops.Current;
 
         int ti = _topRow.FindIndex(d => d.Id == cur);
-        if (ti >= 0) { _level = 0; _topIndex = ti; }
+        if (ti >= 0) { _onMain = true; _topIndex = ti; }
         else
         {
             for (int gi = 0; gi < _groups.Count; gi++)
             {
                 int di = -1;
                 for (int j = 0; j < _groups[gi].Desktops.Count; j++) if (_groups[gi].Desktops[j].Id == cur) di = j;
-                if (di >= 0) { _level = gi + 1; _lastGroup = gi; _groups[gi].LastUsedIndex = di; break; }
+                if (di >= 0) { _onMain = false; _currentGroup = gi; _groups[gi].LastUsedIndex = di; break; }
             }
         }
+        ClampCurrentGroup();
 
         _target = CurrentDesktop().Id;
         Save();
@@ -300,14 +325,14 @@ public sealed class NavigationModel
                 .ToList();
             if (desks.Count > 0) _groups.Add(new Group(pg.Name, desks, pg.LastUsedIndex));
         }
-        _lastGroup = _groups.Count == 0 ? 0 : Math.Clamp(state.ActiveGroup, 0, _groups.Count - 1);
+        _currentGroup = _groups.Count == 0 ? 0 : Math.Clamp(state.ActiveGroup, 0, _groups.Count - 1);
     }
 
     private void Save()
     {
         _store?.Save(new PersistedState
         {
-            ActiveGroup = _lastGroup,
+            ActiveGroup = _currentGroup,
             Groups = _groups.Select(g => new PersistedGroup
             {
                 Name = g.Name,

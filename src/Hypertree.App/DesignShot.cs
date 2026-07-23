@@ -31,12 +31,13 @@ internal static class DesignShot
         }, live, cur);
         NavMapGroup Hotfix() => new(1, "hotfix", new List<NavMapTile> { new("db", false), new("api", false) }, false, 0);
 
-        // On the top row: Web (cursor 2) current, groups resting beneath, each centred on its cursor.
-        Save(new NavMap(Top(2), 2, true, new List<NavMapGroup> { Feat(false, 1), Hotfix() }),
+        // On the main timeline: Web (cursor 2) current; both groups render below main (TopPosition 0).
+        Save(new NavMap(Top(2), 2, true, new List<NavMapGroup> { Feat(false, 1), Hotfix() }, 0),
              Path.Combine(outDir, "board-top-row.png"));
 
-        // Dived into the active group (FEAT-123, on API=cursor 1); hotfix rests below on its cursor.
-        Save(new NavMap(Top(-1), 2, false, new List<NavMapGroup> { Feat(true, 1), Hotfix() }),
+        // Inside the current group (FEAT-123, on API=cursor 1), which sits directly below main
+        // (TopPosition 0); hotfix rests below it on its cursor.
+        Save(new NavMap(Top(-1), 2, false, new List<NavMapGroup> { Feat(true, 1), Hotfix() }, 0),
              Path.Combine(outDir, "board-dived.png"));
     }
 

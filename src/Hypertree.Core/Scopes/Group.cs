@@ -8,9 +8,9 @@ namespace Hypertree.Scopes;
 public sealed record DesktopRef(DesktopId Id, string Label);
 
 /// <summary>
-/// A group (one worktree's stream of desktops) — a horizontal timeline that hangs below the
-/// day-to-day top row. Groups form a wrapping carousel: the active group is drawn nearest the top
-/// row and is the one <c>Down</c> dives into; the others stack below it and rotate. Diving into a
+/// A group (one worktree's stream of desktops) — a horizontal timeline in the fixed vertical stack
+/// (F2). Groups keep their listed order and never reorder; the current group sits directly below the
+/// main timeline, and the stack splits around main (see <see cref="NavigationModel"/>). Entering a
 /// group resumes its <see cref="LastUsedIndex"/> rather than restarting at the first desktop.
 /// </summary>
 public sealed class Group

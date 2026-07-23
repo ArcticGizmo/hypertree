@@ -125,8 +125,7 @@ public sealed class App : Application
         if (_model is null || _overlay is null) return;
         if (_overlay.IsOpen) { _overlay.Close(); return; }
 
-        _model.PrepareForMapOpen(); // bring the last-used group to the top of the stack
-        _overlay.Open(_model.BuildMap());
+        _overlay.Open(_model.BuildMap()); // vertical model renders the stack around main — no reorder
     }
 
     private void RefreshOverlay()

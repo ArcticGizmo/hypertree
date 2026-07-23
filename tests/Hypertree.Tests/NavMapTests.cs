@@ -16,7 +16,7 @@ public class NavMapTests
     private static NavigationModel New(int current = 0) => new(new FakeDesktopController(TopIds, current));
 
     [Fact]
-    public void Top_row_lists_all_ungrouped_desktops_with_current_marked()
+    public void Main_timeline_lists_all_ungrouped_desktops_with_current_marked()
     {
         var m = New(current: 1);
         NavMap map = m.BuildMap();
@@ -24,6 +24,7 @@ public class NavMapTests
         Assert.Equal(3, map.TopRow.Count);
         Assert.Equal(new[] { false, true, false }, map.TopRow.Select(t => t.IsCurrent));
         Assert.Empty(map.Groups);
+        Assert.Equal(0, map.TopPosition);
     }
 
     [Fact]
@@ -53,7 +54,7 @@ public class NavMapTests
     }
 
     [Fact]
-    public void Dived_marks_the_active_group_and_its_current_desktop()
+    public void Inside_a_group_marks_it_current_with_its_current_desktop()
     {
         var m = New();
         m.AddGroup(G("one", (10, "a"), (11, "b")));
@@ -64,6 +65,18 @@ public class NavMapTests
         Assert.False(map.OnTop);
         Assert.True(map.Groups[0].IsCurrentLevel);
         Assert.Equal(new[] { false, true }, map.Groups[0].Desktops.Select(d => d.IsCurrent));
-        Assert.All(map.TopRow, t => Assert.False(t.IsCurrent)); // nothing on the top row is current
+        Assert.All(map.TopRow, t => Assert.False(t.IsCurrent)); // nothing on the main timeline is current
+    }
+
+    [Fact]
+    public void TopPosition_splits_the_stack_around_the_main_timeline()
+    {
+        var m = New();
+        m.AddGroup(G("one", (10, "a")));
+        m.AddGroup(G("two", (20, "x"))); // stack [two, one]
+        m.GoToGroupDesktop(1, 0);        // enter "one" (index 1) → main sits directly above it
+
+        NavMap map = m.BuildMap();
+        Assert.Equal(1, map.TopPosition); // two / MAIN / one
     }
 }
