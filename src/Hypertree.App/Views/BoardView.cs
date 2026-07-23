@@ -9,12 +9,14 @@ using Hypertree.Scopes;
 namespace Hypertree.App.Views;
 
 /// <summary>
-/// Renders the Model-P board in the docs/design/p-vs-q.html style: a top row of desktop "tiles" (a
-/// screen with mini-window bars + a caption) for the ungrouped desktops, and the groups as amber
-/// boxes stacked beneath in carousel order (active/nearest first). The current desktop is outlined
-/// and the board is translated so it stays centred as you navigate. Non-current groups are dimmed
-/// ("resting"). Tiles can be made clickable (overlay) to jump straight to a desktop.
-/// Shared by the flash (<see cref="HudWindow"/>) and the interactive overlay (<see cref="MapOverlay"/>).
+/// Renders the Model-P board in the docs/design/p-vs-q.html style, laid out as the F2 vertical model:
+/// the <b>main timeline</b> (a row of desktop "tiles") is the pivot, with the fixed group stack split
+/// around it — the groups before <see cref="NavMap.TopPosition"/> stack above main, the rest below,
+/// the current group sitting directly beneath main. The board fills the whole screen (F3, no bounding
+/// box): every row is centred horizontally on its own cursor, and the sequence scrolls vertically so
+/// the current row sits on the screen's centre line. Rows wider than the screen extend under the edges
+/// and are clipped by the canvas. Tiles can be made clickable (interactive map) to jump to a desktop.
+/// Shared by the transient flash and the interactive map (<see cref="MapOverlay"/>).
 /// </summary>
 internal static class BoardView
 {
@@ -24,97 +26,119 @@ internal static class BoardView
     private static readonly Color Focus = Color.Parse("#6EA8FF");
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
 
-    public static Control Render(NavMap map, double s = 1.0, int maxGroups = int.MaxValue,
+    /// <summary>
+    /// Lay the board out to fill a <paramref name="screenW"/>×<paramref name="screenH"/> surface,
+    /// centred on the current row (vertically) and each row's cursor (horizontally).
+    /// </summary>
+    public static Control Render(NavMap map, double screenW, double screenH, double s = 1.0,
                                  Action<int>? onTopClick = null, Action<int, int>? onGroupClick = null,
                                  Action<int>? onTopDelete = null, Action<int, int>? onGroupDelete = null)
     {
-        double tileW = 96 * s, screenH = 50 * s, capH = 22 * s, gap = 14 * s, conn = 22 * s;
-        double tileH = screenH + capH, lift = 6 * s, top = 14 * s, pad = 22 * s;
-        double scopePad = 10 * s, labelH = 20 * s, groupGap = 12 * s;
+        double tileW = 96 * s, scrH = 50 * s, capH = 22 * s, gap = 14 * s;
+        double tileH = scrH + capH, lift = 6 * s, scopePad = 10 * s, labelH = 20 * s;
+        double vgap = 26 * s;                 // vertical gap between rows (holds the connector spine)
+        double mainLabelH = 18 * s;
 
-        double viewportW = (tileW + gap) * 6 + pad * 2;
-        double cx = viewportW / 2;
-        double rowY = top + lift;
+        double cx = screenW / 2, cy = screenH / 2;
 
-        // ── Every row is centred on its own cursor (the position you'd return to), so the "current"
-        //    tile of each row lines up on the centre column and moving between rows never slides
-        //    the layout sideways. ──
-        double topOffset = cx - (map.TopCursor * (tileW + gap) + tileW / 2);
+        var canvas = new Canvas { Width = screenW, Height = screenH, ClipToBounds = true, Background = Brushes.Transparent };
 
-        var canvas = new Canvas { Width = viewportW, ClipToBounds = true };
-        double bottom = rowY + tileH;
+        // ── The vertical sequence of rows: groups above main, main, then groups below. ──
+        int split = Math.Clamp(map.TopPosition, 0, map.Groups.Count);
+        var rows = new List<Row>();
+        for (int gi = 0; gi < split; gi++) rows.Add(GroupRow(map.Groups[gi], s, tileW, scrH, capH, gap, scopePad, labelH, lift, onGroupClick, onGroupDelete));
+        int mainRowIndex = rows.Count;
+        rows.Add(MainRow(map, s, tileW, scrH, capH, gap, lift, mainLabelH, onTopClick, onTopDelete));
+        for (int gi = split; gi < map.Groups.Count; gi++) rows.Add(GroupRow(map.Groups[gi], s, tileW, scrH, capH, gap, scopePad, labelH, lift, onGroupClick, onGroupDelete));
 
-        int shown = Math.Min(map.Groups.Count, maxGroups);
-        double firstBoxY = rowY + tileH + conn;
+        // Which row is the user actually on? main when OnTop, else the current group (the one directly
+        // below main, i.e. the first group after the split).
+        int currentRow = map.OnTop ? mainRowIndex : mainRowIndex + 1;
+        currentRow = Math.Min(currentRow, rows.Count - 1);
 
-        // When the view is capped (the compact flash), show a window of the stack that includes the
-        // group you're actually in — not just the topmost one.
-        int startIdx = 0;
-        if (shown < map.Groups.Count)
+        // Stack rows top→bottom, then shift the whole column so the current row is centred on screen.
+        double stackH = rows.Sum(r => r.Height) + vgap * Math.Max(0, rows.Count - 1);
+        var yTop = new double[rows.Count];
+        double run = 0;
+        for (int i = 0; i < rows.Count; i++) { yTop[i] = run; run += rows[i].Height + vgap; }
+        double curCentre = yTop[currentRow] + rows[currentRow].Height / 2;
+        double offset = cy - curCentre;
+
+        // Connector spine: a thin vertical line through cx joining consecutive rows (their cursors all
+        // line up on cx), so the stack reads as one timeline.
+        for (int i = 0; i + 1 < rows.Count; i++)
         {
-            int cur = 0;
-            for (int i = 0; i < map.Groups.Count; i++) if (map.Groups[i].IsCurrentLevel) cur = i;
-            startIdx = Math.Min(cur, map.Groups.Count - shown);
-        }
-
-        // Connector line down to the nearest group box (both centred → vertical at cx).
-        if (shown > 0)
-        {
-            var line = new Rectangle { Width = Math.Max(2, 2 * s), Height = conn, Fill = new SolidColorBrush(StrBorder) };
+            double from = yTop[i] + offset + rows[i].Height;
+            double to = yTop[i + 1] + offset;
+            if (to <= from) continue;
+            var line = new Rectangle { Width = Math.Max(2, 2 * s), Height = to - from, Fill = new SolidColorBrush(StrBorder), Opacity = 0.7 };
             Canvas.SetLeft(line, cx - 1);
-            Canvas.SetTop(line, rowY + tileH);
+            Canvas.SetTop(line, from);
             canvas.Children.Add(line);
         }
 
-        for (int d = 0; d < shown; d++)
-        {
-            NavMapGroup g = map.Groups[startIdx + d];
-            int groupIndex = g.Index;
+        for (int i = 0; i < rows.Count; i++)
+            rows[i].Place(canvas, cx, yTop[i] + offset);
 
-            // Centre each group on its own cursor (resume point), so returning to any group lands
-            // its remembered desktop on the centre column — aligned under the top-row cursor.
-            double boxX = cx - (scopePad + g.Cursor * (tileW + gap) + tileW / 2);
-            double boxY = firstBoxY + d * ( labelH + 6 * s + tileH + scopePad * 2 + groupGap );
-
-            Action<int>? clickForThisGroup = onGroupClick is null ? null : j => onGroupClick(groupIndex, j);
-            Action<int>? deleteForThisGroup = onGroupDelete is null ? null : j => onGroupDelete(groupIndex, j);
-            Control box = BuildGroupBox(g, s, tileW, screenH, capH, gap, scopePad, clickForThisGroup, deleteForThisGroup);
-            box.Opacity = g.IsCurrentLevel ? 1.0 : Math.Max(0.22, (map.OnTop ? 0.55 : 0.4) - d * 0.12);
-            Canvas.SetLeft(box, boxX);
-            Canvas.SetTop(box, boxY);
-            canvas.Children.Add(box);
-
-            bottom = boxY + labelH + 6 * s + tileH + scopePad * 2;
-        }
-
-        if (map.Groups.Count > shown)
-        {
-            var more = new TextBlock
-            {
-                Text = $"+{map.Groups.Count - shown} more", FontFamily = Mono, FontSize = 10 * s,
-                Foreground = new SolidColorBrush(InkFaint),
-            };
-            Canvas.SetLeft(more, cx - 30 * s);
-            Canvas.SetTop(more, bottom + 4 * s);
-            canvas.Children.Add(more);
-            bottom += 16 * s;
-        }
-
-        // ── Top-row tiles (drawn last so they sit above the connector). ──
-        for (int i = 0; i < map.TopRow.Count; i++)
-        {
-            bool focused = map.OnTop && map.TopRow[i].IsCurrent;
-            int idx = i;
-            Control tile = Tile(map.TopRow[i].Label, isStream: false, focused, s, tileW, screenH, capH,
-                                onTopClick is null ? null : () => onTopClick(idx),
-                                onTopDelete is null ? null : () => onTopDelete(idx));
-            Canvas.SetLeft(tile, i * (tileW + gap) + topOffset);
-            Canvas.SetTop(tile, rowY);
-            canvas.Children.Add(tile);
-        }
-
-        canvas.Height = bottom + pad;
         return canvas;
+    }
+
+    // A laid-out row: knows its own height and how to place its content on the board canvas, centred
+    // horizontally on cx (its cursor tile lands on the centre column).
+    private sealed record Row(double Height, Action<Canvas, double, double> Place);
+
+    private static Row MainRow(NavMap map, double s, double tileW, double scrH, double capH, double gap,
+                               double lift, double labelH, Action<int>? onClick, Action<int>? onDelete)
+    {
+        double tileH = scrH + capH;
+        double height = labelH + lift + tileH;
+        return new Row(height, (canvas, cx, y) =>
+        {
+            var label = new TextBlock
+            {
+                Text = "▸ main", FontFamily = Mono, FontSize = 11 * s, FontWeight = FontWeight.Bold,
+                Foreground = new SolidColorBrush(map.OnTop ? Focus : InkFaint),
+            };
+            Canvas.SetLeft(label, cx - 24 * s);
+            Canvas.SetTop(label, y);
+            canvas.Children.Add(label);
+
+            double rowY = y + labelH + lift;
+            double originX = cx - (map.TopCursor * (tileW + gap) + tileW / 2); // centre the cursor tile on cx
+            for (int i = 0; i < map.TopRow.Count; i++)
+            {
+                int idx = i;
+                Control tile = Tile(map.TopRow[i].Label, isStream: false, map.OnTop && map.TopRow[i].IsCurrent, s,
+                                    tileW, scrH, capH,
+                                    onClick is null ? null : () => onClick(idx),
+                                    onDelete is null ? null : () => onDelete(idx));
+                Canvas.SetLeft(tile, originX + i * (tileW + gap));
+                Canvas.SetTop(tile, rowY);
+                canvas.Children.Add(tile);
+            }
+        });
+    }
+
+    private static Row GroupRow(NavMapGroup g, double s, double tileW, double scrH, double capH, double gap,
+                                double scopePad, double labelH, double lift,
+                                Action<int, int>? onClick, Action<int, int>? onDelete)
+    {
+        int groupIndex = g.Index;
+        Action<int>? clickForThisGroup = onClick is null ? null : j => onClick(groupIndex, j);
+        Action<int>? deleteForThisGroup = onDelete is null ? null : j => onDelete(groupIndex, j);
+        Control box = BuildGroupBox(g, s, tileW, scrH, capH, gap, scopePad, clickForThisGroup, deleteForThisGroup);
+        box.Opacity = g.IsCurrentLevel ? 1.0 : 0.45;
+        box.Measure(Size.Infinity);
+        double height = box.DesiredSize.Height + lift; // lift = headroom for the focused-tile pop
+
+        return new Row(height, (canvas, cx, y) =>
+        {
+            // Centre the box on its own cursor: box origin + internal pad + cursor tile centre == cx.
+            double boxX = cx - (scopePad + g.Cursor * (tileW + gap) + tileW / 2);
+            Canvas.SetLeft(box, boxX);
+            Canvas.SetTop(box, y + lift);
+            canvas.Children.Add(box);
+        });
     }
 
     private static Control BuildGroupBox(NavMapGroup g, double s, double tileW, double screenH, double capH,

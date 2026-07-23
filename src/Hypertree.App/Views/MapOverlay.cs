@@ -50,11 +50,14 @@ internal sealed class MapOverlay
         _map.NewGroupRequested += () => NewGroupRequested?.Invoke();
         _map.RemoveGroupRequested += g => RemoveGroupRequested?.Invoke(g);
         _map.DeleteCurrentRequested += () => DeleteCurrentRequested?.Invoke();
+        _map.Show();          // realize the handle so Screens is available, then size + fill it
         _map.Render(map);
-        _map.Show();
 
+        // Dim every OTHER monitor; the map window itself covers the primary and carries its own dim,
+        // so the primary isn't double-dimmed.
         foreach (Screen s in _map.Screens.All)
         {
+            if (_map.Screens.Primary is { } p && s.Bounds == p.Bounds) continue;
             Window dim = MakeDim(s);
             dim.Show();
             _dims.Add(dim);
@@ -105,7 +108,9 @@ internal sealed class MapOverlay
     }
 }
 
-/// <summary>The primary-monitor card: the board (clickable) plus a footer to add/remove groups.</summary>
+/// <summary>The interactive map: a full-screen, box-less surface on the primary monitor (F1/F3). Dim
+/// backdrop, the centred board drawn directly on it (clickable tiles), a hint at the top and the
+/// add/remove/delete actions reflowed to the bottom of the screen — no framing card.</summary>
 internal sealed class MapWindow : Window
 {
     public event Action? CloseRequested;
@@ -117,30 +122,20 @@ internal sealed class MapWindow : Window
     public event Action<int>? RemoveGroupRequested;
     public event Action? DeleteCurrentRequested;
 
-    private readonly Border _card;
     private static readonly IBrush Fg = new SolidColorBrush(Color.Parse("#E8EDF5"));
-    private static readonly IBrush FgDim = new SolidColorBrush(Color.Parse("#69748A"));
+    private static readonly IBrush FgDim = new SolidColorBrush(Color.Parse("#9AA6B8"));
 
     public MapWindow()
     {
         Title = "Hypertree";
         WindowDecorations = WindowDecorations.None;
-        WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        SizeToContent = SizeToContent.WidthAndHeight;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        SizeToContent = SizeToContent.Manual;
         CanResize = false;
         Topmost = true;
-        Background = Brushes.Transparent;
+        ShowInTaskbar = false;
+        Background = new SolidColorBrush(Color.FromArgb(0x9E, 0x0E, 0x0E, 0x12)); // the dim backdrop
         TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
-
-        _card = new Border
-        {
-            Background = new SolidColorBrush(Color.FromArgb(0xF2, 0x14, 0x19, 0x22)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(16),
-            Padding = new Thickness(22, 18),
-        };
-        Content = _card;
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -151,46 +146,58 @@ internal sealed class MapWindow : Window
 
     public void Render(NavMap map)
     {
-        var header = new DockPanel { LastChildFill = false };
-        header.Children.Add(new TextBlock
-        {
-            Text = "Streams", FontSize = 17, FontWeight = FontWeight.Bold, Foreground = Fg,
-            [DockPanel.DockProperty] = Dock.Left,
-        });
-        header.Children.Add(new TextBlock
-        {
-            Text = "click a desktop to jump · Esc to close", FontSize = 12, Foreground = FgDim,
-            VerticalAlignment = VerticalAlignment.Center, [DockPanel.DockProperty] = Dock.Right,
-        });
+        CoverPrimary();
 
-        Control board = BoardView.Render(map, 1.0,
+        Control board = BoardView.Render(map, Width, Height, 1.0,
             onTopClick: i => GoToTopRequested?.Invoke(i),
             onGroupClick: (g, d) => GoToGroupRequested?.Invoke(g, d),
             onTopDelete: i => DeleteTopRequested?.Invoke(i),
             onGroupDelete: (g, d) => DeleteGroupDesktopRequested?.Invoke(g, d));
 
-        var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        var hint = new TextBlock
+        {
+            Text = "click a desktop to jump · Esc to close", FontSize = 12, Foreground = FgDim,
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 24, 0, 0),
+        };
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         var add = new Button { Content = "+ New group", FontSize = 12 };
         add.Click += (_, _) => NewGroupRequested?.Invoke();
-        footer.Children.Add(add);
+        buttons.Children.Add(add);
 
         // Delete the currently-selected desktop (also available per-tile via the × badge).
         var deleteDesktop = new Button { Content = "Delete desktop", FontSize = 12 };
         deleteDesktop.Click += (_, _) => DeleteCurrentRequested?.Invoke();
-        footer.Children.Add(deleteDesktop);
+        buttons.Children.Add(deleteDesktop);
 
-        // Remove targets the top (nearest) group, if any.
+        // Remove targets the first group in the stack, if any.
         if (map.Groups.Count > 0)
         {
-            int nearestIndex = map.Groups[0].Index;
+            int firstIndex = map.Groups[0].Index;
             var remove = new Button { Content = $"Remove “{map.Groups[0].Name}”", FontSize = 12 };
-            remove.Click += (_, _) => RemoveGroupRequested?.Invoke(nearestIndex);
-            footer.Children.Add(remove);
+            remove.Click += (_, _) => RemoveGroupRequested?.Invoke(firstIndex);
+            buttons.Children.Add(remove);
         }
 
-        _card.Child = new StackPanel
+        var footer = new Border
         {
-            Orientation = Orientation.Vertical, Spacing = 14, Children = { header, board, footer },
+            Background = new SolidColorBrush(Color.FromArgb(0xB0, 0x14, 0x19, 0x22)),
+            CornerRadius = new CornerRadius(12), Padding = new Thickness(14, 10),
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(0, 0, 0, 28), Child = buttons,
         };
+
+        Content = new Grid { Children = { board, hint, footer } };
+    }
+
+    // Fill the primary monitor (DIPs), matching the flash so both modes present identically.
+    private void CoverPrimary()
+    {
+        Screen? screen = Screens.Primary ?? (Screens.All.Count > 0 ? Screens.All[0] : null);
+        if (screen is null) return;
+        Position = screen.Bounds.Position;
+        Width = screen.Bounds.Width / screen.Scaling;
+        Height = screen.Bounds.Height / screen.Scaling;
     }
 }

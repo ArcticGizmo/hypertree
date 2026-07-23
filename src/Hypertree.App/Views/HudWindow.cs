@@ -1,7 +1,6 @@
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Threading;
@@ -10,12 +9,11 @@ using Hypertree.Scopes;
 namespace Hypertree.App.Views;
 
 /// <summary>
-/// The transient navigation HUD. On each hotkey move it shows the full Model-P board pinned to the
-/// top of the primary screen over a dimmed backdrop (the same board the interactive overlay draws —
-/// not a small chip), then auto-hides. Covers the whole primary screen and is laid out with plain
-/// alignment (no manual pixel maths), so the board is reliably top-centred — which also fixes the
-/// occasional "stuck at top-left" glitch the old size-to-content chip had. Click-through and
-/// non-activating: it never blocks input or steals focus.
+/// The transient navigation HUD: the flash. On each hotkey move it shows the full Model-P board
+/// centred on the primary screen over a dimmed backdrop — the exact same board the interactive map
+/// draws (F1: one presentation, two modes) — then auto-hides. This is the transient mode:
+/// click-through and non-activating, so it never blocks input or steals focus. The interactive mode
+/// (<see cref="MapOverlay"/>) draws the same board but stays open, takes clicks, and pins across desktops.
 /// </summary>
 internal sealed class HudWindow : Window
 {
@@ -44,17 +42,12 @@ internal sealed class HudWindow : Window
         MakeClickThrough();
     }
 
-    /// <summary>Show the board at the top of the primary screen and restart the auto-hide timer.</summary>
+    /// <summary>Show the board centred on the primary screen and restart the auto-hide timer.</summary>
     public void Flash(NavMap map)
     {
-        Control board = BoardView.Render(map, 1.0);
-        board.HorizontalAlignment = HorizontalAlignment.Center; // centred by layout — no Bounds maths
-        board.VerticalAlignment = VerticalAlignment.Top;
-        board.Margin = new Thickness(0, 40, 0, 0);
-        Content = board;
-
         if (!IsVisible) Show();   // realizes the handle so Screens is available
-        CoverPrimary();
+        CoverPrimary();           // sets Width/Height to the primary screen (DIPs)
+        Content = BoardView.Render(map, Width, Height); // board centres itself within the full screen
         Topmost = true;
 
         _hideTimer.Stop();

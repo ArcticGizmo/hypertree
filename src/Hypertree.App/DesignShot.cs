@@ -41,24 +41,26 @@ internal static class DesignShot
              Path.Combine(outDir, "board-dived.png"));
     }
 
+    // A representative primary-monitor size, so the shot shows the real full-screen, centred layout
+    // (F1/F3) rather than a size-to-content card.
+    private const int ScreenW = 1440, ScreenH = 900;
+
     private static void Save(NavMap map, string path)
     {
         var host = new Border
         {
+            Width = ScreenW, Height = ScreenH,
             Background = new SolidColorBrush(Color.Parse("#0F131B")), // design --bg (dark)
-            Padding = new Thickness(24),
             // Pass delete callbacks so the × badges render in the verification shot.
-            Child = BoardView.Render(map, 1.0, onTopDelete: _ => { }, onGroupDelete: (_, _) => { }),
+            Child = BoardView.Render(map, ScreenW, ScreenH, 1.0, onTopDelete: _ => { }, onGroupDelete: (_, _) => { }),
         };
         host.Measure(Size.Infinity);
-        host.Arrange(new Rect(host.DesiredSize));
+        host.Arrange(new Rect(new Size(ScreenW, ScreenH)));
 
-        int w = (int)Math.Ceiling(host.DesiredSize.Width);
-        int h = (int)Math.Ceiling(host.DesiredSize.Height);
-        var rtb = new RenderTargetBitmap(new PixelSize(Math.Max(1, w), Math.Max(1, h)), new Vector(96, 96));
+        var rtb = new RenderTargetBitmap(new PixelSize(ScreenW, ScreenH), new Vector(96, 96));
         rtb.Render(host);
         using var fs = File.Create(path);
         rtb.Save(fs);
-        Console.WriteLine($"wrote {path} ({w}x{h})");
+        Console.WriteLine($"wrote {path} ({ScreenW}x{ScreenH})");
     }
 }
