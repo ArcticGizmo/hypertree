@@ -16,10 +16,13 @@ internal static class PlatformServices
 #if WINDOWS
     public static IDesktopController CreateDesktopController() => new Impl.VirtualDesktopController();
     public static IGlobalHotkey CreateGlobalHotkey() => new Impl.GlobalHotkey();
+    public static IForegroundActivator CreateForegroundActivator() => new Impl.ForegroundActivator();
 #else
     public static IDesktopController CreateDesktopController()
         => throw new PlatformNotSupportedException("No desktop controller for this platform yet.");
     public static IGlobalHotkey CreateGlobalHotkey()
         => throw new PlatformNotSupportedException("No global hotkey for this platform yet.");
+    public static IForegroundActivator CreateForegroundActivator()
+        => throw new PlatformNotSupportedException("No foreground activator for this platform yet.");
 #endif
 }

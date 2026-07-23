@@ -30,9 +30,9 @@ public enum HotkeyModifiers
 }
 
 /// <summary>
-/// The trigger key of a hotkey. Only the keys Hypertree binds today — the four arrows (the depth
-/// and within-level axes). Kept as an enum, not a raw VK, so Core stays OS-agnostic; the Windows
-/// layer maps these to virtual-key codes.
+/// The trigger key of a hotkey. The keys Hypertree binds today — the four arrows (the depth and
+/// within-level axes), Space (map toggle) and P (the spotlight / command palettes). Kept as an enum,
+/// not a raw VK, so Core stays OS-agnostic; the Windows layer maps these to virtual-key codes.
 /// </summary>
 public enum HotkeyKey
 {
@@ -41,4 +41,5 @@ public enum HotkeyKey
     ArrowLeft,
     ArrowRight,
     Space,
+    P,
 }
