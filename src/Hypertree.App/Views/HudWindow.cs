@@ -49,9 +49,19 @@ internal sealed class HudWindow : Window
         CoverPrimary();           // sets Width/Height to the primary screen (DIPs)
         Content = BoardView.Render(map, Width, Height); // board centres itself within the full screen
         Topmost = true;
+        BringToTop();             // the desktop switch can briefly surface the target window over us
 
         _hideTimer.Stop();
         _hideTimer.Start();
+    }
+
+    // Re-lift to the top of the always-on-top band. Non-activating, so the flash keeps its
+    // no-focus-steal contract even while re-asserting z-order after a desktop switch.
+    private void BringToTop()
+    {
+        IPlatformHandle? handle = TryGetPlatformHandle();
+        if (handle is null || handle.Handle == 0) return;
+        SetWindowPos(handle.Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 
     private void CoverPrimary()
@@ -67,10 +77,15 @@ internal sealed class HudWindow : Window
     private const int GWL_EXSTYLE = -20;
     private const long WS_EX_TRANSPARENT = 0x20, WS_EX_LAYERED = 0x80000, WS_EX_NOACTIVATE = 0x8000000, WS_EX_TOOLWINDOW = 0x80;
 
+    private static readonly nint HWND_TOPMOST = new(-1);
+    private const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOACTIVATE = 0x0010;
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern long GetWindowLongPtr(nint hWnd, int nIndex);
     [DllImport("user32.dll", SetLastError = true)]
     private static extern long SetWindowLongPtr(nint hWnd, int nIndex, long dwNewLong);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
 
     private void MakeClickThrough()
     {
