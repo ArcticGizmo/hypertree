@@ -5,17 +5,21 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Hypertree.Platform;
+using Hypertree.Scopes;
 
 namespace Hypertree.App.Views;
 
 /// <summary>One filterable row in a <see cref="PaletteWindow"/>: a primary <paramref name="Label"/>,
 /// an optional dimmer <paramref name="Detail"/> (also folded into the match text, so e.g. a group
-/// name filters its desktops), an optional trailing <paramref name="Glyph"/>, and the action to run
-/// when it's chosen.</summary>
-internal sealed record PaletteItem(string Label, string? Detail, string? Glyph, Action Choose)
+/// name filters its desktops), an optional trailing <paramref name="Glyph"/>, the action to run when
+/// it's chosen, and — in preview mode — a <paramref name="Preview"/> board to show while it's the
+/// selected row (so you can see where a jump will land).</summary>
+internal sealed record PaletteItem(string Label, string? Detail, string? Glyph, Action Choose,
+                                   Func<NavMap>? Preview = null)
 {
     public bool Matches(string q) =>
         Label.Contains(q, StringComparison.OrdinalIgnoreCase)
@@ -24,14 +28,14 @@ internal sealed record PaletteItem(string Label, string? Detail, string? Glyph, 
 
 /// <summary>
 /// The shared spotlight/command-palette base (F4 &amp; F5), modelled on perch's SessionSwitcherWindow:
-/// a centred, keyboard-driven palette summoned by a global hotkey. A search box takes focus
-/// immediately; type to filter (case-insensitive Contains over label + detail), Up/Down or Tab to
-/// move, Enter to choose the highlighted row, Esc or click-away to dismiss. Because a tray-hotkey
-/// window must steal focus from a background process, it force-foregrounds on open via
-/// <see cref="IForegroundActivator"/> (the opposite of the HUD's no-activate policy).
+/// a keyboard-driven palette summoned by a global hotkey. A search box takes focus immediately; type
+/// to filter (case-insensitive Contains over label + detail), Up/Down or Tab to move, Enter to choose
+/// the highlighted row, Esc or click-away to dismiss. Because a tray-hotkey window must steal focus
+/// from a background process, it force-foregrounds on open via <see cref="IForegroundActivator"/>.
 ///
-/// Generic: it takes a flat item list and an optional synthetic <c>createRow</c> factory (F4's
-/// "Create desktop «query»"), so both palettes are the same control with different contents.
+/// Two layouts: the default centred card (command palette), and <b>preview mode</b> (the jump palette)
+/// — a full-screen dim surface with the search card anchored to the top and the board rendered in the
+/// middle, re-drawn to highlight the currently-selected desktop so you can see the destination.
 /// </summary>
 internal sealed class PaletteWindow : Window
 {
@@ -48,33 +52,33 @@ internal sealed class PaletteWindow : Window
     private readonly IForegroundActivator _activator;
     private readonly IReadOnlyList<PaletteItem> _all;
     private readonly Func<string, PaletteItem?>? _createRow;
+    private readonly bool _previewMode;
 
     private readonly TextBox _search;
     private readonly StackPanel _list;
     private readonly List<Control> _rows = new();
+    private readonly Border? _previewBorder; // holds the board in preview mode
     private List<PaletteItem> _filtered;
     private int _selected;
     private bool _chosen;
     private bool _ready; // armed once focus settles, so the foreground-forcing dance can't self-dismiss
 
     public PaletteWindow(string placeholder, string footerHint, IReadOnlyList<PaletteItem> items,
-                         IForegroundActivator activator, Func<string, PaletteItem?>? createRow = null)
+                         IForegroundActivator activator, Func<string, PaletteItem?>? createRow = null,
+                         bool previewMode = false)
     {
         _activator = activator;
         _all = items;
         _createRow = createRow;
+        _previewMode = previewMode;
         _filtered = items.ToList();
 
         WindowDecorations = WindowDecorations.None;
         RequestedThemeVariant = ThemeVariant.Dark; // else the themed search box renders light (app is FluentTheme light)
-        Background = Brushes.Transparent;
         TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
         Topmost = true;
         ShowInTaskbar = false;
         CanResize = false;
-        Width = 560;
-        SizeToContent = SizeToContent.Height;
-        WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
         _search = new TextBox
         {
@@ -88,7 +92,7 @@ internal sealed class PaletteWindow : Window
         _list = new StackPanel { Margin = new Thickness(6) };
         var scroll = new ScrollViewer
         {
-            Content = _list, MaxHeight = 380,
+            Content = _list, MaxHeight = previewMode ? 300 : 380,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         };
@@ -104,16 +108,44 @@ internal sealed class PaletteWindow : Window
             Padding = new Thickness(12, 9), Child = hint,
         };
 
-        Content = new Border
+        var card = new Border
         {
             Background = CardBg, CornerRadius = new CornerRadius(12),
             BorderBrush = Stroke, BorderThickness = new Thickness(1.5),
             Child = new StackPanel { Children = { _search, scroll, footer } }, ClipToBounds = true,
+            Width = 560,
         };
+
+        if (previewMode)
+        {
+            // Full-screen dim surface: search card anchored top-centre, board filling the space below.
+            Background = new SolidColorBrush(Color.FromArgb(0x9E, 0x0E, 0x0E, 0x12));
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            SizeToContent = SizeToContent.Manual;
+            card.HorizontalAlignment = HorizontalAlignment.Center;
+            card.VerticalAlignment = VerticalAlignment.Top;
+            card.Margin = new Thickness(0, 44, 0, 0);
+
+            _previewBorder = new Border { Margin = new Thickness(0, 0, 0, 24) };
+            // Re-render the board whenever its region is (re)sized — including the first real layout.
+            _previewBorder.PropertyChanged += (_, e) => { if (e.Property == BoundsProperty) UpdatePreview(); };
+
+            // DockPanel: card takes its natural height at the top, the board fills the space beneath it.
+            DockPanel.SetDock(card, Dock.Top);
+            Content = new DockPanel { Children = { card, _previewBorder } };
+        }
+        else
+        {
+            Background = Brushes.Transparent;
+            Width = 560;
+            SizeToContent = SizeToContent.Height;
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            Content = card;
+        }
 
         // Tunnel so Up/Down/Tab/Enter/Esc win before the TextBox consumes them.
         AddHandler(KeyDownEvent, OnPreviewKeyDown, RoutingStrategies.Tunnel);
-        Opened += (_, _) => _search.Focus();
+        Opened += (_, _) => { if (_previewMode) CoverPrimary(); _search.Focus(); };
         Deactivated += (_, _) => { if (_ready && !_chosen) Close(); };
 
         Rebuild();
@@ -130,6 +162,15 @@ internal sealed class PaletteWindow : Window
         // Arm dismiss-on-deactivate only after this settles, so the foreground dance above doesn't
         // immediately self-close the window.
         Dispatcher.UIThread.Post(() => _ready = true, DispatcherPriority.Background);
+    }
+
+    private void CoverPrimary()
+    {
+        Screen? screen = Screens.Primary ?? (Screens.All.Count > 0 ? Screens.All[0] : null);
+        if (screen is null) return;
+        Position = screen.Bounds.Position;
+        Width = screen.Bounds.Width / screen.Scaling;
+        Height = screen.Bounds.Height / screen.Scaling;
     }
 
     private void OnPreviewKeyDown(object? sender, KeyEventArgs e)
@@ -192,6 +233,7 @@ internal sealed class PaletteWindow : Window
             {
                 Text = "No matches", Foreground = Muted, FontSize = 13, Margin = new Thickness(12, 14),
             });
+            UpdatePreview();
             return;
         }
 
@@ -250,6 +292,19 @@ internal sealed class PaletteWindow : Window
                 b.Background = i == _selected ? RowSel : Brushes.Transparent;
         if (_selected >= 0 && _selected < _rows.Count)
             _rows[_selected].BringIntoView();
+        UpdatePreview();
+    }
+
+    // Preview mode: draw the selected row's board into the middle region (highlighting the target).
+    private void UpdatePreview()
+    {
+        if (!_previewMode || _previewBorder is null) return;
+        Size sz = _previewBorder.Bounds.Size;
+        if (sz.Width < 10 || sz.Height < 10) return;
+
+        PaletteItem? sel = _selected >= 0 && _selected < _filtered.Count ? _filtered[_selected] : null;
+        NavMap? map = sel?.Preview?.Invoke();
+        _previewBorder.Child = map is null ? null : BoardView.Render(map, sz.Width, sz.Height);
     }
 
     private void Choose(PaletteItem item)

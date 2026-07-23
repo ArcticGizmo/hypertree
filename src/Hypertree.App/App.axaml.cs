@@ -169,11 +169,14 @@ public sealed class App : Application
         var items = new List<PaletteItem>();
 
         // Every main-timeline desktop, then every group's desktops (group name in the detail so
-        // typing a group name filters to its desktops).
+        // typing a group name filters to its desktops). Each carries a Preview board that highlights
+        // where the jump would land, shown in the middle of the palette as you move the selection.
         for (int i = 0; i < map.TopRow.Count; i++)
         {
             int idx = i;
-            items.Add(new PaletteItem(map.TopRow[i].Label, "main", "→", () => { _model.GoToTop(idx); RefreshOrFlash(); }));
+            items.Add(new PaletteItem(map.TopRow[i].Label, "main", "→",
+                () => { _model.GoToTop(idx); RefreshOrFlash(); },
+                Preview: () => PreviewMap(onMain: true, topIndex: idx, groupIndex: -1, desktopIndex: -1)));
         }
         foreach (NavMapGroup g in map.Groups)
         {
@@ -182,12 +185,32 @@ public sealed class App : Application
             {
                 int dj = j;
                 items.Add(new PaletteItem(g.Desktops[j].Label, g.Name, "→",
-                    () => { _model.GoToGroupDesktop(gi, dj); RefreshOrFlash(); }));
+                    () => { _model.GoToGroupDesktop(gi, dj); RefreshOrFlash(); },
+                    Preview: () => PreviewMap(onMain: false, topIndex: -1, groupIndex: gi, desktopIndex: dj)));
             }
         }
 
         OpenPalette("Jump to or create a desktop…", "↑↓ move · ↵ jump/create · Esc close", items,
-            query => new PaletteItem($"Create desktop “{query}”", "new · main", "+", () => CreateAndGoToDesktop(query)));
+            query => new PaletteItem($"Create desktop “{query}”", "new · main", "+",
+                () => CreateAndGoToDesktop(query),
+                Preview: () => _model!.BuildMap()), // no target tile yet — show the current board
+            previewMode: true);
+    }
+
+    // Build a board snapshot that marks a specific desktop as current (for the jump palette's preview),
+    // without moving the model. Rebuilds the tiles from the live map with the target highlighted and
+    // centred on its own row.
+    private NavMap PreviewMap(bool onMain, int topIndex, int groupIndex, int desktopIndex)
+    {
+        NavMap b = _model!.BuildMap();
+        var top = b.TopRow.Select((t, i) => new NavMapTile(t.Label, onMain && i == topIndex)).ToList();
+        var groups = b.Groups.Select(g => new NavMapGroup(
+            g.Index, g.Name,
+            g.Desktops.Select((d, j) => new NavMapTile(d.Label, !onMain && g.Index == groupIndex && j == desktopIndex)).ToList(),
+            !onMain && g.Index == groupIndex,
+            g.Index == groupIndex ? desktopIndex : g.Cursor)).ToList();
+        int topCursor = onMain ? topIndex : b.TopCursor;
+        return new NavMap(top, topCursor, onMain, groups, b.TopPosition);
     }
 
     // Create a new ungrouped desktop named the query and jump straight to it.
@@ -203,10 +226,10 @@ public sealed class App : Application
     }
 
     private void OpenPalette(string placeholder, string hint, IReadOnlyList<PaletteItem> items,
-                             Func<string, PaletteItem?>? createRow = null)
+                             Func<string, PaletteItem?>? createRow = null, bool previewMode = false)
     {
         if (_activator is null) return;
-        _palette = new PaletteWindow(placeholder, hint, items, _activator, createRow);
+        _palette = new PaletteWindow(placeholder, hint, items, _activator, createRow, previewMode);
         _palette.Closed += (_, _) => _palette = null;
         _palette.Show();
         _palette.TakeFocus();
