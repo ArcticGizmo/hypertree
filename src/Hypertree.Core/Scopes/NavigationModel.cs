@@ -57,6 +57,10 @@ public sealed class NavigationModel
     public (int group, int desktop)? CurrentGroupDesktop
         => _onMain || _groups.Count == 0 ? null : (_currentGroup, _groups[_currentGroup].LastUsedIndex);
 
+    /// <summary>The pivot group index (the group directly below main), or -1 when there are no groups.
+    /// Valid even on the main timeline — that's the group Down would re-enter.</summary>
+    public int CurrentGroupIndex => _groups.Count == 0 ? -1 : _currentGroup;
+
     /// <summary>A main-timeline desktop id to use as a fallback when tearing a group's desktops down.</summary>
     public DesktopId FallbackDesktopId =>
         _topRow.Count > 0 ? _topRow[Math.Clamp(_topIndex, 0, _topRow.Count - 1)].Id : _desktops.Current;

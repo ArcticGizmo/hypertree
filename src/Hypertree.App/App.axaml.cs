@@ -117,6 +117,11 @@ public sealed class App : Application
         var spotHk = PlatformServices.CreateGlobalHotkey();
         if (spotHk.Register(Mods, PaletteKey, () => Dispatcher.UIThread.Post(ToggleSpotlight))) _hotkeys.Add(spotHk);
         else { spotHk.Dispose(); Console.Error.WriteLine("Hotkey Ctrl+Alt+P (spotlight) was refused by the OS."); }
+
+        // Ctrl+Alt+Shift+P — command palette.
+        var cmdHk = PlatformServices.CreateGlobalHotkey();
+        if (cmdHk.Register(Mods | HotkeyModifiers.Shift, PaletteKey, () => Dispatcher.UIThread.Post(ToggleCommandPalette))) _hotkeys.Add(cmdHk);
+        else { cmdHk.Dispose(); Console.Error.WriteLine("Hotkey Ctrl+Alt+Shift+P (command palette) was refused by the OS."); }
     }
 
     // Navigate. While the map overlay is open it stays open (its windows are pinned across the
@@ -194,6 +199,42 @@ public sealed class App : Application
         _palette.Closed += (_, _) => _palette = null;
         _palette.Show();
         _palette.TakeFocus();
+    }
+
+    // ── Command palette (F5): same look/feel, items are commands. Bones only. ───────────
+
+    private void ToggleCommandPalette()
+    {
+        if (_activator is null) return;
+        if (_palette is not null) { _palette.Close(); return; } // re-press toggles closed
+
+        var items = BuildCommands()
+            .Select(c => new PaletteItem(c.Name, null, "▸", c.Run))
+            .ToList();
+        OpenPalette("Run a command…", "↑↓ move · ↵ run · Esc close", items);
+    }
+
+    // The command registry. A few real commands (reusing existing handlers) plus stubs for features
+    // that don't exist yet — the exact set isn't the point this iteration, the wiring is.
+    private IReadOnlyList<Command> BuildCommands()
+    {
+        Action stub(string name) => () => Console.Error.WriteLine($"Command “{name}” is not implemented yet.");
+        return new List<Command>
+        {
+            new("New group…", PromptNewGroup),
+            new("Delete current desktop", DeleteCurrentDesktop),
+            new("Remove current group", RemoveCurrentGroup),
+            new("Snapshot layout", stub("Snapshot layout")),
+            new("Add branch", stub("Add branch")),          // → M2 git
+            new("Move desktop to group…", stub("Move desktop to group…")),
+        };
+    }
+
+    private void RemoveCurrentGroup()
+    {
+        if (_model is null) return;
+        int index = _model.CurrentGroupIndex;
+        if (index >= 0) RemoveGroup(index);
     }
 
     private void RefreshOrFlash()
