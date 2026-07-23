@@ -177,7 +177,7 @@ public sealed class App : Application
         {
             int idx = i;
             items.Add(new PaletteItem(map.TopRow[i].Label, "main", "→",
-                () => { _model.GoToTop(idx); RefreshOrFlash(); },
+                () => { _model.GoToTop(idx); RefreshOverlay(); }, // no flash — the preview already showed it
                 Preview: () => PreviewMap(onMain: true, topIndex: idx, groupIndex: -1, desktopIndex: -1)));
         }
         foreach (NavMapGroup g in map.Groups)
@@ -187,7 +187,7 @@ public sealed class App : Application
             {
                 int dj = j;
                 items.Add(new PaletteItem(g.Desktops[j].Label, g.Name, "→",
-                    () => { _model.GoToGroupDesktop(gi, dj); RefreshOrFlash(); },
+                    () => { _model.GoToGroupDesktop(gi, dj); RefreshOverlay(); }, // no flash — see above
                     Preview: () => PreviewMap(onMain: false, topIndex: -1, groupIndex: gi, desktopIndex: dj)));
             }
         }
@@ -234,7 +234,7 @@ public sealed class App : Application
         _model.SyncTopRow();
         _desktops.SwitchTo(id);
         _model.Resync(); // land the model on the freshly-created desktop
-        RefreshOrFlash();
+        RefreshOverlay(); // no flash — the jump/create is decisive on its own
     }
 
     private void OpenPalette(string placeholder, string hint, IReadOnlyList<PaletteItem> items,
