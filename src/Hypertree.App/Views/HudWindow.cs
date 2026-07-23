@@ -11,13 +11,20 @@ namespace Hypertree.App.Views;
 /// <summary>
 /// The transient navigation HUD: the flash. On each hotkey move it shows the full Model-P board
 /// centred on the primary screen over a dimmed backdrop — the exact same board the interactive map
-/// draws (F1: one presentation, two modes) — then auto-hides. This is the transient mode:
-/// click-through and non-activating, so it never blocks input or steals focus. The interactive mode
-/// (<see cref="MapOverlay"/>) draws the same board but stays open, takes clicks, and pins across desktops.
+/// draws (F1: one presentation, two modes). It stays up while you hold the nav modifiers (Ctrl+Alt),
+/// so you get time to find your bearings mid-navigation, and only fades out a short beat after you
+/// release them. This is the transient mode: click-through and non-activating, so it never blocks
+/// input or steals focus. The interactive mode (<see cref="MapOverlay"/>) draws the same board but
+/// stays open, takes clicks, and pins across desktops.
 /// </summary>
 internal sealed class HudWindow : Window
 {
-    private readonly DispatcherTimer _hideTimer;
+    // Poll the modifier state (no focused window ⇒ no key-up events) and keep the flash up while
+    // Ctrl+Alt is held; once released, hide after a short grace so the final position lingers.
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(100);
+    private const int GraceTicks = 6; // ~600ms after release before hiding
+    private readonly DispatcherTimer _poll;
+    private int _grace;
 
     public HudWindow()
     {
@@ -32,8 +39,16 @@ internal sealed class HudWindow : Window
         IsVisible = false;
         Position = new PixelPoint(0, 0);
 
-        _hideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
-        _hideTimer.Tick += (_, _) => { _hideTimer.Stop(); IsVisible = false; };
+        _poll = new DispatcherTimer { Interval = PollInterval };
+        _poll.Tick += (_, _) => Poll();
+    }
+
+    // While the nav modifiers are held, keep the flash up (and re-arm the grace). Once they're
+    // released, count the grace down and hide.
+    private void Poll()
+    {
+        if (ModifiersHeld()) { _grace = GraceTicks; return; }
+        if (--_grace <= 0) { _poll.Stop(); IsVisible = false; }
     }
 
     protected override void OnOpened(EventArgs e)
@@ -42,7 +57,7 @@ internal sealed class HudWindow : Window
         MakeClickThrough();
     }
 
-    /// <summary>Show the board centred on the primary screen and restart the auto-hide timer.</summary>
+    /// <summary>Show the board centred on the primary screen; it stays up while Ctrl+Alt is held.</summary>
     public void Flash(NavMap map)
     {
         if (!IsVisible) Show();   // realizes the handle so Screens is available
@@ -51,8 +66,8 @@ internal sealed class HudWindow : Window
         Topmost = true;
         BringToTop();             // the desktop switch can briefly surface the target window over us
 
-        _hideTimer.Stop();
-        _hideTimer.Start();
+        _grace = GraceTicks;
+        if (!_poll.IsEnabled) _poll.Start();
     }
 
     // Re-lift to the top of the always-on-top band. Non-activating, so the flash keeps its
@@ -86,6 +101,12 @@ internal sealed class HudWindow : Window
     private static extern long SetWindowLongPtr(nint hWnd, int nIndex, long dwNewLong);
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+    private const int VK_CONTROL = 0x11, VK_MENU = 0x12; // Ctrl, Alt — the nav modifier layer
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+    private static bool ModifiersHeld()
+        => (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
 
     private void MakeClickThrough()
     {
