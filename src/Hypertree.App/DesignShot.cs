@@ -31,13 +31,14 @@ internal static class DesignShot
         }, live, cur);
         NavMapGroup Hotfix() => new(1, "hotfix", new List<NavMapTile> { new("db", false), new("api", false) }, false, 0);
 
-        // On the main timeline: Web (cursor 2) current; both groups render below main (TopPosition 0).
-        Save(new NavMap(Top(2), 2, true, new List<NavMapGroup> { Feat(false, 1), Hotfix() }, 0),
+        // Stable pivot: FEAT-123 sits above main, hotfix below (main slot 1). On the main timeline,
+        // Web (cursor 2) is current and main renders between the two groups.
+        Save(new NavMap(Top(2), 2, true, new List<NavMapGroup> { Feat(false, 1), Hotfix() }, 1),
              Path.Combine(outDir, "board-top-row.png"));
 
-        // Inside the current group (FEAT-123, on API=cursor 1), which sits directly below main
-        // (TopPosition 0); hotfix rests below it on its cursor.
-        Save(new NavMap(Top(-1), 2, false, new List<NavMapGroup> { Feat(true, 1), Hotfix() }, 0),
+        // Same fixed layout, now with the cursor inside FEAT-123 (on API=cursor 1) — the group above
+        // main. Main keeps its slot; it does not move.
+        Save(new NavMap(Top(2), 2, false, new List<NavMapGroup> { Feat(true, 1), Hotfix() }, 1),
              Path.Combine(outDir, "board-dived.png"));
     }
 

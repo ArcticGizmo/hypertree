@@ -10,10 +10,9 @@ namespace Hypertree.Scopes;
 /// <param name="TopCursor">The remembered main-timeline position — where surfacing returns you.
 /// Always valid, even while inside a group, so the board can keep it on the centre column.</param>
 /// <param name="OnTop">Whether the user is on the main timeline (vs. inside the current group).</param>
-/// <param name="TopPosition">How many groups render above the main timeline in the vertical
-/// sequence: <c>Groups[0..TopPosition-1]</c> stack above main, then main, then
-/// <c>Groups[TopPosition..]</c> below (the first of which is the current group). Equals the current
-/// group's index — main always sits directly above it.</param>
+/// <param name="TopPosition">The main timeline's fixed slot: how many groups render above it.
+/// <c>Groups[0..TopPosition-1]</c> stack above main, then main, then <c>Groups[TopPosition..]</c>
+/// below. Fixed as the cursor navigates (stable pivot) — main does not move.</param>
 public sealed record NavMap(
     IReadOnlyList<NavMapTile> TopRow,
     int TopCursor,

@@ -6,7 +6,13 @@ namespace Hypertree.Store;
 /// Hypertree re-associates its created desktops instead of treating them as orphaned/ungrouped.</summary>
 public sealed class PersistedState
 {
+    /// <summary>The cursor's group (resume point) when inside a group.</summary>
     public int ActiveGroup { get; set; }
+
+    /// <summary>The main timeline's fixed slot in the vertical stack: how many groups render above
+    /// main. <c>Groups[0..MainSlot-1]</c> sit above main, the rest below (F2 stable pivot).</summary>
+    public int MainSlot { get; set; }
+
     public List<PersistedGroup> Groups { get; set; } = new();
 }
 

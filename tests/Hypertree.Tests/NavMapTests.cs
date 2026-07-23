@@ -69,14 +69,14 @@ public class NavMapTests
     }
 
     [Fact]
-    public void TopPosition_splits_the_stack_around_the_main_timeline()
+    public void TopPosition_is_the_fixed_main_slot_unaffected_by_entering_a_group()
     {
         var m = New();
         m.AddGroup(G("one", (10, "a")));
-        m.AddGroup(G("two", (20, "x"))); // stack [two, one]
-        m.GoToGroupDesktop(1, 0);        // enter "one" (index 1) → main sits directly above it
+        m.AddGroup(G("two", (20, "x"))); // mainSlot 0 → main on top, both below
+        m.GoToGroupDesktop(1, 0);        // enter "one" — main must NOT move
 
         NavMap map = m.BuildMap();
-        Assert.Equal(1, map.TopPosition); // two / MAIN / one
+        Assert.Equal(0, map.TopPosition); // MAIN / two / one
     }
 }

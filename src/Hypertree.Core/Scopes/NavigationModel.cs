@@ -4,22 +4,16 @@ using Hypertree.Store;
 namespace Hypertree.Scopes;
 
 /// <summary>
-/// Model P as pure state, vertical model (F2 — "main above current"). The <b>main timeline</b>
-/// (<see cref="_topRow"/>) is every OS desktop not assigned to a group, in natural order; it is the
-/// pivot. <b>Groups</b> are a fixed vertical stack that never reorders — the current group sits
-/// directly <em>below</em> the main timeline, groups listed before it stack above main (in order),
-/// groups listed after it stack below the current group. So for groups [A,B,C] with current B, the
-/// vertical sequence is: A / MAIN / B / C.
-///
-/// Navigation:
-///   • <b>Up</b>: inside a group → the main timeline; on main → the previous group (currentGroup−1),
-///     entering it. No-op past the first group.
-///   • <b>Down</b>: on main → re-enter the current group; inside a group → the next group
-///     (currentGroup+1). No-op past the last group.
+/// Model P as pure state, vertical model (F2 — "stable pivot"). The <b>main timeline</b>
+/// (<see cref="_topRow"/>) is every OS desktop not assigned to a group; it sits at a <b>fixed slot</b>
+/// in the vertical stack (<see cref="_mainSlot"/> = how many groups render above it). <b>Groups</b> are
+/// a fixed vertical list that never reorders. The full top-to-bottom sequence of rows is therefore:
+///   groups[0..mainSlot-1]  /  MAIN  /  groups[mainSlot..]
+/// and navigation is a plain ladder that walks a cursor through it — <b>main never moves</b>:
+///   • <b>Up</b> / <b>Down</b>: move the cursor one row up / down, crossing main in place (no leap).
 ///   • <b>Left/Right</b>: within the current row (main desktops, or the current group's desktops).
-/// The accepted asymmetry: Up from B passes through MAIN before reaching A, but Down from B goes
-/// straight to C (main is always directly above the current group, so it isn't re-crossed going down).
-/// Ends clamp (no wrap). Holds no Win32/UI, so the whole feel is unit-testable against a fake controller.
+/// Groups above main stay above; groups below stay below. A newly-added group appears directly below
+/// main. Ends clamp (no wrap). Holds no Win32/UI, so the whole feel is unit-testable against a fake.
 /// </summary>
 public sealed class NavigationModel
 {
@@ -28,8 +22,9 @@ public sealed class NavigationModel
     private readonly List<Group> _groups = new();
 
     private List<DesktopRef> _topRow = new();
-    private bool _onMain = true;    // true = on the main timeline; false = inside _groups[_currentGroup]
-    private int _currentGroup;      // the group directly below main (the Down/Up pivot). Always clamped valid.
+    private int _mainSlot;          // groups[0.._mainSlot-1] render above main; the rest below. Fixed.
+    private bool _onMain = true;    // true = cursor on the main timeline; false = inside _groups[_currentGroup]
+    private int _currentGroup;      // the group the cursor is in (valid only when !_onMain, else the resume group)
     private int _topIndex;          // cursor within the main timeline
     private DesktopId _target;      // desktop the model last switched to
 
@@ -57,9 +52,12 @@ public sealed class NavigationModel
     public (int group, int desktop)? CurrentGroupDesktop
         => _onMain || _groups.Count == 0 ? null : (_currentGroup, _groups[_currentGroup].LastUsedIndex);
 
-    /// <summary>The pivot group index (the group directly below main), or -1 when there are no groups.
-    /// Valid even on the main timeline — that's the group Down would re-enter.</summary>
-    public int CurrentGroupIndex => _groups.Count == 0 ? -1 : _currentGroup;
+    /// <summary>The group to act on for "current group" commands: the one the cursor is in, or (on the
+    /// main timeline) the group directly below main. -1 when there are no groups.</summary>
+    public int CurrentGroupIndex
+        => _groups.Count == 0 ? -1
+         : _onMain ? Math.Min(_mainSlot, _groups.Count - 1)
+         : _currentGroup;
 
     /// <summary>A main-timeline desktop id to use as a fallback when tearing a group's desktops down.</summary>
     public DesktopId FallbackDesktopId =>
@@ -73,7 +71,7 @@ public sealed class NavigationModel
             : _groups[_currentGroup].Desktops[_groups[_currentGroup].LastUsedIndex];
 
     /// <summary>Render-ready snapshot: main timeline + groups in their fixed stack order, split around
-    /// main at <see cref="_currentGroup"/> (the groups before it render above main, the rest below).</summary>
+    /// main at its fixed slot (groups before the slot render above main, the rest below).</summary>
     public NavMap BuildMap()
     {
         var top = new List<NavMapTile>(_topRow.Count);
@@ -91,20 +89,33 @@ public sealed class NavigationModel
             groups.Add(new NavMapGroup(gi, g.Name, tiles, current, g.LastUsedIndex));
         }
 
-        int topPosition = _groups.Count == 0 ? 0 : Math.Clamp(_currentGroup, 0, _groups.Count);
-        return new NavMap(top, _topRow.Count == 0 ? 0 : _topIndex, _onMain, groups, topPosition);
+        return new NavMap(top, _topRow.Count == 0 ? 0 : _topIndex, _onMain, groups, Math.Clamp(_mainSlot, 0, _groups.Count));
     }
 
-    // ── Navigation (vertical "main above current") ─────────────────────────────────
+    // ── Navigation (stable pivot ladder) ───────────────────────────────────────────
 
     public bool Apply(NavAction action) => action switch
     {
         NavAction.MoveLeft => Move(-1),
         NavAction.MoveRight => Move(+1),
-        NavAction.Dive => Down(),
-        NavAction.Surface => Up(),
+        NavAction.Dive => SetRow(CurrentRow() + 1),   // Down = one row lower
+        NavAction.Surface => SetRow(CurrentRow() - 1), // Up = one row higher
         _ => false,
     };
+
+    // The cursor's index in the combined row sequence: groups[0..mainSlot-1] / main / groups[mainSlot..].
+    // Rows run 0.._groups.Count (main occupies index _mainSlot).
+    private int CurrentRow()
+        => _onMain ? _mainSlot : (_currentGroup < _mainSlot ? _currentGroup : _currentGroup + 1);
+
+    // Move the cursor to a row in the combined sequence (clamped), then map it back to main/group.
+    private bool SetRow(int row)
+    {
+        row = Math.Clamp(row, 0, _groups.Count);
+        if (row == _mainSlot) _onMain = true;
+        else { _onMain = false; _currentGroup = row < _mainSlot ? row : row - 1; }
+        return Commit();
+    }
 
     private bool Move(int delta)
     {
@@ -125,39 +136,7 @@ public sealed class NavigationModel
         return Commit();
     }
 
-    // Down: on main → re-enter the current group; in a group → advance to the next group (no main re-cross).
-    private bool Down()
-    {
-        if (_groups.Count == 0) return false;
-        if (_onMain)
-        {
-            _onMain = false;                       // re-enter the group directly below main
-        }
-        else
-        {
-            if (_currentGroup + 1 >= _groups.Count) return false; // at the bottom — no wrap
-            _currentGroup++;
-        }
-        return Commit();
-    }
-
-    // Up: in a group → surface to main; on main → step into the group above main (currentGroup−1).
-    private bool Up()
-    {
-        if (!_onMain)
-        {
-            _onMain = true;                        // surface to the main timeline
-        }
-        else
-        {
-            if (_currentGroup <= 0 || _groups.Count == 0) return false; // no group above main — no-op
-            _currentGroup--;
-            _onMain = false;                       // enter it
-        }
-        return Commit();
-    }
-
-    /// <summary>Click-to-navigate: jump to a specific main-timeline desktop.</summary>
+    /// <summary>Click-to-navigate: jump to a specific main-timeline desktop. Main keeps its slot.</summary>
     public bool GoToTop(int index)
     {
         if (index < 0 || index >= _topRow.Count) return false;
@@ -166,7 +145,7 @@ public sealed class NavigationModel
         return Commit();
     }
 
-    /// <summary>Click-to-navigate: jump to a specific desktop within a specific group.</summary>
+    /// <summary>Click-to-navigate: jump to a specific desktop within a specific group. Main keeps its slot.</summary>
     public bool GoToGroupDesktop(int groupIndex, int desktopIndex)
     {
         if (groupIndex < 0 || groupIndex >= _groups.Count) return false;
@@ -200,17 +179,17 @@ public sealed class NavigationModel
             .ToList();
 
         _topIndex = _topRow.Count == 0 ? 0 : Math.Clamp(_topIndex, 0, _topRow.Count - 1);
-        ClampCurrentGroup();
+        ClampState();
     }
 
-    /// <summary>Add a group at the top of the stack and make it the pivot below main. Diving from main
-    /// enters it. Keeps the OS position: if inside another group, shift the pivot to stay on it.</summary>
+    /// <summary>Add a group directly below the main timeline (at the main slot), leaving main and the
+    /// groups above it in place. Keeps the OS position: a cursor already below main shifts down with it.</summary>
     public void AddGroup(Group group)
     {
-        _groups.Insert(0, group);
-        if (_onMain) _currentGroup = 0;   // the new group becomes the dive target directly below main
-        else _currentGroup++;             // existing selection shifted down one — keep pointing at it
-        ClampCurrentGroup();
+        int at = Math.Clamp(_mainSlot, 0, _groups.Count);
+        _groups.Insert(at, group);
+        if (!_onMain && _currentGroup >= at) _currentGroup++; // existing selection shifted down one
+        ClampState();
         SyncTopRow();
         Save();
         Changed?.Invoke();
@@ -224,6 +203,7 @@ public sealed class NavigationModel
         _groups.RemoveAt(index);
         AdjustForRemoval(index);
         SyncTopRow();
+        _target = CurrentDesktop().Id; // re-anchor: removing the group you were in lands you on main
         Save();
         Changed?.Invoke();
         return removed;
@@ -269,28 +249,27 @@ public sealed class NavigationModel
         return id;
     }
 
-    // Keep _onMain/_currentGroup coherent after a group at removedIndex disappears.
+    // Keep main's slot and the cursor coherent after the group at removedIndex disappears.
     private void AdjustForRemoval(int removedIndex)
     {
+        if (removedIndex < _mainSlot) _mainSlot--;              // a group above main went — main rises with it
         if (!_onMain)
         {
-            if (_currentGroup == removedIndex) _onMain = true;   // we were in it → surface to main
+            if (_currentGroup == removedIndex) _onMain = true;  // we were in it → land on main
             else if (_currentGroup > removedIndex) _currentGroup--;
         }
-        else if (_currentGroup > removedIndex)
-        {
-            _currentGroup--;                                     // keep the pivot on the same group
-        }
-        ClampCurrentGroup();
+        ClampState();
     }
 
-    private void ClampCurrentGroup()
+    private void ClampState()
     {
+        _mainSlot = Math.Clamp(_mainSlot, 0, _groups.Count);
         if (_groups.Count == 0) { _currentGroup = 0; _onMain = true; }
         else _currentGroup = Math.Clamp(_currentGroup, 0, _groups.Count - 1);
     }
 
-    /// <summary>Re-anchor to whatever desktop the OS is now showing (after a create/destroy).</summary>
+    /// <summary>Re-anchor to whatever desktop the OS is now showing (after a create/destroy). Main keeps
+    /// its slot; only the cursor moves.</summary>
     public void Resync()
     {
         SyncTopRow();
@@ -307,7 +286,7 @@ public sealed class NavigationModel
                 if (di >= 0) { _onMain = false; _currentGroup = gi; _groups[gi].LastUsedIndex = di; break; }
             }
         }
-        ClampCurrentGroup();
+        ClampState();
 
         _target = CurrentDesktop().Id;
         Save();
@@ -329,6 +308,9 @@ public sealed class NavigationModel
                 .ToList();
             if (desks.Count > 0) _groups.Add(new Group(pg.Name, desks, pg.LastUsedIndex));
         }
+        // Migrate: prefer the persisted MainSlot; fall back to the pre-pivot ActiveGroup split.
+        int slot = state.MainSlot != 0 ? state.MainSlot : state.ActiveGroup;
+        _mainSlot = _groups.Count == 0 ? 0 : Math.Clamp(slot, 0, _groups.Count);
         _currentGroup = _groups.Count == 0 ? 0 : Math.Clamp(state.ActiveGroup, 0, _groups.Count - 1);
     }
 
@@ -337,6 +319,7 @@ public sealed class NavigationModel
         _store?.Save(new PersistedState
         {
             ActiveGroup = _currentGroup,
+            MainSlot = _mainSlot,
             Groups = _groups.Select(g => new PersistedGroup
             {
                 Name = g.Name,
