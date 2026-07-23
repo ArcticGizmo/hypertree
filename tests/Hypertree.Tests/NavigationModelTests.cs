@@ -302,6 +302,28 @@ public class NavigationModelTests
         Assert.Equal(new[] { "feat-2" }, map.Groups.Select(g => g.Name));
     }
 
+    // ── Reconcile against externally-deleted desktops ───────────────────────────
+
+    [Fact]
+    public void Reconcile_drops_group_desktops_the_os_no_longer_has()
+    {
+        var (m, c) = Pivot(); // feat-1: a,b,c (10,11,12); feat-2: x,y
+        c.Remove(D(11), T0);  // user deletes feat-1's "b" from Task View
+        m.Reconcile();
+        var g = m.BuildMap().Groups.First(x => x.Name == "feat-1");
+        Assert.Equal(new[] { "a", "c" }, g.Desktops.Select(t => t.Label));
+    }
+
+    [Fact]
+    public void Reconcile_removes_a_group_whose_desktops_all_vanish()
+    {
+        var (m, c) = Pivot();
+        c.Remove(D(20), T0);
+        c.Remove(D(21), T0); // feat-2 entirely gone from the OS
+        m.Reconcile();
+        Assert.Equal(new[] { "feat-1" }, m.BuildMap().Groups.Select(g => g.Name));
+    }
+
     // ── Single-desktop deletion ──────────────────────────────────────────────────
 
     [Fact]

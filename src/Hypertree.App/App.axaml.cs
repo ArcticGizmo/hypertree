@@ -150,6 +150,7 @@ public sealed class App : Application
         if (_model is null || _overlay is null) return;
         if (_overlay.IsOpen) { _overlay.Close(); return; }
 
+        _model.Reconcile(); // drop any externally-deleted desktops before showing the map
         _overlay.Open(_model.BuildMap()); // vertical model renders the stack around main — no reorder
     }
 
@@ -165,6 +166,7 @@ public sealed class App : Application
         if (_model is null || _activator is null) return;
         if (_palette is not null) { _palette.Close(); return; } // re-press toggles closed
 
+        _model.Reconcile(); // drop any desktops deleted out from under us before offering jumps
         NavMap map = _model.BuildMap();
         var items = new List<PaletteItem>();
 

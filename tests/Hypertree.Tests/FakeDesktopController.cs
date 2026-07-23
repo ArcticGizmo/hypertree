@@ -30,10 +30,17 @@ internal sealed class FakeDesktopController : IDesktopController
         Current = id;
     }
 
-    // Not exercised by the navigation model — the fake only needs Current + SwitchTo.
+    /// <summary>Simulate an external desktop deletion (e.g. the user removing it from Task View), so
+    /// reconciliation can be tested. Removes it from the list; if it was current, falls back.</summary>
+    public void Remove(DesktopId id, DesktopId fallback)
+    {
+        _desktops.RemoveAll(d => d.Id == id);
+        if (Current == id) Current = fallback;
+    }
+
+    // Not exercised by the navigation model — the fake only needs Current + SwitchTo + Remove.
     public DesktopId Create(string name) => throw new NotSupportedException();
     public void Rename(DesktopId id, string name) => throw new NotSupportedException();
-    public void Remove(DesktopId id, DesktopId fallback) => throw new NotSupportedException();
     public string GetName(DesktopId id) => _desktops.First(d => d.Id == id).Name;
     public void MoveWindowToDesktop(nint hwnd, DesktopId id) => throw new NotSupportedException();
     public void PinWindow(nint hwnd) { }

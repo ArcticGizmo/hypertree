@@ -55,7 +55,13 @@ public sealed class VirtualDesktopController : IDesktopController
         return result;
     }
 
-    public void SwitchTo(DesktopId id) => _vdm.SwitchDesktop(Resolve(id));
+    // Switch/rename/remove tolerate a desktop that no longer exists (e.g. the user deleted it from
+    // Task View): the id is stale, so there's nothing to do — no-op rather than crash the tray. The
+    // navigation model reconciles the stale record separately.
+    public void SwitchTo(DesktopId id)
+    {
+        if (TryResolve(id) is { } vd) _vdm.SwitchDesktop(vd);
+    }
 
     public DesktopId Create(string name)
     {
@@ -64,14 +70,25 @@ public sealed class VirtualDesktopController : IDesktopController
         return new DesktopId(vd.GetId());
     }
 
-    public void Rename(DesktopId id, string name) => SetName(Resolve(id), name);
+    public void Rename(DesktopId id, string name)
+    {
+        if (TryResolve(id) is { } vd) SetName(vd, name);
+    }
 
-    public void Remove(DesktopId id, DesktopId fallback) => _vdm.RemoveDesktop(Resolve(id), Resolve(fallback));
+    public void Remove(DesktopId id, DesktopId fallback)
+    {
+        IVirtualDesktop? vd = TryResolve(id);
+        if (vd is null) return;                 // already gone
+        IVirtualDesktop? fb = TryResolve(fallback) ?? _vdm.GetCurrentDesktop();
+        if (fb is not null) _vdm.RemoveDesktop(vd, fb);
+    }
 
-    public string GetName(DesktopId id) => HString.Read(Resolve(id).GetName());
+    public string GetName(DesktopId id) => TryResolve(id) is { } vd ? HString.Read(vd.GetName()) : "";
 
     public void MoveWindowToDesktop(nint hwnd, DesktopId id)
-        => _vdm.MoveViewToDesktop(ViewFor(hwnd), Resolve(id));
+    {
+        if (TryResolve(id) is { } vd) _vdm.MoveViewToDesktop(ViewFor(hwnd), vd);
+    }
 
     public void PinWindow(nint hwnd) => _pinned.PinView(ViewFor(hwnd));
 
@@ -85,12 +102,12 @@ public sealed class VirtualDesktopController : IDesktopController
         return view;
     }
 
-    /// <summary>Resolve a Core <see cref="DesktopId"/> to the live COM desktop object.</summary>
-    private IVirtualDesktop Resolve(DesktopId id)
+    /// <summary>Resolve a Core <see cref="DesktopId"/> to the live COM desktop object, or null if the
+    /// OS no longer has that desktop (deleted out from under us).</summary>
+    private IVirtualDesktop? TryResolve(DesktopId id)
     {
         Guid g = id.Value;
-        return _vdm.FindDesktop(ref g)
-               ?? throw new ArgumentException($"No virtual desktop with id {id}.", nameof(id));
+        return _vdm.FindDesktop(ref g);
     }
 
     private void SetName(IVirtualDesktop vd, string name)

@@ -268,6 +268,24 @@ public sealed class NavigationModel
         else _currentGroup = Math.Clamp(_currentGroup, 0, _groups.Count - 1);
     }
 
+    /// <summary>
+    /// Reconcile against the OS: drop any group desktops the OS no longer has (e.g. the user deleted a
+    /// desktop from Task View), remove groups left empty, refresh the top row, and re-anchor. Call this
+    /// before surfacing the map/palette so stale records are never shown or navigated to.
+    /// </summary>
+    public void Reconcile()
+    {
+        var live = _desktops.List().Select(d => d.Id.Value).ToHashSet();
+        for (int gi = _groups.Count - 1; gi >= 0; gi--)
+        {
+            Group g = _groups[gi];
+            for (int j = g.Count - 1; j >= 0; j--)
+                if (!live.Contains(g.Desktops[j].Id.Value)) g.RemoveDesktopAt(j);
+            if (g.Count == 0) { _groups.RemoveAt(gi); AdjustForRemoval(gi); }
+        }
+        Resync(); // rebuilds the top row from the live list, re-anchors to the OS current, saves
+    }
+
     /// <summary>Re-anchor to whatever desktop the OS is now showing (after a create/destroy). Main keeps
     /// its slot; only the cursor moves.</summary>
     public void Resync()
