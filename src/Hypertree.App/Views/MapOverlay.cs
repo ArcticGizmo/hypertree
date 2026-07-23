@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -72,7 +73,33 @@ internal sealed class MapOverlay
         foreach (Window d in _dims) Pin(d);
     }
 
-    public void Refresh(NavMap map) => _map?.Render(map);
+    public void Refresh(NavMap map)
+    {
+        _map?.Render(map);
+        // Navigating switches the desktop, which can surface the target desktop's foreground window
+        // (e.g. VS Code) above the pinned map. Re-lift the map to the top of the topmost band after
+        // each interaction — without activating, so we don't steal focus or disturb the hotkey thread.
+        BringToTop();
+    }
+
+    private static readonly nint HWND_TOPMOST = new(-1);
+    private const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOACTIVATE = 0x0010;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+    // Lift the map (and, beneath it, the dim windows) back to the top of the always-on-top band.
+    private void BringToTop()
+    {
+        foreach (Window d in _dims) Lift(d);
+        if (_map is not null) Lift(_map); // map last, so it sits above the dims
+    }
+
+    private static void Lift(Window w)
+    {
+        nint h = w.TryGetPlatformHandle()?.Handle ?? 0;
+        if (h != 0) SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
 
     public void Close()
     {
