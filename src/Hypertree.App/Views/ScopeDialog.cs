@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Styling;
 
 namespace Hypertree.App.Views;
 
@@ -20,13 +21,16 @@ internal sealed class ScopeDialog : Window
     public ScopeDialog()
     {
         Title = "New group";
+        RequestedThemeVariant = ThemeVariant.Dark; // match the board/palette look
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         SizeToContent = SizeToContent.WidthAndHeight;
         CanResize = false;
         Width = 380;
+        Background = new SolidColorBrush(Color.Parse("#12161F"));
 
-        var name = new TextBox { PlaceholderText = "scope name (e.g. feat-123)", Text = "feat-" };
-        var labels = new TextBox { PlaceholderText = "desktop labels, comma-separated", Text = "SPA, API, Mobile" };
+        // No prefilled defaults — you must type a name and at least one desktop label for Create.
+        var name = new TextBox { PlaceholderText = "scope name (e.g. feat-123)" };
+        var labels = new TextBox { PlaceholderText = "desktop labels, comma-separated (e.g. SPA, API)" };
 
         var ok = new Button { Content = "Create", IsDefault = true, HorizontalAlignment = HorizontalAlignment.Right };
         var cancel = new Button { Content = "Cancel", IsCancel = true };
