@@ -44,7 +44,6 @@ public sealed class App : Application
     private NavigationModel? _model;
     private HudWindow? _hud;
     private MapOverlay? _overlay;
-    private MoveWindowsOverlay? _moveOverlay;
     private DesktopId? _moveOrigin; // where the current move flow started, for cancel/restore
     private TaskbarLabel? _taskbarLabel;
     private TrayIcon? _tray;
@@ -133,13 +132,6 @@ public sealed class App : Application
         _overlay.RemoveGroupRequested += RemoveGroup;
         _overlay.SettingsRequested += OpenSettings;
 
-        // The two-phase "move windows" overlay. It holds no model — it raises intent, we service it.
-        _moveOverlay = new MoveWindowsOverlay(_desktops, _activator);
-        _moveOverlay.TargetingEntered += () => _moveOverlay!.ShowTargeting(_model!.BuildMap(_moveOrigin));
-        _moveOverlay.NavigateRequested += a => { _model!.Apply(a); _moveOverlay!.RefreshBoard(_model.BuildMap(_moveOrigin)); };
-        _moveOverlay.MoveRequested += MoveSelectedWindows;
-        _moveOverlay.Cancelled += CancelMove;
-
         RegisterHotkeys();
         BuildTray();
     }
@@ -171,9 +163,9 @@ public sealed class App : Application
     private void Navigate(NavAction action)
     {
         if (_model is null || _desktops is null) return;
-        // The move overlay owns the arrows while it's up (its own plain-arrow handlers drive it), so
+        // The move content owns the arrows while it's up (its own plain-arrow handlers drive it), so
         // an out-of-habit Ctrl+Alt+Arrow mustn't also navigate underneath it.
-        if (_moveOverlay is { IsOpen: true }) return;
+        if (_stage?.Current is MoveContent) return;
         // Start of a gesture: remember where we came from, so releasing Ctrl+Alt can record it as
         // "last visited". A poll watches for the release (works whether flashing or in the map).
         _gestureFrom ??= _desktops.Current;
@@ -241,18 +233,24 @@ public sealed class App : Application
     // Phase 1: snapshot the current desktop's windows and open the picker. Re-press toggles it closed.
     private void ToggleMoveWindows()
     {
-        if (_model is null || _desktops is null || _moveOverlay is null) return;
-        if (_moveOverlay.IsOpen) { CancelMove(); return; }
-        _stage?.Dismiss(); // don't stack the move overlay on top of an open map/palette
+        if (_model is null || _desktops is null || _stage is null) return;
+        if (_stage.Current is MoveContent) { _stage.Dismiss(); return; } // re-press cancels (via OnRemoved)
 
         _model.Reconcile();
         _moveOrigin = _desktops.Current;
         var session = new WindowMoveSession(_desktops.WindowsOn(_moveOrigin.Value));
-        _moveOverlay.Open(session);
+
+        // Presenting the move content on the stage swaps out any open map/palette in place. Navigation
+        // and the move are serviced here; the board is pulled live from the model, centred on the origin.
+        var content = new MoveContent(session) { BoardProvider = () => _model!.BuildMap(_moveOrigin) };
+        content.NavigateRequested += a => _model!.Apply(a);
+        content.MoveRequested += MoveSelectedWindows;
+        content.Cancelled += CancelMove;
+        _stage.Present(content);
     }
 
     // Phase 2 commit: we've navigated to the destination (it's the current desktop), so move each
-    // selected window there and close. We stay on the destination.
+    // selected window there. The content dismisses the stage itself; we stay on the destination.
     private void MoveSelectedWindows(IReadOnlyList<nint> hwnds)
     {
         if (_desktops is null) return;
@@ -261,18 +259,17 @@ public sealed class App : Application
         {
             try { _desktops.MoveWindowToDesktop(h, dest); } catch { /* window may have closed — best-effort */ }
         }
-        _moveOverlay?.Close();
         _moveOrigin = null;
         RefreshOrFlash(); // flash the destination with its now-updated window counts
     }
 
-    // Cancel (Esc / Backspace / re-press): return to where the move started (phase 2 may have navigated
-    // us away) and re-anchor the model there.
+    // Cancel (Esc / Backspace / click-away / re-press) — raised from the move content's OnRemoved as the
+    // stage dismisses it: return to where the move started (phase 2 may have navigated us away) and
+    // re-anchor the model there.
     private void CancelMove()
     {
         if (_desktops is not null && _moveOrigin is { } origin && _desktops.Current != origin)
             _desktops.SwitchTo(origin);
-        _moveOverlay?.Close();
         _moveOrigin = null;
         _model?.Resync();
     }
@@ -392,7 +389,7 @@ public sealed class App : Application
 
     private void ToggleCommandPalette()
     {
-        if (_moveOverlay is { IsOpen: true }) return; // don't stack the palette over an active move
+        if (_stage?.Current is MoveContent) return; // don't stack the palette over an active move
         if (_stage?.Current is PaletteContent) { _stage.Dismiss(); return; } // re-press toggles closed
         OpenCommandPalette();
     }
@@ -930,8 +927,7 @@ public sealed class App : Application
         _hotkeys.Clear();
         if (_tray is not null) _tray.IsVisible = false;
         _dialog?.Close();
-        _stage?.Close(); // closes the shared host + dims (map / palettes live here)
-        _moveOverlay?.Close();
+        _stage?.Close(); // closes the shared host + dims (map / palettes / move all live here)
         _hud?.Close();
         _taskbarLabel?.Close();
         _nameDialog?.Close();

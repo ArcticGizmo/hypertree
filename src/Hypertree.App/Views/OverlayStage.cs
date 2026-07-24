@@ -44,6 +44,8 @@ internal sealed class OverlayStage
     /// <summary>The host window handle — the destination for the move picker's DWM thumbnails.</summary>
     public nint HostHandle => _host?.TryGetPlatformHandle()?.Handle ?? 0;
     public double HostScaling => _host?.RenderScaling ?? 1.0;
+    public double HostWidth => _host?.Width ?? 0;
+    public double HostHeight => _host?.Height ?? 0;
 
     /// <summary>Screen-relative → host-relative point translation, for positioning DWM thumbnails.</summary>
     public Point PointInHost(Visual v) => (_host is not null ? v.TranslatePoint(new Point(0, 0), _host) : null) ?? default;
@@ -74,6 +76,7 @@ internal sealed class OverlayStage
         BringToTop();
         if (HostHandle != 0) _activator.ForceForeground(HostHandle);
         _host.Activate();
+        _host.Focus(); // window-level key focus for content with no focusable child (map/move)
         content.OnPresented(this);
 
         Dispatcher.UIThread.Post(() => _armed = true, DispatcherPriority.Background);
@@ -97,6 +100,10 @@ internal sealed class OverlayStage
         _host?.Hide();
         _shown = false;
     }
+
+    /// <summary>Re-assert topmost — after a navigation whose desktop switch can surface a foreground
+    /// window above the host (content that mutates its view in place, rather than re-presenting).</summary>
+    public void BringToFront() => BringToTop();
 
     /// <summary>Give keyboard focus to a control within the host (e.g. a palette's search box).</summary>
     public void Focus(Control c) => c.Focus();
