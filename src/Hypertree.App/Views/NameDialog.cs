@@ -2,70 +2,63 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Styling;
+using Hypertree.Desktops;
 using Hypertree.Platform;
 
 namespace Hypertree.App.Views;
 
 /// <summary>
 /// A tiny single-field prompt: a title, a one-line explanation, and a text box. Raises
-/// <see cref="Confirmed"/> with the trimmed text (never empty), then closes. Same dark look as the
-/// group dialog / palette. Used for naming a snapshot.
+/// <see cref="Confirmed"/> with the trimmed text (never empty), then closes. Built on
+/// <see cref="OverlayPrompt"/>, so it's a persistent, pinned, top-most surface that survives desktop
+/// switches rather than a losable dialog. Used for naming a snapshot or a group template.
 /// </summary>
-internal sealed class NameDialog : Window
+internal sealed class NameDialog : OverlayPrompt
 {
     public event Action<string>? Confirmed;
 
+    private readonly TextBox _input;
+    protected override Control? InitialFocus => _input;
+
     public NameDialog(string title, string explanation, string placeholder,
-                      IForegroundActivator activator, string confirmLabel = "Save")
+                      IForegroundActivator activator, IDesktopController desktops, string confirmLabel = "Save")
+        : base(activator, desktops)
     {
         Title = title;
-        RequestedThemeVariant = ThemeVariant.Dark;
-        WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        SizeToContent = SizeToContent.WidthAndHeight;
-        CanResize = false;
-        Width = 380;
-        Background = new SolidColorBrush(Color.Parse("#12161F"));
-
-        var input = new TextBox { PlaceholderText = placeholder };
-
-        // Summoned from a background tray, so grab the foreground the same way the palettes do, then
-        // put the caret straight in the box so you can type the name immediately.
-        Opened += (_, _) =>
-        {
-            if (TryGetPlatformHandle() is { } handle) activator.ForceForeground(handle.Handle);
-            Activate();
-            input.Focus();
-        };
+        _input = new TextBox { PlaceholderText = placeholder };
 
         var ok = new Button { Content = confirmLabel, IsDefault = true, HorizontalAlignment = HorizontalAlignment.Right };
         var cancel = new Button { Content = "Cancel", IsCancel = true };
         ok.Click += (_, _) =>
         {
-            string n = input.Text?.Trim() ?? "";
+            string n = _input.Text?.Trim() ?? "";
             if (n.Length == 0) return; // require a name
             Confirmed?.Invoke(n);
             Close();
         };
         cancel.Click += (_, _) => Close();
 
-        Content = new StackPanel
+        SetCard(new Border
         {
-            Margin = new Thickness(16),
-            Spacing = 8,
-            Children =
+            Background = CardBg, BorderBrush = CardStroke, BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12), Width = 380, Padding = new Thickness(16),
+            Child = new StackPanel
             {
-                new TextBlock { Text = title, FontWeight = FontWeight.SemiBold },
-                new TextBlock { Text = explanation, TextWrapping = TextWrapping.Wrap,
-                                Foreground = new SolidColorBrush(Color.Parse("#999")), FontSize = 12 },
-                input,
-                new StackPanel
+                Spacing = 8,
+                Children =
                 {
-                    Orientation = Orientation.Horizontal, Spacing = 8,
-                    HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0),
-                    Children = { cancel, ok },
+                    new TextBlock { Text = title, FontWeight = FontWeight.SemiBold },
+                    new TextBlock { Text = explanation, TextWrapping = TextWrapping.Wrap,
+                                    Foreground = Muted, FontSize = 12 },
+                    _input,
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal, Spacing = 8,
+                        HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0),
+                        Children = { cancel, ok },
+                    },
                 },
             },
-        };
+        });
     }
 }

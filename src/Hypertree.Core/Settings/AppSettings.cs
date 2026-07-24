@@ -18,7 +18,19 @@ public sealed class AppSettings
 
     /// <summary>Fixed on-screen time for the flash when hold-to-keep is off.</summary>
     public int FlashTimeoutMs { get; set; } = 1500;
+
+    /// <summary>Reusable group recipes, offered as a picker when standing up a new group so you don't
+    /// retype the desktop set each time. Empty by default — you build them by promoting a group you
+    /// already made ("Save current group as template…").</summary>
+    public List<GroupTemplate> GroupTemplates { get; set; } = new();
 }
+
+/// <summary>
+/// A reusable recipe for a group: a display <paramref name="Name"/> and its ordered desktop
+/// <paramref name="Labels"/>. Picked when creating a new group to pre-fill the desktop set (the group's
+/// own instance name is still typed per-branch — the template only carries the desktops).
+/// </summary>
+public sealed record GroupTemplate(string Name, IReadOnlyList<string> Labels);
 
 /// <summary>Load/save the persisted settings. Behind an interface so tests use an in-memory fake.</summary>
 public interface ISettingsStore

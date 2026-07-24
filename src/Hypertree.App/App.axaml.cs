@@ -327,13 +327,22 @@ public sealed class App : Application
 
     private void ToggleCommandPalette()
     {
-        if (_activator is null) return;
+        if (_activator is null || _model is null) return;
         if (_palette is not null) { _palette.Close(); return; } // re-press toggles closed
 
+        _model.Reconcile(); // drop any externally-deleted desktops so the context board is accurate
+
+        // Preview mode, like the jump palette: show a board underneath so a command reads in context
+        // ("blue = you are here"). Most rows fall back to the current map; commands with a distinct
+        // target supply their own board that highlights what they'll act on (green).
         var items = BuildCommands()
-            .Select(c => new PaletteItem(c.Name, null, "▸", c.Run))
+            .Select(c => new PaletteItem(c.Name, c.DisabledReason,
+                                         c.DisabledReason is null ? "▸" : null, c.Run,
+                                         Preview: c.Preview ?? (() => _model!.BuildMap()),
+                                         DisabledReason: c.DisabledReason))
             .ToList();
-        OpenPalette("Run a command…", "↑↓ move · ↵ run · Esc close", items);
+        OpenPalette("Run a command…", "↑↓ move · ↵ run · Esc close · blue = you are here", items,
+                    previewMode: true);
     }
 
     // The command registry. A few real commands (reusing existing handlers) plus stubs for features
@@ -341,6 +350,17 @@ public sealed class App : Application
     private IReadOnlyList<Command> BuildCommands()
     {
         Action stub(string name) => () => Console.Error.WriteLine($"Command “{name}” is not implemented yet.");
+
+        // "Save current group as template…" only makes sense inside a group — greyed out with a reason
+        // on the main timeline, so it stays discoverable rather than disappearing.
+        bool inGroup = _model is not null && !_model.OnTop && _model.CurrentGroupIndex >= 0;
+        string? saveTemplateDisabled = inGroup ? null : "you’re on the main timeline — enter a group first";
+
+        // The group a "current group" command would act on: the one you're in, or (on main) the one
+        // directly below main. Used to highlight that group green in the command's preview board.
+        int targetGroup = _model?.CurrentGroupIndex ?? -1;
+        Func<NavMap>? groupTargetPreview = targetGroup >= 0 ? () => PreviewGroupTarget(targetGroup) : null;
+
         return new List<Command>
         {
             // Post so this command's palette finishes closing (clearing _palette) before the next
@@ -348,9 +368,14 @@ public sealed class App : Application
             new("Jump to desktop…", () => Dispatcher.UIThread.Post(ToggleSpotlight)),
             new("Open map", () => Dispatcher.UIThread.Post(ToggleMap)),
             new("Settings", OpenSettings),
-            new("New group…", PromptNewGroup),
+            // Post: New group… may itself open a template palette, so let this one close first.
+            new("New group…", () => Dispatcher.UIThread.Post(PromptNewGroup)),
+            new("Save current group as template…", () => Dispatcher.UIThread.Post(PromptSaveGroupAsTemplate),
+                saveTemplateDisabled, inGroup ? groupTargetPreview : null),
+            new("Manage templates…", () => Dispatcher.UIThread.Post(ManageTemplatesPrompt),
+                _settings.GroupTemplates.Count == 0 ? "no templates saved yet" : null),
             new("Delete current desktop", DeleteCurrentDesktop),
-            new("Remove current group", RemoveCurrentGroup),
+            new("Remove current group", RemoveCurrentGroup, Preview: groupTargetPreview),
             // Post so this command's palette finishes closing before the prompt/palette opens.
             new("Snapshot layout…", () => Dispatcher.UIThread.Post(PromptSnapshot)),
             new("Restore snapshot…", () => Dispatcher.UIThread.Post(RestoreSnapshotPrompt)),
@@ -366,17 +391,29 @@ public sealed class App : Application
         if (index >= 0) RemoveGroup(index);
     }
 
+    // Preview board that marks a whole group as the target: its tiles get the green "here" outline and
+    // the box stays bright (un-rested), so a "current group" command shows exactly which group it hits —
+    // even from the main timeline, where the blue cursor is elsewhere.
+    private NavMap PreviewGroupTarget(int groupIndex)
+    {
+        NavMap b = _model!.BuildMap();
+        var groups = b.Groups.Select(g => g.Index == groupIndex
+            ? g with { Desktops = g.Desktops.Select(d => d with { IsHere = true }).ToList(), IsCurrentLevel = true }
+            : g).ToList();
+        return b with { Groups = groups };
+    }
+
     // ── Snapshots: capture the whole layout under a name, restore it later ─────────
 
     // Prompt for a name, then save the current layout (main timeline + groups) under it.
     private void PromptSnapshot()
     {
-        if (_model is null || _snapshots is null || _activator is null) return;
+        if (_model is null || _snapshots is null || _activator is null || _desktops is null) return;
         if (_nameDialog is not null) { _nameDialog.Activate(); return; }
 
         _nameDialog = new NameDialog("Snapshot layout",
             "Save the current desktops and groups under a name you can restore to later.",
-            "snapshot name (e.g. before-refactor)", _activator);
+            "snapshot name (e.g. before-refactor)", _activator, _desktops);
         _nameDialog.Closed += (_, _) => _nameDialog = null;
         _nameDialog.Confirmed += SaveSnapshot;
         _nameDialog.Show();
@@ -404,18 +441,38 @@ public sealed class App : Application
             s.Name,
             $"{s.DesktopCount} desktops · {s.Groups.Count} groups",
             "⟲",
-            () => Dispatcher.UIThread.Post(() => ConfirmRestore(s)))) // let the palette close first
+            () => Dispatcher.UIThread.Post(() => ConfirmRestore(s)), // let the palette close first
+            Preview: () => SnapshotPreview(s)))                       // show the layout you'd restore to
             .ToList();
 
         OpenPalette(snaps.Count == 0 ? "No snapshots saved yet" : "Restore a snapshot…",
-                    "↑↓ move · ↵ restore · Esc close", items);
+                    "↑↓ move · ↵ restore · Esc close · preview = the saved layout", items,
+                    previewMode: true);
+    }
+
+    // Build a board from a saved snapshot (persisted labels only — no live windows), so the restore
+    // palette previews the layout you'd land in. All groups render bright (this is the whole target),
+    // and window counts are absent since the desktops may not exist yet.
+    private static NavMap SnapshotPreview(Snapshot snap)
+    {
+        var top = snap.MainDesktops.Select(d => new NavMapTile(d.Label, IsCurrent: false)).ToList();
+        var groups = new List<NavMapGroup>(snap.Groups.Count);
+        for (int gi = 0; gi < snap.Groups.Count; gi++)
+        {
+            PersistedGroup pg = snap.Groups[gi];
+            var tiles = pg.Desktops.Select(d => new NavMapTile(d.Label, IsCurrent: false)).ToList();
+            int cursor = tiles.Count == 0 ? 0 : Math.Clamp(pg.LastUsedIndex, 0, tiles.Count - 1);
+            groups.Add(new NavMapGroup(gi, pg.Name, tiles, IsCurrentLevel: true, cursor));
+        }
+        return new NavMap(top, TopCursor: 0, OnTop: true, groups, Math.Clamp(snap.MainSlot, 0, groups.Count));
     }
 
     private void ConfirmRestore(Snapshot snap)
     {
+        if (_activator is null || _desktops is null) return;
         var dlg = new ConfirmDialog(
             $"Restore snapshot “{snap.Name}”?\nYour desktops are rebuilt to match it. Desktops that aren’t part of the snapshot are removed (any windows on them move to another desktop).",
-            confirmLabel: "Restore");
+            _activator, _desktops, confirmLabel: "Restore");
         dlg.Confirmed += () => RestoreSnapshot(snap);
         dlg.Show();
     }
@@ -535,13 +592,37 @@ public sealed class App : Application
 
     // ── Group definition (M1 stand-in for M2's git-worktree flow) ─────────────────
 
+    // "New group…" — template-first when any templates exist, else straight to the blank dialog.
     private void PromptNewGroup()
     {
-        if (_desktops is null) return;
+        if (_desktops is null || _activator is null) return;
+
+        // No templates yet → the blank dialog, exactly as before (nothing regresses until you make one).
+        if (_settings.GroupTemplates.Count == 0) { OpenNewGroupDialog(null); return; }
+
+        // Otherwise pick a template first. "Blank group" is row 0 (the default selection), so the
+        // no-template path stays a quick Enter-Enter; picking a template pre-fills the labels instead.
+        var items = new List<PaletteItem>
+        {
+            new("Blank group", "type your own desktops", "+",
+                () => Dispatcher.UIThread.Post(() => OpenNewGroupDialog(null))),
+        };
+        foreach (GroupTemplate template in _settings.GroupTemplates)
+        {
+            GroupTemplate t = template; // capture per iteration
+            items.Add(new PaletteItem(t.Name, string.Join(" · ", t.Labels), "▸",
+                () => Dispatcher.UIThread.Post(() => OpenNewGroupDialog(t.Labels))));
+        }
+        OpenPalette("Pick a template…", "↑↓ move · ↵ use · Esc close", items);
+    }
+
+    // Open the group dialog, optionally pre-filled with a template's desktop labels.
+    private void OpenNewGroupDialog(IReadOnlyList<string>? prefillLabels)
+    {
+        if (_desktops is null || _activator is null) return;
         if (_dialog is not null) { _dialog.Activate(); return; }
 
-        _dialog = new ScopeDialog();
-        if (_overlay is { IsOpen: true }) _dialog.Topmost = true; // sit above the dimmed overlay
+        _dialog = new ScopeDialog(_activator, _desktops, prefillLabels); // pinned + top-most overlay, sits above the map
         _dialog.Closed += (_, _) => _dialog = null;
         _dialog.Confirmed += CreateGroup;
         _dialog.Show();
@@ -561,6 +642,66 @@ public sealed class App : Application
 
         _model.AddGroup(new Group(spec.Name, refs));
         RefreshOrFlash();
+    }
+
+    // ── Group templates (reusable desktop recipes for new groups) ─────────────────
+
+    // Promote the current group's desktop set into a named, reusable template.
+    private void PromptSaveGroupAsTemplate()
+    {
+        if (_model is null || _activator is null || _settingsStore is null || _desktops is null) return;
+        if (_model.OnTop) return; // greyed out in the palette; guard the direct path too
+        if (_nameDialog is not null) { _nameDialog.Activate(); return; }
+
+        int gi = _model.CurrentGroupIndex;
+        if (gi < 0) return;
+        NavMapGroup group = _model.BuildMap().Groups[gi];
+        var labels = group.Desktops.Select(d => d.Label).ToList();
+
+        _nameDialog = new NameDialog("Save as template",
+            "Save this group’s desktops as a reusable template you can pick when creating new groups.",
+            $"template name (e.g. {group.Name})", _activator, _desktops);
+        _nameDialog.Closed += (_, _) => _nameDialog = null;
+        _nameDialog.Confirmed += name => SaveTemplate(name, labels);
+        _nameDialog.Show();
+    }
+
+    private void SaveTemplate(string name, IReadOnlyList<string> labels)
+    {
+        if (_settingsStore is null) return;
+        // Same name overwrites, so re-saving updates a template in place (mirrors snapshots).
+        _settings.GroupTemplates.RemoveAll(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        _settings.GroupTemplates.Add(new GroupTemplate(name, labels));
+        _settingsStore.Save(_settings);
+    }
+
+    // A palette of saved templates; choosing one confirms, then deletes it.
+    private void ManageTemplatesPrompt()
+    {
+        if (_activator is null || _settingsStore is null) return;
+        if (_palette is not null) { _palette.Close(); return; } // re-invoke toggles closed
+
+        var items = _settings.GroupTemplates.Select(template =>
+        {
+            GroupTemplate t = template; // capture per iteration
+            return new PaletteItem(t.Name, string.Join(" · ", t.Labels), "🗑",
+                () => Dispatcher.UIThread.Post(() => ConfirmDeleteTemplate(t)));
+        }).ToList();
+
+        OpenPalette(items.Count == 0 ? "No templates saved yet" : "Delete a template…",
+                    "↑↓ move · ↵ delete · Esc close", items);
+    }
+
+    private void ConfirmDeleteTemplate(GroupTemplate template)
+    {
+        if (_activator is null || _desktops is null) return;
+        var dlg = new ConfirmDialog($"Delete template “{template.Name}”?", _activator, _desktops, confirmLabel: "Delete");
+        dlg.Confirmed += () =>
+        {
+            _settings.GroupTemplates.RemoveAll(t => t.Name.Equals(template.Name, StringComparison.OrdinalIgnoreCase));
+            _settingsStore?.Save(_settings);
+        };
+        dlg.Show();
     }
 
     private void RemoveGroup(int index)
@@ -626,8 +767,9 @@ public sealed class App : Application
 
     private void Confirm(string message, Action onConfirm)
     {
-        var dlg = new ConfirmDialog(message);
-        if (_overlay is { IsOpen: true }) dlg.Topmost = true;
+        if (_activator is null || _desktops is null) return;
+        // Always top-most and pinned across desktops now (OverlayPrompt), so it sits above the map on its own.
+        var dlg = new ConfirmDialog(message, _activator, _desktops);
         dlg.Confirmed += onConfirm;
         dlg.Show();
     }

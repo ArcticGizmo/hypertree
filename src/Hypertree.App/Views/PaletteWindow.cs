@@ -19,8 +19,11 @@ namespace Hypertree.App.Views;
 /// it's chosen, and — in preview mode — a <paramref name="Preview"/> board to show while it's the
 /// selected row (so you can see where a jump will land).</summary>
 internal sealed record PaletteItem(string Label, string? Detail, string? Glyph, Action Choose,
-                                   Func<NavMap>? Preview = null)
+                                   Func<NavMap>? Preview = null, string? DisabledReason = null)
 {
+    /// <summary>A greyed-out row: still shown and selectable (so the reason can be read), but inert.</summary>
+    public bool Enabled => DisabledReason is null;
+
     public bool Matches(string q) =>
         Label.Contains(q, StringComparison.OrdinalIgnoreCase)
         || (Detail?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false);
@@ -248,9 +251,10 @@ internal sealed class PaletteWindow : Window
 
     private Control BuildRow(PaletteItem item, int index)
     {
+        bool enabled = item.Enabled;
         var label = new TextBlock
         {
-            Text = item.Label, Foreground = Ink, FontSize = 14, FontWeight = FontWeight.SemiBold,
+            Text = item.Label, Foreground = enabled ? Ink : Muted, FontSize = 14, FontWeight = FontWeight.SemiBold,
             VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis,
         };
         Grid.SetColumn(label, 0);
@@ -278,10 +282,11 @@ internal sealed class PaletteWindow : Window
         var border = new Border
         {
             Child = grid, CornerRadius = new CornerRadius(7), Padding = new Thickness(12, 9),
-            Background = Brushes.Transparent, Cursor = new Cursor(StandardCursorType.Hand),
+            Background = Brushes.Transparent,
+            Cursor = new Cursor(enabled ? StandardCursorType.Hand : StandardCursorType.No),
         };
         border.PointerEntered += (_, _) => { _selected = index; Highlight(); };
-        border.PointerPressed += (_, _) => Choose(item);
+        border.PointerPressed += (_, _) => Choose(item); // no-op for disabled rows (guarded in Choose)
         return border;
     }
 
@@ -309,6 +314,7 @@ internal sealed class PaletteWindow : Window
 
     private void Choose(PaletteItem item)
     {
+        if (!item.Enabled) return; // greyed-out row: selectable so its reason can be read, but inert
         if (_chosen) return;
         _chosen = true;
         item.Choose();
