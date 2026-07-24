@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Hypertree.Platform;
@@ -40,6 +41,7 @@ internal sealed class SettingsWindow : Window
         _onSave = onSave;
 
         Title = "Hypertree Settings";
+        try { Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://hypertree/Assets/icon.ico"))); } catch { }
         RequestedThemeVariant = ThemeVariant.Dark;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         SizeToContent = SizeToContent.WidthAndHeight;

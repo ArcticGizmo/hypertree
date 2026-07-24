@@ -15,10 +15,18 @@
     <Product>Hypertree</Product>
     <Version>0.1.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- The .exe icon Explorer/taskbar shows. Generated from hypertree.svg by tools/IconGen. -->
+    <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <DefineConstants>$(DefineConstants);WINDOWS</DefineConstants>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- icon.png / icon.ico (generated from hypertree.svg) embedded so the tray + windows can load them
+         at runtime via avares://hypertree/Assets/... -->
+    <AvaloniaResource Include="Assets/**" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.0.5" />
