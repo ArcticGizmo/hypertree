@@ -339,6 +339,9 @@ public sealed class App : Application
         Action stub(string name) => () => Console.Error.WriteLine($"Command “{name}” is not implemented yet.");
         return new List<Command>
         {
+            // Post so this command's palette finishes closing (clearing _palette) before the
+            // spotlight opens — otherwise ToggleSpotlight would see the open palette and toggle it shut.
+            new("Jump to desktop…", () => Dispatcher.UIThread.Post(ToggleSpotlight)),
             new("Settings", OpenSettings),
             new("New group…", PromptNewGroup),
             new("Delete current desktop", DeleteCurrentDesktop),
