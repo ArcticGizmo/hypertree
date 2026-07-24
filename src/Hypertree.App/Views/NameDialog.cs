@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Hypertree.Platform;
 
 namespace Hypertree.App.Views;
 
@@ -15,7 +16,8 @@ internal sealed class NameDialog : Window
 {
     public event Action<string>? Confirmed;
 
-    public NameDialog(string title, string explanation, string placeholder, string confirmLabel = "Save")
+    public NameDialog(string title, string explanation, string placeholder,
+                      IForegroundActivator activator, string confirmLabel = "Save")
     {
         Title = title;
         RequestedThemeVariant = ThemeVariant.Dark;
@@ -26,6 +28,15 @@ internal sealed class NameDialog : Window
         Background = new SolidColorBrush(Color.Parse("#12161F"));
 
         var input = new TextBox { PlaceholderText = placeholder };
+
+        // Summoned from a background tray, so grab the foreground the same way the palettes do, then
+        // put the caret straight in the box so you can type the name immediately.
+        Opened += (_, _) =>
+        {
+            if (TryGetPlatformHandle() is { } handle) activator.ForceForeground(handle.Handle);
+            Activate();
+            input.Focus();
+        };
 
         var ok = new Button { Content = confirmLabel, IsDefault = true, HorizontalAlignment = HorizontalAlignment.Right };
         var cancel = new Button { Content = "Cancel", IsCancel = true };
