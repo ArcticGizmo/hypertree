@@ -78,6 +78,17 @@ public class NavigationModelTests
     }
 
     [Fact]
+    public void Describe_names_main_desktops_and_group_prefixes()
+    {
+        var (m, _) = Pivot();
+        // A main-timeline desktop: no group, label is the OS name from the top row.
+        Assert.Equal((null, "d0"), m.Describe(T0));
+        // A group desktop: prefixed with its group name, using its in-group label.
+        Assert.Equal(("feat-1", "b"), m.Describe(D(11)));
+        Assert.Equal(("feat-2", "y"), m.Describe(D(21)));
+    }
+
+    [Fact]
     public void MoveRight_and_left_walk_the_main_timeline_and_clamp()
     {
         var (m, c) = New(current: 0);

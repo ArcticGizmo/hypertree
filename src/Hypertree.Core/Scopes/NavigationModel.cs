@@ -65,6 +65,21 @@ public sealed class NavigationModel
 
     public IEnumerable<DesktopId> GroupDesktopIds() => _groups.SelectMany(g => g.Desktops).Select(d => d.Id);
 
+    /// <summary>Describe a desktop by its OS id for the persistent status label: its display label and
+    /// the name of the group it belongs to (null when it's a main-timeline desktop). Resolved by id so
+    /// it stays correct even after a switch made outside Hypertree; falls back to the live OS name for
+    /// an id we don't track yet.</summary>
+    public (string? group, string label) Describe(DesktopId id)
+    {
+        foreach (Group g in _groups)
+            foreach (DesktopRef d in g.Desktops)
+                if (d.Id == id) return (g.Name, d.Label);
+        foreach (DesktopRef d in _topRow)
+            if (d.Id == id) return (null, d.Label);
+        string name = _desktops.GetName(id);
+        return (null, string.IsNullOrEmpty(name) ? "Desktop" : name);
+    }
+
     private DesktopRef CurrentDesktop()
         => _onMain || _groups.Count == 0
             ? _topRow[Math.Clamp(_topIndex, 0, Math.Max(0, _topRow.Count - 1))]

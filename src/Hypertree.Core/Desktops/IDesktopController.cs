@@ -26,6 +26,14 @@ public interface IDesktopController
     /// </summary>
     IReadOnlyDictionary<DesktopId, int> WindowCounts();
 
+    /// <summary>
+    /// The application windows currently on <paramref name="id"/> — the same "countable" windows
+    /// <see cref="WindowCounts"/> tallies, but with each window's handle, title and process name so
+    /// they can be listed and moved (the "move windows" picker). Best-effort; order is enumeration
+    /// order (roughly Z-order).
+    /// </summary>
+    IReadOnlyList<WindowInfo> WindowsOn(DesktopId id);
+
     /// <summary>Switch the whole monitor array to <paramref name="id"/>. No-op if already there.</summary>
     void SwitchTo(DesktopId id);
 

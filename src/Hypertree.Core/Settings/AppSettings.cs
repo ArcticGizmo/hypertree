@@ -19,6 +19,11 @@ public sealed class AppSettings
     /// <summary>Fixed on-screen time for the flash when hold-to-keep is off.</summary>
     public int FlashTimeoutMs { get; set; } = 1500;
 
+    /// <summary>When true a persistent pill sits over the bottom of the primary screen naming the
+    /// desktop you're on (prefixed with the group name, in the group's colour, when inside a group).
+    /// It auto-hides while the cursor is near it so the taskbar underneath stays clickable.</summary>
+    public bool ShowTaskbarLabel { get; set; } = true;
+
     /// <summary>Reusable group recipes, offered as a picker when standing up a new group so you don't
     /// retype the desktop set each time. Empty by default — you build them by promoting a group you
     /// already made ("Save current group as template…").</summary>

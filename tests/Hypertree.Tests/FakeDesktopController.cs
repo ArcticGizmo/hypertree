@@ -29,6 +29,14 @@ internal sealed class FakeDesktopController : IDesktopController
     public Dictionary<DesktopId, int> WinCounts { get; } = new();
     public IReadOnlyDictionary<DesktopId, int> WindowCounts() => WinCounts;
 
+    /// <summary>Per-desktop window lists a test can seed to exercise the move picker; empty by default.</summary>
+    public Dictionary<DesktopId, List<WindowInfo>> Windows { get; } = new();
+    public IReadOnlyList<WindowInfo> WindowsOn(DesktopId id)
+        => Windows.TryGetValue(id, out var list) ? list : new List<WindowInfo>();
+
+    /// <summary>Every MoveWindowToDesktop call, in order — so the move flow's output is assertable.</summary>
+    public List<(nint hwnd, DesktopId to)> Moves { get; } = new();
+
     public void SwitchTo(DesktopId id)
     {
         Switches.Add(id);
@@ -47,7 +55,7 @@ internal sealed class FakeDesktopController : IDesktopController
     public DesktopId Create(string name) => throw new NotSupportedException();
     public void Rename(DesktopId id, string name) => throw new NotSupportedException();
     public string GetName(DesktopId id) => _desktops.First(d => d.Id == id).Name;
-    public void MoveWindowToDesktop(nint hwnd, DesktopId id) => throw new NotSupportedException();
+    public void MoveWindowToDesktop(nint hwnd, DesktopId id) => Moves.Add((hwnd, id));
     public void PinWindow(nint hwnd) { }
     public void UnpinWindow(nint hwnd) { }
 }

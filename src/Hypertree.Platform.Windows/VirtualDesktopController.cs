@@ -66,19 +66,56 @@ public sealed class VirtualDesktopController : IDesktopController
     public IReadOnlyDictionary<DesktopId, int> WindowCounts()
     {
         var counts = new Dictionary<DesktopId, int>();
-        uint own = GetCurrentProcessId();
+        foreach ((_, Guid g) in EnumAppWindows())
+        {
+            var id = new DesktopId(g);
+            counts[id] = counts.TryGetValue(id, out int n) ? n + 1 : 1;
+        }
+        return counts;
+    }
 
+    // The same countable-window walk, but returning each window's handle + title + owning process for
+    // the desktop asked about — the "move windows" picker. Text is best-effort (empty on failure).
+    public IReadOnlyList<WindowInfo> WindowsOn(DesktopId id)
+    {
+        var result = new List<WindowInfo>();
+        foreach ((nint hwnd, Guid g) in EnumAppWindows())
+            if (g == id.Value)
+                result.Add(new WindowInfo(hwnd, TitleOf(hwnd), ProcessOf(hwnd)));
+        return result;
+    }
+
+    // Walk every top-level window once, keeping only the "real" app windows (IsCountableWindow) that
+    // the documented API attributes to a concrete desktop. Shared by WindowCounts and WindowsOn.
+    private List<(nint hwnd, Guid desktop)> EnumAppWindows()
+    {
+        var list = new List<(nint, Guid)>();
+        uint own = GetCurrentProcessId();
         EnumWindows((hwnd, _) =>
         {
             if (!IsCountableWindow(hwnd, own)) return true;
             if (_publicVdm.GetWindowDesktopId(hwnd, out Guid g) != 0) return true; // HR != S_OK
             if (g == Guid.Empty) return true; // pinned / all-desktops / unassigned — don't attribute to one
-            var id = new DesktopId(g);
-            counts[id] = counts.TryGetValue(id, out int n) ? n + 1 : 1;
+            list.Add((hwnd, g));
             return true;
         }, 0);
+        return list;
+    }
 
-        return counts;
+    private static string TitleOf(nint hwnd)
+    {
+        int len = GetWindowTextLength(hwnd);
+        if (len <= 0) return "";
+        var sb = new System.Text.StringBuilder(len + 1);
+        GetWindowText(hwnd, sb, sb.Capacity);
+        return sb.ToString();
+    }
+
+    private static string ProcessOf(nint hwnd)
+    {
+        GetWindowThreadProcessId(hwnd, out uint pid);
+        try { return System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; }
+        catch { return ""; } // process gone / access denied — advisory only
     }
 
     // The alt-tab-ish filter: a visible, titled, top-level (un-owned) window that isn't a tool window,
@@ -111,6 +148,7 @@ public sealed class VirtualDesktopController : IDesktopController
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc cb, nint lparam);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint hwnd);
     [DllImport("user32.dll")] private static extern int GetWindowTextLength(nint hwnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetWindowTextW")] private static extern int GetWindowText(nint hwnd, System.Text.StringBuilder buf, int max);
     [DllImport("user32.dll")] private static extern nint GetAncestor(nint hwnd, int flags);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint hwnd, int nIndex);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint hwnd, out uint pid);

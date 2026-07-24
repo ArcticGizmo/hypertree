@@ -28,10 +28,12 @@ internal sealed class SettingsWindow : Window
 
     private readonly IForegroundActivator _activator;
     private readonly Action<AppSettings, bool> _onSave;
+    private readonly AppSettings _initial; // carries fields this window doesn't edit (e.g. templates) through Save
 
     private readonly CheckBox _holdToKeep;
     private readonly NumericUpDown _grace;
     private readonly NumericUpDown _timeout;
+    private readonly CheckBox _showTaskbarLabel;
     private readonly CheckBox _startOnLogin;
 
     public SettingsWindow(AppSettings settings, bool startOnLogin,
@@ -39,6 +41,7 @@ internal sealed class SettingsWindow : Window
     {
         _activator = activator;
         _onSave = onSave;
+        _initial = settings;
 
         Title = "Hypertree Settings";
         try { Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://hypertree/Assets/icon.ico"))); } catch { }
@@ -56,6 +59,11 @@ internal sealed class SettingsWindow : Window
         };
         _grace = Number(settings.FlashGraceMs, 0, 2000, 50);
         _timeout = Number(settings.FlashTimeoutMs, 200, 10000, 100);
+        _showTaskbarLabel = new CheckBox
+        {
+            Content = "Show the current desktop name over the taskbar",
+            IsChecked = settings.ShowTaskbarLabel, Foreground = Ink,
+        };
         _startOnLogin = new CheckBox
         {
             Content = "Start Hypertree when I log in", IsChecked = startOnLogin, Foreground = Ink,
@@ -91,6 +99,10 @@ internal sealed class SettingsWindow : Window
                     Field("Auto-hide after (ms)", _timeout),
 
                     Divider(),
+                    Title2("Desktop label"),
+                    _showTaskbarLabel,
+
+                    Divider(),
                     Title2("Startup"),
                     _startOnLogin,
 
@@ -116,6 +128,8 @@ internal sealed class SettingsWindow : Window
             FlashHoldToKeep = _holdToKeep.IsChecked ?? true,
             FlashGraceMs = (int)(_grace.Value ?? 100),
             FlashTimeoutMs = (int)(_timeout.Value ?? 1500),
+            ShowTaskbarLabel = _showTaskbarLabel.IsChecked ?? true,
+            GroupTemplates = _initial.GroupTemplates, // not edited here — carry through untouched
         };
         _onSave(settings, _startOnLogin.IsChecked ?? false);
         Close();

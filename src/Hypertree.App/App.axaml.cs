@@ -32,6 +32,7 @@ public sealed class App : Application
         (HotkeyKey.ArrowRight, NavAction.MoveRight),
     };
     private const HotkeyKey PaletteKey = HotkeyKey.P; // Ctrl+Alt+P — command palette (spotlight/jump lives inside it)
+    private const HotkeyKey MoveKey = HotkeyKey.M;    // Ctrl+Alt+M — the "move windows to another desktop" flow
 
     private readonly List<IGlobalHotkey> _hotkeys = new();
     // Desktops Hypertree created (for groups). Only these are ever torn down — the top row is the
@@ -43,6 +44,9 @@ public sealed class App : Application
     private NavigationModel? _model;
     private HudWindow? _hud;
     private MapOverlay? _overlay;
+    private MoveWindowsOverlay? _moveOverlay;
+    private DesktopId? _moveOrigin; // where the current move flow started, for cancel/restore
+    private TaskbarLabel? _taskbarLabel;
     private TrayIcon? _tray;
     private ScopeDialog? _dialog;
     private PaletteWindow? _palette;
@@ -109,6 +113,12 @@ public sealed class App : Application
         _hud = new HudWindow();
         ApplyFlashSettings();
 
+        // Persistent desktop-name pill over the taskbar. It re-reads the current desktop itself, but we
+        // also poke it on every navigation so it never lags a keystroke.
+        _taskbarLabel = new TaskbarLabel(CurrentDesktopLabel, _desktops);
+        _model.Changed += () => _taskbarLabel?.Sync();
+        ApplyTaskbarLabel();
+
         _overlay = new MapOverlay(_desktops);
         _overlay.GoToTopRequested += i => Jump(() => _model!.GoToTop(i));
         _overlay.GoToGroupRequested += (g, d) => Jump(() => _model!.GoToGroupDesktop(g, d));
@@ -118,6 +128,13 @@ public sealed class App : Application
         _overlay.NewGroupRequested += PromptNewGroup;
         _overlay.RemoveGroupRequested += RemoveGroup;
         _overlay.SettingsRequested += OpenSettings;
+
+        // The two-phase "move windows" overlay. It holds no model — it raises intent, we service it.
+        _moveOverlay = new MoveWindowsOverlay(_desktops, _activator);
+        _moveOverlay.TargetingEntered += () => _moveOverlay!.ShowTargeting(_model!.BuildMap(_moveOrigin));
+        _moveOverlay.NavigateRequested += a => { _model!.Apply(a); _moveOverlay!.RefreshBoard(_model.BuildMap(_moveOrigin)); };
+        _moveOverlay.MoveRequested += MoveSelectedWindows;
+        _moveOverlay.Cancelled += CancelMove;
 
         RegisterHotkeys();
         BuildTray();
@@ -138,6 +155,11 @@ public sealed class App : Application
         var cmdHk = PlatformServices.CreateGlobalHotkey();
         if (cmdHk.Register(Mods, PaletteKey, () => Dispatcher.UIThread.Post(ToggleCommandPalette))) _hotkeys.Add(cmdHk);
         else { cmdHk.Dispose(); Console.Error.WriteLine("Hotkey Ctrl+Alt+P (command palette) was refused by the OS."); }
+
+        // Ctrl+Alt+M — move the current desktop's windows to another desktop.
+        var moveHk = PlatformServices.CreateGlobalHotkey();
+        if (moveHk.Register(Mods, MoveKey, () => Dispatcher.UIThread.Post(ToggleMoveWindows))) _hotkeys.Add(moveHk);
+        else { moveHk.Dispose(); Console.Error.WriteLine("Hotkey Ctrl+Alt+M (move windows) was refused by the OS."); }
     }
 
     // Navigate. While the map overlay is open it stays open (its windows are pinned across the
@@ -145,6 +167,9 @@ public sealed class App : Application
     private void Navigate(NavAction action)
     {
         if (_model is null || _desktops is null) return;
+        // The move overlay owns the arrows while it's up (its own plain-arrow handlers drive it), so
+        // an out-of-habit Ctrl+Alt+Arrow mustn't also navigate underneath it.
+        if (_moveOverlay is { IsOpen: true }) return;
         // Start of a gesture: remember where we came from, so releasing Ctrl+Alt can record it as
         // "last visited". A poll watches for the release (works whether flashing or in the map).
         _gestureFrom ??= _desktops.Current;
@@ -205,6 +230,46 @@ public sealed class App : Application
     private void RefreshOverlay()
     {
         if (_model is not null && _overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap(_mapOpenedFrom));
+    }
+
+    // ── Move windows to another desktop (Ctrl+Alt+M) ────────────────────────────────
+
+    // Phase 1: snapshot the current desktop's windows and open the picker. Re-press toggles it closed.
+    private void ToggleMoveWindows()
+    {
+        if (_model is null || _desktops is null || _moveOverlay is null) return;
+        if (_moveOverlay.IsOpen) { CancelMove(); return; }
+
+        _model.Reconcile();
+        _moveOrigin = _desktops.Current;
+        var session = new WindowMoveSession(_desktops.WindowsOn(_moveOrigin.Value));
+        _moveOverlay.Open(session);
+    }
+
+    // Phase 2 commit: we've navigated to the destination (it's the current desktop), so move each
+    // selected window there and close. We stay on the destination.
+    private void MoveSelectedWindows(IReadOnlyList<nint> hwnds)
+    {
+        if (_desktops is null) return;
+        DesktopId dest = _desktops.Current;
+        foreach (nint h in hwnds)
+        {
+            try { _desktops.MoveWindowToDesktop(h, dest); } catch { /* window may have closed — best-effort */ }
+        }
+        _moveOverlay?.Close();
+        _moveOrigin = null;
+        RefreshOrFlash(); // flash the destination with its now-updated window counts
+    }
+
+    // Cancel (Esc / Backspace / re-press): return to where the move started (phase 2 may have navigated
+    // us away) and re-anchor the model there.
+    private void CancelMove()
+    {
+        if (_desktops is not null && _moveOrigin is { } origin && _desktops.Current != origin)
+            _desktops.SwitchTo(origin);
+        _moveOverlay?.Close();
+        _moveOrigin = null;
+        _model?.Resync();
     }
 
     // ── Spotlight (F4): jump to any existing desktop, or create one named the query ─────
@@ -328,6 +393,7 @@ public sealed class App : Application
     private void ToggleCommandPalette()
     {
         if (_activator is null || _model is null) return;
+        if (_moveOverlay is { IsOpen: true }) return; // don't stack the palette over an active move
         if (_palette is not null) { _palette.Close(); return; } // re-press toggles closed
 
         _model.Reconcile(); // drop any externally-deleted desktops so the context board is accurate
@@ -367,6 +433,8 @@ public sealed class App : Application
             // window opens — otherwise the toggle would see the open palette and close it again.
             new("Jump to desktop…", () => Dispatcher.UIThread.Post(ToggleSpotlight)),
             new("Open map", () => Dispatcher.UIThread.Post(ToggleMap)),
+            new("Move windows to another desktop…", () => Dispatcher.UIThread.Post(ToggleMoveWindows),
+                _desktops is not null && _desktops.WindowsOn(_desktops.Current).Count == 0 ? "no windows on this desktop" : null),
             new("Settings", OpenSettings),
             // Post: New group… may itself open a template palette, so let this one close first.
             new("New group…", () => Dispatcher.UIThread.Post(PromptNewGroup)),
@@ -376,6 +444,10 @@ public sealed class App : Application
                 _settings.GroupTemplates.Count == 0 ? "no templates saved yet" : null),
             new("Delete current desktop", DeleteCurrentDesktop),
             new("Remove current group", RemoveCurrentGroup, Preview: groupTargetPreview),
+            // Hard reset: collapse everything back to one desktop. Pointless (and greyed out) when
+            // there's already a single desktop and no groups.
+            new("Implode — reset to a single desktop", () => Dispatcher.UIThread.Post(Implode),
+                _model is not null && _model.TotalDesktops <= 1 ? "already a single desktop" : null),
             // Post so this command's palette finishes closing before the prompt/palette opens.
             new("Snapshot layout…", () => Dispatcher.UIThread.Post(PromptSnapshot)),
             new("Restore snapshot…", () => Dispatcher.UIThread.Post(RestoreSnapshotPrompt)),
@@ -389,6 +461,46 @@ public sealed class App : Application
         if (_model is null) return;
         int index = _model.CurrentGroupIndex;
         if (index >= 0) RemoveGroup(index);
+    }
+
+    // ── Implode: hard reset to a single desktop ────────────────────────────────────
+
+    // Remove every desktop but one and clear all groups — a clean slate. Guarded by a confirm.
+    // Mirrors RestoreSnapshot's teardown: stand on the survivor first so the current view is never
+    // yanked out from under us, then remove the rest (their windows fall back onto the survivor).
+    private void Implode()
+    {
+        if (_model is null || _desktops is null || _activator is null) return;
+
+        var dlg = new ConfirmDialog(
+            "Implode all desktops?\nEvery desktop and group is removed and you’re reset to a single desktop. Windows from the others move onto it. This can’t be undone.",
+            _activator, _desktops, confirmLabel: "Implode");
+        dlg.Confirmed += DoImplode;
+        dlg.Show();
+    }
+
+    private void DoImplode()
+    {
+        if (_model is null || _desktops is null) return;
+
+        _model.Reconcile(); // act on the live layout, not stale/externally-deleted desktops
+        IReadOnlyList<DesktopInfo> all = _desktops.List();
+        if (all.Count == 0) return; // nothing to do — never strip the machine to zero desktops
+
+        // Keep the OS's first desktop (the canonical "Desktop 1") as the survivor; everything
+        // consolidates onto it.
+        DesktopId survivor = all[0].Id;
+        _desktops.SwitchTo(survivor);
+
+        foreach (DesktopInfo d in all)
+        {
+            if (d.Id == survivor) continue;
+            _created.Remove(d.Id.Value);
+            try { _desktops.Remove(d.Id, survivor); } catch { /* already gone — best-effort */ }
+        }
+
+        _model.RestoreStructure(0, Array.Empty<Group>()); // no groups; top row re-derives to the survivor
+        RefreshOrFlash();
     }
 
     // Preview board that marks a whole group as the target: its tiles get the green "here" outline and
@@ -555,11 +667,29 @@ public sealed class App : Application
         _settings = settings;
         _settingsStore?.Save(settings);
         ApplyFlashSettings();
+        ApplyTaskbarLabel();
         _startup?.SetEnabled(startOnLogin);
     }
 
     private void ApplyFlashSettings()
         => _hud?.Configure(_settings.FlashHoldToKeep, _settings.FlashGraceMs, _settings.FlashTimeoutMs);
+
+    // Show or hide the persistent taskbar label to match the setting.
+    private void ApplyTaskbarLabel()
+    {
+        if (_taskbarLabel is null) return;
+        if (_settings.ShowTaskbarLabel) _taskbarLabel.Enable();
+        else _taskbarLabel.Disable();
+    }
+
+    // The (group, name) the taskbar label should show for the desktop the OS is currently on — resolved
+    // by id, so it's right even after a switch made outside Hypertree. Null before startup / during teardown.
+    private (string? group, string name)? CurrentDesktopLabel()
+    {
+        if (_model is null || _desktops is null) return null;
+        (string? group, string label) = _model.Describe(_desktops.Current);
+        return (group, label);
+    }
 
     private void RefreshOrFlash()
     {
@@ -573,6 +703,8 @@ public sealed class App : Application
         var header = new NativeMenuItem("Hypertree 0.1.0") { IsEnabled = false };
         var map = new NativeMenuItem("Open map");
         map.Click += (_, _) => ToggleMap();
+        var move = new NativeMenuItem("Move windows…");
+        move.Click += (_, _) => ToggleMoveWindows();
         var newGroup = new NativeMenuItem("New group…");
         newGroup.Click += (_, _) => PromptNewGroup();
         var settings = new NativeMenuItem("Settings…");
@@ -585,7 +717,7 @@ public sealed class App : Application
             Icon = TrayIconFactory.Create(),
             ToolTipText = "Hypertree",
             IsVisible = true,
-            Menu = new NativeMenu { header, new NativeMenuItemSeparator(), map, newGroup, settings, new NativeMenuItemSeparator(), exit },
+            Menu = new NativeMenu { header, new NativeMenuItemSeparator(), map, move, newGroup, settings, new NativeMenuItemSeparator(), exit },
         };
         TrayIcon.SetIcons(this, new TrayIcons { _tray });
     }
@@ -796,7 +928,9 @@ public sealed class App : Application
         if (_tray is not null) _tray.IsVisible = false;
         _dialog?.Close();
         _overlay?.Close();
+        _moveOverlay?.Close();
         _hud?.Close();
+        _taskbarLabel?.Close();
         _palette?.Close();
         _nameDialog?.Close();
         _settingsWindow?.Close();
