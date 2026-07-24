@@ -168,8 +168,7 @@ internal sealed class SettingsWindow : Window
         });
         Row("Ctrl+Alt+↑ ↓ ← →", "navigate");
         Row("Ctrl+Alt+Space", "open the map");
-        Row("Ctrl+Alt+P", "spotlight (jump/create)");
-        Row("Ctrl+Alt+Shift+P", "command palette");
+        Row("Ctrl+Alt+P", "command palette");
         rows.Children.Add(new TextBlock
         {
             Text = "Rebinding coming soon.", Foreground = Muted, FontSize = 11,

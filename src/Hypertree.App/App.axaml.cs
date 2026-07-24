@@ -32,7 +32,7 @@ public sealed class App : Application
         (HotkeyKey.ArrowRight, NavAction.MoveRight),
     };
     private const HotkeyKey MapKey = HotkeyKey.Space; // Ctrl+Alt+Space toggles the map overlay
-    private const HotkeyKey PaletteKey = HotkeyKey.P; // Ctrl+Alt+P spotlight; Ctrl+Alt+Shift+P command palette
+    private const HotkeyKey PaletteKey = HotkeyKey.P; // Ctrl+Alt+P — command palette (spotlight/jump lives inside it)
 
     private readonly List<IGlobalHotkey> _hotkeys = new();
     // Desktops Hypertree created (for groups). Only these are ever torn down — the top row is the
@@ -134,15 +134,11 @@ public sealed class App : Application
         if (mapHk.Register(Mods, MapKey, () => Dispatcher.UIThread.Post(ToggleMap))) _hotkeys.Add(mapHk);
         else { mapHk.Dispose(); Console.Error.WriteLine("Hotkey Ctrl+Alt+Space (map) was refused by the OS."); }
 
-        // Ctrl+Alt+P — spotlight (jump/create desktop).
-        var spotHk = PlatformServices.CreateGlobalHotkey();
-        if (spotHk.Register(Mods, PaletteKey, () => Dispatcher.UIThread.Post(ToggleSpotlight))) _hotkeys.Add(spotHk);
-        else { spotHk.Dispose(); Console.Error.WriteLine("Hotkey Ctrl+Alt+P (spotlight) was refused by the OS."); }
-
-        // Ctrl+Alt+Shift+P — command palette.
+        // Ctrl+Alt+P — command palette. (The spotlight/jump is still reachable from there via the
+        // "Jump to desktop…" command.)
         var cmdHk = PlatformServices.CreateGlobalHotkey();
-        if (cmdHk.Register(Mods | HotkeyModifiers.Shift, PaletteKey, () => Dispatcher.UIThread.Post(ToggleCommandPalette))) _hotkeys.Add(cmdHk);
-        else { cmdHk.Dispose(); Console.Error.WriteLine("Hotkey Ctrl+Alt+Shift+P (command palette) was refused by the OS."); }
+        if (cmdHk.Register(Mods, PaletteKey, () => Dispatcher.UIThread.Post(ToggleCommandPalette))) _hotkeys.Add(cmdHk);
+        else { cmdHk.Dispose(); Console.Error.WriteLine("Hotkey Ctrl+Alt+P (command palette) was refused by the OS."); }
     }
 
     // Navigate. While the map overlay is open it stays open (its windows are pinned across the
