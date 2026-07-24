@@ -49,7 +49,7 @@ public sealed class App : Application
     private TaskbarLabel? _taskbarLabel;
     private TrayIcon? _tray;
     private ScopeDialog? _dialog;
-    private PaletteWindow? _palette;
+    private OverlayStage? _stage;
     private SettingsWindow? _settingsWindow;
     private NameDialog? _nameDialog;
     private ISettingsStore? _settingsStore;
@@ -119,7 +119,11 @@ public sealed class App : Application
         _model.Changed += () => _taskbarLabel?.Sync();
         ApplyTaskbarLabel();
 
-        _overlay = new MapOverlay(_desktops);
+        // One shared, persistent presentation surface for the full-screen overlays (map + palettes).
+        // Swapping between them is an in-place content change, not a window teardown — no flash.
+        _stage = new OverlayStage(_desktops, _activator);
+
+        _overlay = new MapOverlay(_stage);
         _overlay.GoToTopRequested += i => Jump(() => _model!.GoToTop(i));
         _overlay.GoToGroupRequested += (g, d) => Jump(() => _model!.GoToGroupDesktop(g, d));
         _overlay.DeleteTopRequested += DeleteTopDesktop;
@@ -239,6 +243,7 @@ public sealed class App : Application
     {
         if (_model is null || _desktops is null || _moveOverlay is null) return;
         if (_moveOverlay.IsOpen) { CancelMove(); return; }
+        _stage?.Dismiss(); // don't stack the move overlay on top of an open map/palette
 
         _model.Reconcile();
         _moveOrigin = _desktops.Current;
@@ -274,10 +279,9 @@ public sealed class App : Application
 
     // ── Spotlight (F4): jump to any existing desktop, or create one named the query ─────
 
-    private void ToggleSpotlight()
+    private void OpenSpotlight()
     {
-        if (_model is null || _activator is null) return;
-        if (_palette is not null) { _palette.Close(); return; } // re-press toggles closed
+        if (_model is null) return;
 
         _model.Reconcile(); // drop any desktops deleted out from under us before offering jumps
         NavMap map = _model.BuildMap();
@@ -381,20 +385,21 @@ public sealed class App : Application
     private void OpenPalette(string placeholder, string hint, IReadOnlyList<PaletteItem> items,
                              Func<string, PaletteItem?>? createRow = null, bool previewMode = false)
     {
-        if (_activator is null) return;
-        _palette = new PaletteWindow(placeholder, hint, items, _activator, createRow, previewMode);
-        _palette.Closed += (_, _) => _palette = null;
-        _palette.Show();
-        _palette.TakeFocus();
+        _stage?.Present(new PaletteContent(placeholder, hint, items, createRow, previewMode));
     }
 
     // ── Command palette (F5): same look/feel, items are commands. Bones only. ───────────
 
     private void ToggleCommandPalette()
     {
-        if (_activator is null || _model is null) return;
         if (_moveOverlay is { IsOpen: true }) return; // don't stack the palette over an active move
-        if (_palette is not null) { _palette.Close(); return; } // re-press toggles closed
+        if (_stage?.Current is PaletteContent) { _stage.Dismiss(); return; } // re-press toggles closed
+        OpenCommandPalette();
+    }
+
+    private void OpenCommandPalette()
+    {
+        if (_model is null) return;
 
         _model.Reconcile(); // drop any externally-deleted desktops so the context board is accurate
 
@@ -427,30 +432,30 @@ public sealed class App : Application
         int targetGroup = _model?.CurrentGroupIndex ?? -1;
         Func<NavMap>? groupTargetPreview = targetGroup >= 0 ? () => PreviewGroupTarget(targetGroup) : null;
 
+        // Commands run synchronously: those that open another stage surface (map / a palette) swap it
+        // in place, so PaletteContent.Choose sees the stage is no longer the command palette and leaves
+        // it be; those that open a separate window (dialogs, settings, the move overlay) leave the
+        // command palette current, so Choose dismisses the stage behind them. Either way, no flash.
         return new List<Command>
         {
-            // Post so this command's palette finishes closing (clearing _palette) before the next
-            // window opens — otherwise the toggle would see the open palette and close it again.
-            new("Jump to desktop…", () => Dispatcher.UIThread.Post(ToggleSpotlight)),
-            new("Open map", () => Dispatcher.UIThread.Post(ToggleMap)),
-            new("Move windows to another desktop…", () => Dispatcher.UIThread.Post(ToggleMoveWindows),
+            new("Jump to desktop…", OpenSpotlight),
+            new("Open map", ToggleMap),
+            new("Move windows to another desktop…", ToggleMoveWindows,
                 _desktops is not null && _desktops.WindowsOn(_desktops.Current).Count == 0 ? "no windows on this desktop" : null),
             new("Settings", OpenSettings),
-            // Post: New group… may itself open a template palette, so let this one close first.
-            new("New group…", () => Dispatcher.UIThread.Post(PromptNewGroup)),
-            new("Save current group as template…", () => Dispatcher.UIThread.Post(PromptSaveGroupAsTemplate),
+            new("New group…", PromptNewGroup),
+            new("Save current group as template…", PromptSaveGroupAsTemplate,
                 saveTemplateDisabled, inGroup ? groupTargetPreview : null),
-            new("Manage templates…", () => Dispatcher.UIThread.Post(ManageTemplatesPrompt),
+            new("Manage templates…", ManageTemplatesPrompt,
                 _settings.GroupTemplates.Count == 0 ? "no templates saved yet" : null),
             new("Delete current desktop", DeleteCurrentDesktop),
             new("Remove current group", RemoveCurrentGroup, Preview: groupTargetPreview),
             // Hard reset: collapse everything back to one desktop. Pointless (and greyed out) when
             // there's already a single desktop and no groups.
-            new("Implode — reset to a single desktop", () => Dispatcher.UIThread.Post(Implode),
+            new("Implode — reset to a single desktop", Implode,
                 _model is not null && _model.TotalDesktops <= 1 ? "already a single desktop" : null),
-            // Post so this command's palette finishes closing before the prompt/palette opens.
-            new("Snapshot layout…", () => Dispatcher.UIThread.Post(PromptSnapshot)),
-            new("Restore snapshot…", () => Dispatcher.UIThread.Post(RestoreSnapshotPrompt)),
+            new("Snapshot layout…", PromptSnapshot),
+            new("Restore snapshot…", RestoreSnapshotPrompt),
             new("Add branch", stub("Add branch")),          // → M2 git
             new("Move desktop to group…", stub("Move desktop to group…")),
         };
@@ -546,7 +551,6 @@ public sealed class App : Application
     private void RestoreSnapshotPrompt()
     {
         if (_snapshots is null || _activator is null) return;
-        if (_palette is not null) { _palette.Close(); return; } // re-invoke toggles closed
 
         IReadOnlyList<Snapshot> snaps = _snapshots.Load();
         var items = snaps.Select(s => new PaletteItem(
@@ -811,7 +815,6 @@ public sealed class App : Application
     private void ManageTemplatesPrompt()
     {
         if (_activator is null || _settingsStore is null) return;
-        if (_palette is not null) { _palette.Close(); return; } // re-invoke toggles closed
 
         var items = _settings.GroupTemplates.Select(template =>
         {
@@ -927,11 +930,10 @@ public sealed class App : Application
         _hotkeys.Clear();
         if (_tray is not null) _tray.IsVisible = false;
         _dialog?.Close();
-        _overlay?.Close();
+        _stage?.Close(); // closes the shared host + dims (map / palettes live here)
         _moveOverlay?.Close();
         _hud?.Close();
         _taskbarLabel?.Close();
-        _palette?.Close();
         _nameDialog?.Close();
         _settingsWindow?.Close();
     }

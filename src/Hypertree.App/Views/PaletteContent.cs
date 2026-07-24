@@ -5,19 +5,14 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Platform;
-using Avalonia.Styling;
-using Avalonia.Threading;
-using Hypertree.Platform;
 using Hypertree.Scopes;
 
 namespace Hypertree.App.Views;
 
-/// <summary>One filterable row in a <see cref="PaletteWindow"/>: a primary <paramref name="Label"/>,
-/// an optional dimmer <paramref name="Detail"/> (also folded into the match text, so e.g. a group
-/// name filters its desktops), an optional trailing <paramref name="Glyph"/>, the action to run when
-/// it's chosen, and — in preview mode — a <paramref name="Preview"/> board to show while it's the
-/// selected row (so you can see where a jump will land).</summary>
+/// <summary>One filterable row in a palette: a primary <paramref name="Label"/>, an optional dimmer
+/// <paramref name="Detail"/> (also folded into the match text, so e.g. a group name filters its
+/// desktops), an optional trailing <paramref name="Glyph"/>, the action to run when it's chosen, and —
+/// in preview mode — a <paramref name="Preview"/> board to show while it's the selected row.</summary>
 internal sealed record PaletteItem(string Label, string? Detail, string? Glyph, Action Choose,
                                    Func<NavMap>? Preview = null, string? DisabledReason = null)
 {
@@ -30,17 +25,18 @@ internal sealed record PaletteItem(string Label, string? Detail, string? Glyph, 
 }
 
 /// <summary>
-/// The shared spotlight/command-palette base (F4 &amp; F5), modelled on perch's SessionSwitcherWindow:
-/// a keyboard-driven palette summoned by a global hotkey. A search box takes focus immediately; type
-/// to filter (case-insensitive Contains over label + detail), Up/Down or Tab to move, Enter to choose
-/// the highlighted row, Esc or click-away to dismiss. Because a tray-hotkey window must steal focus
-/// from a background process, it force-foregrounds on open via <see cref="IForegroundActivator"/>.
+/// The shared spotlight/command palette, hosted on the <see cref="OverlayStage"/>. A search box takes
+/// focus immediately; type to filter (case-insensitive Contains over label + detail), Up/Down or Tab to
+/// move, Enter to choose the highlighted row, Esc or click-away to dismiss.
 ///
-/// Two layouts: the default centred card (command palette), and <b>preview mode</b> (the jump palette)
-/// — a full-screen dim surface with the search card anchored to the top and the board rendered in the
-/// middle, re-drawn to highlight the currently-selected desktop so you can see the destination.
+/// Two layouts: the default centred card (command lists — a "popover" the stage shows without a dim,
+/// dismissed by clicking away), and <b>preview mode</b> (jump / previewed commands) — a full-screen dim
+/// surface with the card anchored to the top and a live board rendered below it, re-drawn to highlight
+/// the currently-selected desktop so the destination is visible. The window-level concerns (cover the
+/// primary, force-foreground, dismiss-on-deactivate) belong to the stage; this class is just the view
+/// plus its keyboard/filter behaviour.
 /// </summary>
-internal sealed class PaletteWindow : Window
+internal sealed class PaletteContent : IStageContent
 {
     // Reuse the board's dark palette so it reads as one app.
     private static readonly IBrush CardBg = new SolidColorBrush(Color.Parse("#12161F"));
@@ -52,7 +48,6 @@ internal sealed class PaletteWindow : Window
     private static readonly IBrush Accent = new SolidColorBrush(Color.Parse("#6EA8FF"));
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
 
-    private readonly IForegroundActivator _activator;
     private readonly IReadOnlyList<PaletteItem> _all;
     private readonly Func<string, PaletteItem?>? _createRow;
     private readonly bool _previewMode;
@@ -61,27 +56,19 @@ internal sealed class PaletteWindow : Window
     private readonly StackPanel _list;
     private readonly List<Control> _rows = new();
     private readonly Border? _previewBorder; // holds the board in preview mode
+    private readonly Control _root;
     private List<PaletteItem> _filtered;
     private int _selected;
     private bool _chosen;
-    private bool _ready; // armed once focus settles, so the foreground-forcing dance can't self-dismiss
+    private OverlayStage? _stage;
 
-    public PaletteWindow(string placeholder, string footerHint, IReadOnlyList<PaletteItem> items,
-                         IForegroundActivator activator, Func<string, PaletteItem?>? createRow = null,
-                         bool previewMode = false)
+    public PaletteContent(string placeholder, string footerHint, IReadOnlyList<PaletteItem> items,
+                          Func<string, PaletteItem?>? createRow = null, bool previewMode = false)
     {
-        _activator = activator;
         _all = items;
         _createRow = createRow;
         _previewMode = previewMode;
         _filtered = items.ToList();
-
-        WindowDecorations = WindowDecorations.None;
-        RequestedThemeVariant = ThemeVariant.Dark; // else the themed search box renders light (app is FluentTheme light)
-        TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
-        Topmost = true;
-        ShowInTaskbar = false;
-        CanResize = false;
 
         _search = new TextBox
         {
@@ -118,70 +105,61 @@ internal sealed class PaletteWindow : Window
             Child = new StackPanel { Children = { _search, scroll, footer } }, ClipToBounds = true,
             Width = 560,
         };
+        // Clicks on the card must not bubble to the stage backdrop (which would dismiss the popover).
+        card.AddHandler(InputElement.PointerPressedEvent, (_, e) => e.Handled = true, RoutingStrategies.Bubble);
 
         if (previewMode)
         {
-            // Full-screen dim surface: search card anchored top-centre, board filling the space below.
-            Background = new SolidColorBrush(Color.FromArgb(0x9E, 0x0E, 0x0E, 0x12));
-            WindowStartupLocation = WindowStartupLocation.Manual;
-            SizeToContent = SizeToContent.Manual;
             card.HorizontalAlignment = HorizontalAlignment.Center;
             card.VerticalAlignment = VerticalAlignment.Top;
             card.Margin = new Thickness(0, 44, 0, 0);
 
             _previewBorder = new Border { Margin = new Thickness(0, 0, 0, 24) };
-            // Re-render the board whenever its region is (re)sized — including the first real layout.
-            _previewBorder.PropertyChanged += (_, e) => { if (e.Property == BoundsProperty) UpdatePreview(); };
+            _previewBorder.PropertyChanged += (_, e) => { if (e.Property == Visual.BoundsProperty) UpdatePreview(); };
 
-            // DockPanel: card takes its natural height at the top, the board fills the space beneath it.
             DockPanel.SetDock(card, Dock.Top);
-            Content = new DockPanel { Children = { card, _previewBorder } };
+            _root = new DockPanel { Children = { card, _previewBorder } };
         }
         else
         {
-            Background = Brushes.Transparent;
-            Width = 560;
-            SizeToContent = SizeToContent.Height;
-            WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            Content = card;
+            // Centred card popover; the stage host is transparent (no dim) and dismisses on click-away.
+            card.HorizontalAlignment = HorizontalAlignment.Center;
+            card.VerticalAlignment = VerticalAlignment.Center;
+            _root = card;
         }
 
         // Tunnel so Up/Down/Tab/Enter/Esc win before the TextBox consumes them.
-        AddHandler(KeyDownEvent, OnPreviewKeyDown, RoutingStrategies.Tunnel);
-        Opened += (_, _) => { if (_previewMode) CoverPrimary(); _search.Focus(); };
-        Deactivated += (_, _) => { if (_ready && !_chosen) Close(); };
+        _root.AddHandler(InputElement.KeyDownEvent, OnPreviewKeyDown, RoutingStrategies.Tunnel);
 
         Rebuild();
     }
 
-    /// <summary>Force to the foreground and hand the search box focus — the app calls this right after
-    /// <see cref="Window.Show()"/>, since a global hotkey in a background tray doesn't grant foreground
-    /// rights on its own.</summary>
-    public void TakeFocus()
+    // ── IStageContent ────────────────────────────────────────────────────────────
+
+    public Control View => _root;
+    public bool Dim => _previewMode;
+    public bool DismissOnDeactivate => true;
+    public bool DismissOnClickAway => !_previewMode;
+
+    public void OnPresented(OverlayStage stage)
     {
-        if (TryGetPlatformHandle() is { } handle) _activator.ForceForeground(handle.Handle);
-        Activate();
+        _stage = stage;
         _search.Focus();
-        // Arm dismiss-on-deactivate only after this settles, so the foreground dance above doesn't
-        // immediately self-close the window.
-        Dispatcher.UIThread.Post(() => _ready = true, DispatcherPriority.Background);
+        if (_previewMode) UpdatePreview();
     }
 
-    private void CoverPrimary()
-    {
-        Screen? screen = Screens.Primary ?? (Screens.All.Count > 0 ? Screens.All[0] : null);
-        if (screen is null) return;
-        Position = screen.Bounds.Position;
-        Width = screen.Bounds.Width / screen.Scaling;
-        Height = screen.Bounds.Height / screen.Scaling;
-    }
+    public void OnRemoved() { }
+
+    public void OnKey(KeyEventArgs e) { } // handled by the tunneling handler on _root
+
+    // ── Behaviour (unchanged from the old window) ──────────────────────────────────
 
     private void OnPreviewKeyDown(object? sender, KeyEventArgs e)
     {
         switch (e.Key)
         {
             case Key.Escape:
-                Close();
+                _stage?.Dismiss();
                 e.Handled = true;
                 break;
             case Key.Down or Key.Tab when !e.KeyModifiers.HasFlag(KeyModifiers.Shift):
@@ -213,7 +191,6 @@ internal sealed class PaletteWindow : Window
         string q = (_search.Text ?? "").Trim();
         _filtered = q.Length == 0 ? _all.ToList() : _all.Where(i => i.Matches(q)).ToList();
 
-        // Always offer a create row when the query is non-empty and no item matches it exactly (F4).
         if (_createRow is not null && q.Length > 0
             && !_all.Any(i => i.Label.Equals(q, StringComparison.OrdinalIgnoreCase))
             && _createRow(q) is { } create)
@@ -318,6 +295,7 @@ internal sealed class PaletteWindow : Window
         if (_chosen) return;
         _chosen = true;
         item.Choose();
-        Close();
+        // Dismiss the stage only if the action didn't already swap in new content (e.g. "Open map").
+        if (_stage?.Current == this) _stage.Dismiss();
     }
 }
