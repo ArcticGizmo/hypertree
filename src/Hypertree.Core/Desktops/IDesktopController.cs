@@ -19,6 +19,13 @@ public interface IDesktopController
     /// <summary>All desktops in OS order (ordinal 0..Count-1).</summary>
     IReadOnlyList<DesktopInfo> List();
 
+    /// <summary>
+    /// How many application windows currently sit on each desktop, keyed by id. Desktops with no windows
+    /// may be absent (treat a missing id as zero). Best-effort and advisory only — it drives the
+    /// at-a-glance counts on the map, never navigation — so an inexact count is acceptable.
+    /// </summary>
+    IReadOnlyDictionary<DesktopId, int> WindowCounts();
+
     /// <summary>Switch the whole monitor array to <paramref name="id"/>. No-op if already there.</summary>
     void SwitchTo(DesktopId id);
 

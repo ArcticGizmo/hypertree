@@ -355,4 +355,80 @@ public class NavigationModelTests
         Assert.NotNull(peek);
         Assert.Equal(T1, peek!.Value.id);
     }
+
+    // ── Snapshots (capture / restore a whole named layout) ───────────────────────
+
+    [Fact]
+    public void CaptureSnapshot_records_the_main_slot_main_desktops_and_groups()
+    {
+        var (m, _) = Pivot(); // feat-1 above main (slot 1), feat-2 below; main = T0,T1,T2
+        Snapshot snap = m.CaptureSnapshot("layout-1");
+
+        Assert.Equal("layout-1", snap.Name);
+        Assert.Equal(1, snap.MainSlot);
+        Assert.Equal(8, snap.DesktopCount); // 3 main + 3 + 2
+        Assert.Equal(new[] { T0.Value, T1.Value, T2.Value }, snap.MainDesktops.Select(d => d.Id));
+        Assert.Equal(new[] { "feat-1", "feat-2" }, snap.Groups.Select(g => g.Name));
+        Assert.Equal(new[] { D(10).Value, D(11).Value, D(12).Value }, snap.Groups[0].Desktops.Select(d => d.Id));
+        Assert.Equal(new[] { "a", "b", "c" }, snap.Groups[0].Desktops.Select(d => d.Label));
+    }
+
+    [Fact]
+    public void RestoreStructure_replaces_groups_and_rederives_the_main_timeline()
+    {
+        var (_, c) = Pivot();
+        // A fresh model over the same OS (no persisted groups) sees all 8 desktops as ungrouped.
+        var fresh = new NavigationModel(c);
+        Assert.Equal(8, fresh.BuildMap().TopRow.Count);
+        Assert.Empty(fresh.BuildMap().Groups);
+
+        fresh.RestoreStructure(1, new[] { G("feat-1", G1), G("feat-2", G2) });
+
+        NavMap map = fresh.BuildMap();
+        Assert.Equal(3, map.TopRow.Count);  // only T0,T1,T2 stay on the main timeline now
+        Assert.Equal(1, map.TopPosition);   // the restored main slot is honoured
+        Assert.Equal(new[] { "feat-1", "feat-2" }, map.Groups.Select(g => g.Name));
+    }
+
+    [Fact]
+    public void Snapshot_round_trips_through_capture_and_restore()
+    {
+        var (source, c) = Pivot();
+        Snapshot snap = source.CaptureSnapshot("s");
+
+        var target = new NavigationModel(c); // same OS, no persisted groups
+        var groups = snap.Groups
+            .Select(g => new Group(g.Name,
+                g.Desktops.Select(d => new DesktopRef(new DesktopId(d.Id), d.Label)).ToList(),
+                g.LastUsedIndex))
+            .ToList();
+        target.RestoreStructure(snap.MainSlot, groups);
+
+        NavMap a = source.BuildMap(), b = target.BuildMap();
+        Assert.Equal(a.TopPosition, b.TopPosition);
+        Assert.Equal(a.TopRow.Count, b.TopRow.Count);
+        Assert.Equal(a.Groups.Select(g => g.Name), b.Groups.Select(g => g.Name));
+        Assert.Equal(
+            a.Groups.SelectMany(g => g.Desktops.Select(d => d.Label)),
+            b.Groups.SelectMany(g => g.Desktops.Select(d => d.Label)));
+    }
+
+    // ── Per-desktop window counts on the map ─────────────────────────────────────
+
+    [Fact]
+    public void BuildMap_carries_per_desktop_window_counts_onto_the_tiles()
+    {
+        var (m, c) = Pivot();
+        c.WinCounts[T0] = 4;     // a main desktop
+        c.WinCounts[D(10)] = 2;  // feat-1's "a"
+        // D(11) ("b") and everything else left unset → 0
+
+        NavMap map = m.BuildMap();
+        Assert.Equal(4, map.TopRow[0].WindowCount);
+        Assert.Equal(0, map.TopRow[1].WindowCount); // unset desktop reads as empty
+
+        NavMapGroup feat1 = map.Groups.First(g => g.Name == "feat-1");
+        Assert.Equal(2, feat1.Desktops[0].WindowCount);
+        Assert.Equal(0, feat1.Desktops[1].WindowCount);
+    }
 }

@@ -20,6 +20,21 @@ internal static class Guids
     public static readonly Guid CLSID_ImmersiveShell = new("C2F03A33-21F5-47FA-B4BB-156362A2F239");
     public static readonly Guid CLSID_VirtualDesktopManagerInternal = new("C5E0CDCA-7B6E-41B2-9FC4-D93975CC467B");
     public static readonly Guid CLSID_VirtualDesktopPinnedApps = new("B5A399E7-1C87-46B8-88E9-FC5747B171BD");
+
+    // The PUBLIC, documented virtual-desktop API — stable since Windows 10, unlike the internal ones
+    // above. Used only to ask which desktop a given window is on (for the map's per-desktop counts).
+    public static readonly Guid CLSID_VirtualDesktopManager = new("AA509086-5CA9-4C25-8F95-589D3C07B48A");
+}
+
+// Documented API (shell32) — CoCreatable, not from the ImmersiveShell service provider. Only
+// GetWindowDesktopId is used; the other two members are declared to keep the vtable order correct.
+[ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+[Guid("A5CD92FF-29BE-454C-8D04-D82879FB3F1B")]
+internal interface IVirtualDesktopManager
+{
+    [PreserveSig] int IsWindowOnCurrentVirtualDesktop(nint hwnd, out int onCurrent);
+    [PreserveSig] int GetWindowDesktopId(nint hwnd, out Guid desktopId);
+    [PreserveSig] int MoveWindowToDesktop(nint hwnd, ref Guid desktopId);
 }
 
 [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

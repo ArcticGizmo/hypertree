@@ -48,7 +48,9 @@ public sealed class App : Application
     private ScopeDialog? _dialog;
     private PaletteWindow? _palette;
     private SettingsWindow? _settingsWindow;
+    private NameDialog? _nameDialog;
     private ISettingsStore? _settingsStore;
+    private ISnapshotStore? _snapshots;
     private AppSettings _settings = new();
 
     // "Last visited" = the desktop you came from, committed when a navigation completes (Ctrl+Alt
@@ -99,6 +101,7 @@ public sealed class App : Application
 
         _settingsStore = new FileSettingsStore();
         _settings = _settingsStore.Load();
+        _snapshots = new FileSnapshotStore();
 
         _hud = new HudWindow();
         ApplyFlashSettings();
@@ -281,13 +284,15 @@ public sealed class App : Application
         var top = b.TopRow.Select((t, i) => new NavMapTile(
             t.Label,
             hereMain && i == hereTop,      // IsCurrent (blue) = you are here
-            onMain && i == topIndex)).ToList(); // IsHere (green) = the target
+            onMain && i == topIndex,       // IsHere (green) = the target
+            t.WindowCount)).ToList();      // keep the at-a-glance count on the preview board
         var groups = b.Groups.Select(g => new NavMapGroup(
             g.Index, g.Name,
             g.Desktops.Select((d, j) => new NavMapTile(
                 d.Label,
                 !hereMain && g.Index == hereGroup && j == hereDesktop,   // blue = current
-                !onMain && g.Index == groupIndex && j == desktopIndex)).ToList(), // green = target
+                !onMain && g.Index == groupIndex && j == desktopIndex,   // green = target
+                d.WindowCount)).ToList(),
             // Keep both the current group and the target group bright (un-rested).
             (!hereMain && g.Index == hereGroup) || (!onMain && g.Index == groupIndex),
             g.Index == hereGroup ? hereDesktop : g.Index == groupIndex ? desktopIndex : g.Cursor)).ToList();
@@ -346,7 +351,9 @@ public sealed class App : Application
             new("New group…", PromptNewGroup),
             new("Delete current desktop", DeleteCurrentDesktop),
             new("Remove current group", RemoveCurrentGroup),
-            new("Snapshot layout", stub("Snapshot layout")),
+            // Post so this command's palette finishes closing before the prompt/palette opens.
+            new("Snapshot layout…", () => Dispatcher.UIThread.Post(PromptSnapshot)),
+            new("Restore snapshot…", () => Dispatcher.UIThread.Post(RestoreSnapshotPrompt)),
             new("Add branch", stub("Add branch")),          // → M2 git
             new("Move desktop to group…", stub("Move desktop to group…")),
         };
@@ -357,6 +364,119 @@ public sealed class App : Application
         if (_model is null) return;
         int index = _model.CurrentGroupIndex;
         if (index >= 0) RemoveGroup(index);
+    }
+
+    // ── Snapshots: capture the whole layout under a name, restore it later ─────────
+
+    // Prompt for a name, then save the current layout (main timeline + groups) under it.
+    private void PromptSnapshot()
+    {
+        if (_model is null || _snapshots is null) return;
+        if (_nameDialog is not null) { _nameDialog.Activate(); return; }
+
+        _nameDialog = new NameDialog("Snapshot layout",
+            "Save the current desktops and groups under a name you can restore to later.",
+            "snapshot name (e.g. before-refactor)");
+        _nameDialog.Closed += (_, _) => _nameDialog = null;
+        _nameDialog.Confirmed += SaveSnapshot;
+        _nameDialog.Show();
+    }
+
+    private void SaveSnapshot(string name)
+    {
+        if (_model is null || _snapshots is null) return;
+        _model.Reconcile(); // capture the live layout, not stale/deleted desktops
+
+        // Same name overwrites, so re-snapshotting a layout updates it in place.
+        var list = _snapshots.Load().Where(s => !s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToList();
+        list.Add(_model.CaptureSnapshot(name));
+        _snapshots.Save(list);
+    }
+
+    // Show a palette of saved snapshots; choosing one confirms, then restores.
+    private void RestoreSnapshotPrompt()
+    {
+        if (_snapshots is null || _activator is null) return;
+        if (_palette is not null) { _palette.Close(); return; } // re-invoke toggles closed
+
+        IReadOnlyList<Snapshot> snaps = _snapshots.Load();
+        var items = snaps.Select(s => new PaletteItem(
+            s.Name,
+            $"{s.DesktopCount} desktops · {s.Groups.Count} groups",
+            "⟲",
+            () => Dispatcher.UIThread.Post(() => ConfirmRestore(s)))) // let the palette close first
+            .ToList();
+
+        OpenPalette(snaps.Count == 0 ? "No snapshots saved yet" : "Restore a snapshot…",
+                    "↑↓ move · ↵ restore · Esc close", items);
+    }
+
+    private void ConfirmRestore(Snapshot snap)
+    {
+        var dlg = new ConfirmDialog(
+            $"Restore snapshot “{snap.Name}”?\nYour desktops are rebuilt to match it. Desktops that aren’t part of the snapshot are removed (any windows on them move to another desktop).",
+            confirmLabel: "Restore");
+        dlg.Confirmed += () => RestoreSnapshot(snap);
+        dlg.Show();
+    }
+
+    // Rebuild the OS desktops + the model to match a snapshot. Re-attaches to a saved desktop by its GUID
+    // when it still exists, re-creates it by label when it doesn't, then removes anything not in the
+    // snapshot. We switch to the snapshot's first desktop BEFORE any removal so the current view can't be
+    // yanked out from under us.
+    private void RestoreSnapshot(Snapshot snap)
+    {
+        if (_model is null || _desktops is null) return;
+        if (snap.DesktopCount == 0) return; // nothing to restore to — never strip the machine to zero desktops
+
+        _model.Reconcile();
+        var live = _desktops.List().Select(d => d.Id.Value).ToHashSet();
+        var keep = new HashSet<Guid>();
+
+        // Resolve one saved desktop to a live id: reuse its GUID if present (renamed to the saved label),
+        // else create a fresh desktop with that label. Group desktops are tracked in _created so the
+        // teardown guard may remove them later; main desktops are the user's and are never tracked.
+        DesktopId Resolve(PersistedDesktop d, bool group)
+        {
+            DesktopId id;
+            if (live.Contains(d.Id))
+            {
+                id = new DesktopId(d.Id);
+                if (!string.IsNullOrWhiteSpace(d.Label)) { try { _desktops!.Rename(id, d.Label); } catch { } }
+            }
+            else
+            {
+                id = _desktops!.Create(d.Label);
+            }
+            keep.Add(id.Value);
+            if (group) _created.Add(id.Value);
+            return id;
+        }
+
+        // Main desktops first, so the first one exists to stand on before any removal.
+        var mainIds = snap.MainDesktops.Select(d => Resolve(d, group: false)).ToList();
+
+        var groups = new List<Group>(snap.Groups.Count);
+        foreach (PersistedGroup pg in snap.Groups)
+        {
+            var refs = pg.Desktops.Select(d => new DesktopRef(Resolve(d, group: true), d.Label)).ToList();
+            if (refs.Count > 0) groups.Add(new Group(pg.Name, refs, pg.LastUsedIndex));
+        }
+
+        // Land on the snapshot's first desktop (main[0], else the first group desktop) before removing.
+        DesktopId first = mainIds.Count > 0 ? mainIds[0] : groups[0].Desktops[0].Id;
+        _desktops.SwitchTo(first);
+
+        // Remove every desktop that isn't part of the snapshot; windows fall back to the first desktop.
+        foreach (DesktopInfo d in _desktops.List().ToList())
+        {
+            if (keep.Contains(d.Id.Value)) continue;
+            _created.Remove(d.Id.Value);
+            try { _desktops.Remove(d.Id, first); } catch { /* already gone — best-effort */ }
+        }
+
+        _model.RestoreStructure(snap.MainSlot, groups); // re-derives the top row + re-anchors to `first`
+        RefreshOrFlash();
     }
 
     // ── Settings (tray · map cog · command palette "settings") ──────────────────────
@@ -536,6 +656,7 @@ public sealed class App : Application
         _overlay?.Close();
         _hud?.Close();
         _palette?.Close();
+        _nameDialog?.Close();
         _settingsWindow?.Close();
     }
 }

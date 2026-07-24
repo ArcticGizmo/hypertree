@@ -24,6 +24,11 @@ internal sealed class FakeDesktopController : IDesktopController
     public DesktopId Current { get; private set; }
     public IReadOnlyList<DesktopInfo> List() => _desktops;
 
+    /// <summary>Per-desktop window counts a test can populate to exercise the map badges; empty by
+    /// default, so every tile reads as zero windows.</summary>
+    public Dictionary<DesktopId, int> WinCounts { get; } = new();
+    public IReadOnlyDictionary<DesktopId, int> WindowCounts() => WinCounts;
+
     public void SwitchTo(DesktopId id)
     {
         Switches.Add(id);

@@ -20,16 +20,20 @@ internal static class DesignShot
     {
         Directory.CreateDirectory(outDir);
 
+        // Window counts vary per tile (with one empty desktop, "Notes"=0) so the shot exercises the
+        // at-a-glance count badges and the dimmed-empty styling.
         List<NavMapTile> Top(int current) => new()
         {
-            new("Home", current == 0), new("Comms", current == 1),
-            new("Web", current == 2), new("Notes", current == 3),
+            new("Home", current == 0, WindowCount: 4), new("Comms", current == 1, WindowCount: 2),
+            new("Web", current == 2, WindowCount: 7), new("Notes", current == 3, WindowCount: 0),
         };
         NavMapGroup Feat(bool live, int cur) => new(0, "FEAT-123", new List<NavMapTile>
         {
-            new("SPA", live && cur == 0), new("API", live && cur == 1), new("Mobile", live && cur == 2),
+            new("SPA", live && cur == 0, WindowCount: 3), new("API", live && cur == 1, WindowCount: 1),
+            new("Mobile", live && cur == 2, WindowCount: 0),
         }, live, cur);
-        NavMapGroup Hotfix() => new(1, "hotfix", new List<NavMapTile> { new("db", false), new("api", false) }, false, 0);
+        NavMapGroup Hotfix() => new(1, "hotfix", new List<NavMapTile>
+            { new("db", false, WindowCount: 1), new("api", false, WindowCount: 0) }, false, 0);
 
         // Stable pivot: FEAT-123 sits above main, hotfix below (main slot 1). On the main timeline,
         // Web (cursor 2) is current and main renders between the two groups.

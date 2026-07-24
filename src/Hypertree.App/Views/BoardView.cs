@@ -115,7 +115,7 @@ internal static class BoardView
             {
                 int idx = i;
                 Control tile = Tile(map.TopRow[i].Label, isStream: false, map.OnTop && map.TopRow[i].IsCurrent,
-                                    map.TopRow[i].IsHere, s, tileW, scrH, capH,
+                                    map.TopRow[i].IsHere, map.TopRow[i].WindowCount, s, tileW, scrH, capH,
                                     onClick is null ? null : () => onClick(idx),
                                     onDelete is null ? null : () => onDelete(idx));
                 Canvas.SetLeft(tile, originX + i * (tileW + gap));
@@ -162,7 +162,7 @@ internal static class BoardView
         {
             int idx = j;
             row.Children.Add(Tile(g.Desktops[j].Label, isStream: true, g.Desktops[j].IsCurrent,
-                                  g.Desktops[j].IsHere, s, tileW, screenH, capH,
+                                  g.Desktops[j].IsHere, g.Desktops[j].WindowCount, s, tileW, screenH, capH,
                                   onDeskClick is null ? null : () => onDeskClick(idx),
                                   onDeskDelete is null ? null : () => onDeskDelete(idx)));
         }
@@ -178,19 +178,25 @@ internal static class BoardView
         };
     }
 
-    private static Control Tile(string caption, bool isStream, bool focused, bool here, double s,
+    private static Control Tile(string caption, bool isStream, bool focused, bool here, int windowCount, double s,
                                 double tileW, double screenH, double capH, Action? onClick, Action? onDelete = null)
     {
         // The focused/target tile wins the border colour; a non-target "here" tile gets the green
         // marker so current-vs-destination (and the distance between) reads at a glance.
         Color border = focused ? Focus : here ? Here : (isStream ? StrBorder : TileBorder);
         double bt = focused || here ? 2 : 1;
+        bool empty = windowCount == 0;
 
         var winCanvas = new Canvas { Width = tileW, Height = screenH };
         Color win = isStream ? StrWin : TileWin;
-        AddWin(winCanvas, 9 * s, 9 * s, 44 * s, 14 * s, win, 1.0);
-        AddWin(winCanvas, 9 * s, 27 * s, 30 * s, 13 * s, win, 1.0);
-        AddWin(winCanvas, tileW - 9 * s - 22 * s, 14 * s, 22 * s, 26 * s, win, 0.7);
+        // An empty desktop draws no window glyphs — the tile reads as bare, reinforcing the "0" badge.
+        if (!empty)
+        {
+            AddWin(winCanvas, 9 * s, 9 * s, 44 * s, 14 * s, win, 1.0);
+            AddWin(winCanvas, 9 * s, 27 * s, 30 * s, 13 * s, win, 1.0);
+            AddWin(winCanvas, tileW - 9 * s - 22 * s, 14 * s, 22 * s, 26 * s, win, 0.7);
+        }
+        AddCountBadge(winCanvas, windowCount, s, tileW, screenH);
 
         var screen = new Border
         {
@@ -265,8 +271,35 @@ internal static class BoardView
             result = grid;
         }
 
+        // An empty desktop (0 windows) reads dimmer, so populated desktops pop at a glance. The current
+        // and "here" tiles stay full-strength so the cursor is never washed out.
+        if (empty && !focused && !here) result.Opacity = 0.5;
+
         if (focused) result.RenderTransform = new TranslateTransform(0, -6 * s);
         return result;
+    }
+
+    // A small pill in the bottom-left of the screen area showing the window count — bright when the
+    // desktop has windows, faint "0" when it's empty. Corners stay free for the here-pip / delete badge.
+    private static void AddCountBadge(Canvas screen, int count, double s, double tileW, double screenH)
+    {
+        double h = 16 * s;
+        var badge = new Border
+        {
+            Height = h, MinWidth = h, Padding = new Thickness(5 * s, 0),
+            CornerRadius = new CornerRadius(h / 2),
+            Background = new SolidColorBrush(count == 0 ? Color.FromArgb(0x33, 0x16, 0x1C, 0x27)
+                                                        : Color.FromArgb(0xCC, 0x0F, 0x14, 0x1D)),
+            Child = new TextBlock
+            {
+                Text = count.ToString(), FontFamily = Mono, FontSize = 10 * s, FontWeight = FontWeight.SemiBold,
+                Foreground = new SolidColorBrush(count == 0 ? InkFaint : Ink),
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+        Canvas.SetLeft(badge, 6 * s);
+        Canvas.SetTop(badge, screenH - h - 6 * s);
+        screen.Children.Add(badge);
     }
 
     private static void AddWin(Canvas c, double x, double y, double w, double h, Color color, double opacity)

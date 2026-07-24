@@ -74,9 +74,12 @@ public sealed class NavigationModel
     /// main at its fixed slot (groups before the slot render above main, the rest below).</summary>
     public NavMap BuildMap()
     {
+        IReadOnlyDictionary<DesktopId, int> counts = _desktops.WindowCounts();
+        int Windows(DesktopId id) => counts.TryGetValue(id, out int n) ? n : 0;
+
         var top = new List<NavMapTile>(_topRow.Count);
         for (int i = 0; i < _topRow.Count; i++)
-            top.Add(new NavMapTile(_topRow[i].Label, _onMain && i == _topIndex));
+            top.Add(new NavMapTile(_topRow[i].Label, _onMain && i == _topIndex, WindowCount: Windows(_topRow[i].Id)));
 
         var groups = new List<NavMapGroup>(_groups.Count);
         for (int gi = 0; gi < _groups.Count; gi++)
@@ -85,7 +88,8 @@ public sealed class NavigationModel
             bool current = !_onMain && gi == _currentGroup;
             var tiles = new List<NavMapTile>(g.Desktops.Count);
             for (int j = 0; j < g.Desktops.Count; j++)
-                tiles.Add(new NavMapTile(g.Desktops[j].Label, current && j == g.LastUsedIndex));
+                tiles.Add(new NavMapTile(g.Desktops[j].Label, current && j == g.LastUsedIndex,
+                                         WindowCount: Windows(g.Desktops[j].Id)));
             groups.Add(new NavMapGroup(gi, g.Name, tiles, current, g.LastUsedIndex));
         }
 
@@ -309,6 +313,37 @@ public sealed class NavigationModel
         _target = CurrentDesktop().Id;
         Save();
         Changed?.Invoke();
+    }
+
+    // ── Snapshots (named layout capture / restore) ───────────────────────────────
+
+    /// <summary>Capture the whole current layout — main timeline + groups, each desktop keyed by its OS
+    /// GUID — as a named <see cref="Snapshot"/> the caller can persist and later restore.</summary>
+    public Snapshot CaptureSnapshot(string name) => new()
+    {
+        Name = name,
+        MainSlot = _mainSlot,
+        MainDesktops = _topRow.Select(d => new PersistedDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
+        Groups = _groups.Select(g => new PersistedGroup
+        {
+            Name = g.Name,
+            LastUsedIndex = g.LastUsedIndex,
+            Desktops = g.Desktops.Select(d => new PersistedDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
+        }).ToList(),
+    };
+
+    /// <summary>
+    /// Replace the group structure wholesale (used by snapshot restore). The caller is responsible for
+    /// having the OS desktops the <paramref name="groups"/> reference already present; the main timeline
+    /// is then re-derived from the live desktops not in a group, and the cursor re-anchors to whatever
+    /// desktop the OS is currently showing.
+    /// </summary>
+    public void RestoreStructure(int mainSlot, IReadOnlyList<Group> groups)
+    {
+        _groups.Clear();
+        _groups.AddRange(groups);
+        _mainSlot = Math.Clamp(mainSlot, 0, _groups.Count);
+        Resync(); // rebuilds the top row from the live list, re-anchors, saves, notifies
     }
 
     // ── Persistence ────────────────────────────────────────────────────────────
