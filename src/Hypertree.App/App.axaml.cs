@@ -16,7 +16,7 @@ namespace Hypertree.App;
 /// <summary>
 /// The tray/HUD/hotkey shell. Builds the desktop controller and navigation model (top row = the
 /// existing ungrouped desktops; groups are created at runtime), wires the Ctrl+Alt+Arrow nav hotkeys
-/// and the Ctrl+Alt+Space map toggle, and flashes the board on navigation. Tray-only, outlives its
+/// and the Ctrl+Alt+P command palette, and flashes the board on navigation. Tray-only, outlives its
 /// windows (ShutdownMode.OnExplicitShutdown).
 /// </summary>
 public sealed class App : Application
@@ -31,7 +31,6 @@ public sealed class App : Application
         (HotkeyKey.ArrowLeft,  NavAction.MoveLeft),
         (HotkeyKey.ArrowRight, NavAction.MoveRight),
     };
-    private const HotkeyKey MapKey = HotkeyKey.Space; // Ctrl+Alt+Space toggles the map overlay
     private const HotkeyKey PaletteKey = HotkeyKey.P; // Ctrl+Alt+P — command palette (spotlight/jump lives inside it)
 
     private readonly List<IGlobalHotkey> _hotkeys = new();
@@ -129,10 +128,6 @@ public sealed class App : Application
             if (ok) _hotkeys.Add(hk);
             else { hk.Dispose(); Console.Error.WriteLine($"Hotkey Ctrl+Alt+{key} was refused by the OS."); }
         }
-
-        var mapHk = PlatformServices.CreateGlobalHotkey();
-        if (mapHk.Register(Mods, MapKey, () => Dispatcher.UIThread.Post(ToggleMap))) _hotkeys.Add(mapHk);
-        else { mapHk.Dispose(); Console.Error.WriteLine("Hotkey Ctrl+Alt+Space (map) was refused by the OS."); }
 
         // Ctrl+Alt+P — command palette. (The spotlight/jump is still reachable from there via the
         // "Jump to desktop…" command.)
@@ -343,9 +338,10 @@ public sealed class App : Application
         Action stub(string name) => () => Console.Error.WriteLine($"Command “{name}” is not implemented yet.");
         return new List<Command>
         {
-            // Post so this command's palette finishes closing (clearing _palette) before the
-            // spotlight opens — otherwise ToggleSpotlight would see the open palette and toggle it shut.
+            // Post so this command's palette finishes closing (clearing _palette) before the next
+            // window opens — otherwise the toggle would see the open palette and close it again.
             new("Jump to desktop…", () => Dispatcher.UIThread.Post(ToggleSpotlight)),
+            new("Open map", () => Dispatcher.UIThread.Post(ToggleMap)),
             new("Settings", OpenSettings),
             new("New group…", PromptNewGroup),
             new("Delete current desktop", DeleteCurrentDesktop),
@@ -370,12 +366,12 @@ public sealed class App : Application
     // Prompt for a name, then save the current layout (main timeline + groups) under it.
     private void PromptSnapshot()
     {
-        if (_model is null || _snapshots is null) return;
+        if (_model is null || _snapshots is null || _activator is null) return;
         if (_nameDialog is not null) { _nameDialog.Activate(); return; }
 
         _nameDialog = new NameDialog("Snapshot layout",
             "Save the current desktops and groups under a name you can restore to later.",
-            "snapshot name (e.g. before-refactor)");
+            "snapshot name (e.g. before-refactor)", _activator);
         _nameDialog.Closed += (_, _) => _nameDialog = null;
         _nameDialog.Confirmed += SaveSnapshot;
         _nameDialog.Show();
@@ -513,7 +509,7 @@ public sealed class App : Application
     private void BuildTray()
     {
         var header = new NativeMenuItem("Hypertree 0.1.0") { IsEnabled = false };
-        var map = new NativeMenuItem("Open map (Ctrl+Alt+Space)");
+        var map = new NativeMenuItem("Open map");
         map.Click += (_, _) => ToggleMap();
         var newGroup = new NativeMenuItem("New group…");
         newGroup.Click += (_, _) => PromptNewGroup();

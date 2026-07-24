@@ -167,7 +167,6 @@ internal sealed class SettingsWindow : Window
             },
         });
         Row("Ctrl+Alt+↑ ↓ ← →", "navigate");
-        Row("Ctrl+Alt+Space", "open the map");
         Row("Ctrl+Alt+P", "command palette");
         rows.Children.Add(new TextBlock
         {
