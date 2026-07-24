@@ -207,6 +207,12 @@ Detailed spec: **[`docs/design/ux-iteration-2.md`](design/ux-iteration-2.md)**. 
 
 ## M2 — Worktree integration
 
+> **Reframed — see [`design/sprig-integration.md`](design/sprig-integration.md).** Rather than
+> *lifting* sprig's git layer (Phase 2.1 below) and reimplementing provisioning, M2 now **delegates**
+> to sprig over its existing `--json` CLI: ask `sprig ls` for workspaces and `sprig layout` for how
+> each should look as desktops, then provision a group. The phases below are kept as historical
+> intent; the design doc is the live plan. Sprig stays optional — templates remain the fallback.
+
 **Goal (`PLAN.md` §8):** `git worktree` ↔ scope create / anchor / remove. This is where
 sprig's git layer pays off and the model stops being hard-coded.
 
