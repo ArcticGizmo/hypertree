@@ -431,4 +431,26 @@ public class NavigationModelTests
         Assert.Equal(2, feat1.Desktops[0].WindowCount);
         Assert.Equal(0, feat1.Desktops[1].WindowCount);
     }
+
+    // ── "Came from" green marker during navigation ───────────────────────────────
+
+    [Fact]
+    public void BuildMap_marks_the_came_from_desktop_as_here()
+    {
+        var (m, _) = New(current: 0); // on T0
+        m.Apply(NavAction.MoveRight); // now on T1, having come from T0
+
+        NavMap map = m.BuildMap(T0);
+        Assert.True(map.TopRow[0].IsHere);    // T0 (came from) → green
+        Assert.False(map.TopRow[0].IsCurrent);
+        Assert.True(map.TopRow[1].IsCurrent); // T1 (now) → blue
+        Assert.False(map.TopRow[1].IsHere);
+    }
+
+    [Fact]
+    public void BuildMap_without_a_came_from_marks_nothing_here()
+    {
+        var (m, _) = New();
+        Assert.All(m.BuildMap().TopRow, t => Assert.False(t.IsHere));
+    }
 }

@@ -21,11 +21,12 @@ internal static class DesignShot
         Directory.CreateDirectory(outDir);
 
         // Window counts vary per tile (with one empty desktop, "Notes"=0) so the shot exercises the
-        // at-a-glance count badges and the dimmed-empty styling.
-        List<NavMapTile> Top(int current) => new()
+        // at-a-glance count badges and the dimmed-empty styling. `here` marks the "came from" desktop
+        // with the green outline shown while navigating.
+        List<NavMapTile> Top(int current, int here = -1) => new()
         {
-            new("Home", current == 0, WindowCount: 4), new("Comms", current == 1, WindowCount: 2),
-            new("Web", current == 2, WindowCount: 7), new("Notes", current == 3, WindowCount: 0),
+            new("Home", current == 0, here == 0, 4), new("Comms", current == 1, here == 1, 2),
+            new("Web", current == 2, here == 2, 7), new("Notes", current == 3, here == 3, 0),
         };
         NavMapGroup Feat(bool live, int cur) => new(0, "FEAT-123", new List<NavMapTile>
         {
@@ -41,8 +42,9 @@ internal static class DesignShot
              Path.Combine(outDir, "board-top-row.png"));
 
         // Same fixed layout, now with the cursor inside FEAT-123 (on API=cursor 1) — the group above
-        // main. Main keeps its slot; it does not move.
-        Save(new NavMap(Top(2), 2, false, new List<NavMapGroup> { Feat(true, 1), Hotfix() }, 1),
+        // main. Main keeps its slot; it does not move. We dived from Web, so it wears the green
+        // "came from" outline.
+        Save(new NavMap(Top(2, here: 2), 2, false, new List<NavMapGroup> { Feat(true, 1), Hotfix() }, 1),
              Path.Combine(outDir, "board-dived.png"));
     }
 

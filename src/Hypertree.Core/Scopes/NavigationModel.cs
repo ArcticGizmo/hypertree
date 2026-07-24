@@ -71,15 +71,19 @@ public sealed class NavigationModel
             : _groups[_currentGroup].Desktops[_groups[_currentGroup].LastUsedIndex];
 
     /// <summary>Render-ready snapshot: main timeline + groups in their fixed stack order, split around
-    /// main at its fixed slot (groups before the slot render above main, the rest below).</summary>
-    public NavMap BuildMap()
+    /// main at its fixed slot (groups before the slot render above main, the rest below).
+    /// <paramref name="cameFrom"/>, when supplied, marks that desktop with the green "here" outline —
+    /// used during navigation to show where the current move started from (mirrors the jump preview).</summary>
+    public NavMap BuildMap(DesktopId? cameFrom = null)
     {
         IReadOnlyDictionary<DesktopId, int> counts = _desktops.WindowCounts();
         int Windows(DesktopId id) => counts.TryGetValue(id, out int n) ? n : 0;
+        bool CameFrom(DesktopId id) => cameFrom == id;
 
         var top = new List<NavMapTile>(_topRow.Count);
         for (int i = 0; i < _topRow.Count; i++)
-            top.Add(new NavMapTile(_topRow[i].Label, _onMain && i == _topIndex, WindowCount: Windows(_topRow[i].Id)));
+            top.Add(new NavMapTile(_topRow[i].Label, _onMain && i == _topIndex,
+                                   IsHere: CameFrom(_topRow[i].Id), WindowCount: Windows(_topRow[i].Id)));
 
         var groups = new List<NavMapGroup>(_groups.Count);
         for (int gi = 0; gi < _groups.Count; gi++)
@@ -89,7 +93,7 @@ public sealed class NavigationModel
             var tiles = new List<NavMapTile>(g.Desktops.Count);
             for (int j = 0; j < g.Desktops.Count; j++)
                 tiles.Add(new NavMapTile(g.Desktops[j].Label, current && j == g.LastUsedIndex,
-                                         WindowCount: Windows(g.Desktops[j].Id)));
+                                         IsHere: CameFrom(g.Desktops[j].Id), WindowCount: Windows(g.Desktops[j].Id)));
             groups.Add(new NavMapGroup(gi, g.Name, tiles, current, g.LastUsedIndex));
         }
 

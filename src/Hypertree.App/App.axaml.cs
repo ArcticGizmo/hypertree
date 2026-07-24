@@ -154,8 +154,11 @@ public sealed class App : Application
         // "last visited". A poll watches for the release (works whether flashing or in the map).
         _gestureFrom ??= _desktops.Current;
         _model.Apply(action);
-        if (_overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap());
-        else _hud?.Flash(_model.BuildMap());
+        // Mark where this navigation started with the green "here" outline (same cue as the jump
+        // preview), so you can see how far you've moved and where to surface back to.
+        NavMap map = _model.BuildMap(_gestureFrom);
+        if (_overlay is { IsOpen: true }) _overlay.Refresh(map);
+        else _hud?.Flash(map);
         StartGesturePoll();
     }
 
