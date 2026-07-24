@@ -56,6 +56,10 @@ public sealed class App : Application
     // released) or on a discrete jump. Surfaced first in the jump palette so you can hop back.
     private DesktopId? _lastVisited;
     private DesktopId? _gestureFrom; // where the in-progress keyboard gesture started
+    // Where you were when the persistent map was opened. Unlike _gestureFrom (which resets each time
+    // Ctrl+Alt is released), this stays put for the whole time the map is open, so the green "previous
+    // location" marker holds still across navigations until the map is closed.
+    private DesktopId? _mapOpenedFrom;
     private DispatcherTimer? _gesturePoll;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
@@ -145,11 +149,11 @@ public sealed class App : Application
         // "last visited". A poll watches for the release (works whether flashing or in the map).
         _gestureFrom ??= _desktops.Current;
         _model.Apply(action);
-        // Mark where this navigation started with the green "here" outline (same cue as the jump
-        // preview), so you can see how far you've moved and where to surface back to.
-        NavMap map = _model.BuildMap(_gestureFrom);
-        if (_overlay is { IsOpen: true }) _overlay.Refresh(map);
-        else _hud?.Flash(map);
+        // Mark the "previous location" with the green "here" outline (same cue as the jump preview).
+        // In the persistent map it stays pinned to where the map was opened; in the transient flash it
+        // tracks the current gesture's origin.
+        if (_overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap(_mapOpenedFrom));
+        else _hud?.Flash(_model.BuildMap(_gestureFrom));
         StartGesturePoll();
     }
 
@@ -190,16 +194,17 @@ public sealed class App : Application
 
     private void ToggleMap()
     {
-        if (_model is null || _overlay is null) return;
-        if (_overlay.IsOpen) { _overlay.Close(); return; }
+        if (_model is null || _overlay is null || _desktops is null) return;
+        if (_overlay.IsOpen) { _overlay.Close(); _mapOpenedFrom = null; return; }
 
         _model.Reconcile(); // drop any externally-deleted desktops before showing the map
-        _overlay.Open(_model.BuildMap()); // vertical model renders the stack around main — no reorder
+        _mapOpenedFrom = _desktops.Current; // pin the "previous location" marker until the map closes
+        _overlay.Open(_model.BuildMap(_mapOpenedFrom)); // vertical model renders the stack around main
     }
 
     private void RefreshOverlay()
     {
-        if (_model is not null && _overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap());
+        if (_model is not null && _overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap(_mapOpenedFrom));
     }
 
     // ── Spotlight (F4): jump to any existing desktop, or create one named the query ─────
@@ -502,7 +507,7 @@ public sealed class App : Application
     private void RefreshOrFlash()
     {
         if (_model is null) return;
-        if (_overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap());
+        if (_overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap(_mapOpenedFrom));
         else _hud?.Flash(_model.BuildMap());
     }
 
