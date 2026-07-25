@@ -14,7 +14,8 @@ namespace Hypertree.App.Views;
 /// desktops), an optional trailing <paramref name="Glyph"/>, the action to run when it's chosen, and an
 /// optional <paramref name="Preview"/> board to show behind the palette while it's the selected row.</summary>
 internal sealed record PaletteItem(string Label, string? Detail, string? Glyph, Action Choose,
-                                   Func<NavMap>? Preview = null, string? DisabledReason = null)
+                                   Func<NavMap>? Preview = null, string? DisabledReason = null,
+                                   Action? OnDelete = null)
 {
     /// <summary>A greyed-out row: still shown and selectable (so the reason can be read), but inert.</summary>
     public bool Enabled => DisabledReason is null;
@@ -50,6 +51,7 @@ internal sealed class PaletteContent : IStageContent
 
     private readonly IReadOnlyList<PaletteItem> _all;
     private readonly Func<string, PaletteItem?>? _createRow;
+    private readonly bool _clearSearchOnShow;
 
     private readonly TextBox _search;
     private readonly StackPanel _list;
@@ -60,11 +62,15 @@ internal sealed class PaletteContent : IStageContent
     private bool _chosen;
     private OverlayStage? _stage;
 
+    /// <param name="clearSearchOnShow">Reset the filter every time the palette is (re)shown. Only visible on
+    /// a pop-back — you dive into a row's sub-surface then Esc back — so you land on the full, unfiltered list
+    /// rather than your old query. Off by default (other palettes keep their filter when you return).</param>
     public PaletteContent(string placeholder, string footerHint, IReadOnlyList<PaletteItem> items,
-                          Func<string, PaletteItem?>? createRow = null)
+                          Func<string, PaletteItem?>? createRow = null, bool clearSearchOnShow = false)
     {
         _all = items;
         _createRow = createRow;
+        _clearSearchOnShow = clearSearchOnShow;
         _filtered = items.ToList();
 
         _search = new TextBox
@@ -133,6 +139,9 @@ internal sealed class PaletteContent : IStageContent
     {
         _stage = stage;
         _chosen = false; // re-armed each time we're (re)shown — e.g. Esc back from a pushed sub-surface
+        // Drop the stale filter when returning to this palette, so a pop-back lands on the full list. Setting
+        // the text fires TextChanged ⇒ ApplyFilter, which rebuilds the rows and resets the selection.
+        if (_clearSearchOnShow && !string.IsNullOrEmpty(_search.Text)) _search.Text = "";
         _search.Focus();
         // The initial selection's board was already painted by the stage when it set our content; the
         // backdrop is only re-rendered from here on as the selection moves (see Highlight).
@@ -165,8 +174,23 @@ internal sealed class PaletteContent : IStageContent
                 if (_filtered.Count > 0) Choose(_filtered[_selected]);
                 e.Handled = true;
                 break;
+            case Key.Delete:
+                // Only hijack Delete as "remove this row" when it wouldn't edit the search text (no selection
+                // and the caret already at the end, where Delete is a no-op) and the row offers a delete
+                // action — so forward-delete still works while filtering, and rows with no OnDelete ignore it.
+                if (SearchDeleteIsNoOp() && _filtered.Count > 0 && _filtered[_selected].OnDelete is not null)
+                {
+                    Delete(_filtered[_selected]);
+                    e.Handled = true;
+                }
+                break;
         }
     }
+
+    // True when pressing Delete in the search box would do nothing to the text (nothing selected and the
+    // caret at the end), so it's free to repurpose as the row's delete shortcut.
+    private bool SearchDeleteIsNoOp() =>
+        _search.SelectionStart == _search.SelectionEnd && _search.CaretIndex >= (_search.Text?.Length ?? 0);
 
     private void Move(int delta)
     {
@@ -275,6 +299,16 @@ internal sealed class PaletteContent : IStageContent
         item.Choose();
         // If the action opened another surface (pushed content), it's now current — leave it. Otherwise the
         // action was terminal: unwind to where the chain started (the map, or dismiss).
+        if (_stage?.Current == this) _stage.CompleteToBase();
+    }
+
+    // The row's secondary "delete" action (the Del shortcut). Same completion rule as Choose: if it pushed a
+    // surface (a confirm card) that's now current, leave it; otherwise the action was terminal.
+    private void Delete(PaletteItem item)
+    {
+        if (item.OnDelete is null || _chosen) return;
+        _chosen = true;
+        item.OnDelete();
         if (_stage?.Current == this) _stage.CompleteToBase();
     }
 }

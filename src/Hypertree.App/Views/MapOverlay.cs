@@ -19,9 +19,10 @@ namespace Hypertree.App.Views;
 ///
 /// A shortcut legend in the top-left lists the management actions, each raised as an event for <c>App</c>
 /// (which owns the <see cref="NavigationModel"/> and desktop controller): <b>r</b> rename, <b>Del</b>
-/// delete desktop, <b>Shift+Del</b> delete branch, <b>n</b> new desktop, <b>b</b> new branch. Because it
-/// lives on the persistent stage it survives the desktop switches of navigation (the stage is pinned to
-/// every desktop). Closes on Esc, a backdrop click on another monitor, or toggling it off.
+/// delete desktop, <b>Shift+Del</b> delete branch, <b>n</b> new desktop, <b>b</b> new branch, <b>m</b>
+/// move this desktop's windows elsewhere. Because it lives on the persistent stage it survives the desktop
+/// switches of navigation (the stage is pinned to every desktop). Closes on Esc, a backdrop click on
+/// another monitor, or toggling it off.
 /// </summary>
 internal sealed class MapOverlay : IStageContent
 {
@@ -52,6 +53,8 @@ internal sealed class MapOverlay : IStageContent
     /// <summary>Create a new desktop (n) / a new branch (b).</summary>
     public event Action? NewDesktopRequested;
     public event Action? NewBranchRequested;
+    /// <summary>Start the move-windows flow (m) — relocate this desktop's windows to another.</summary>
+    public event Action? MoveWindowsRequested;
     /// <summary>Ctrl+F — open the finder (jump/create spotlight) from the map.</summary>
     public event Action? FinderRequested;
     /// <summary>The cog icon — open settings.</summary>
@@ -133,6 +136,7 @@ internal sealed class MapOverlay : IStageContent
             case Key.R: RenameRequested?.Invoke(CurrentSelection()); e.Handled = true; break;
             case Key.N: NewDesktopRequested?.Invoke(); e.Handled = true; break;
             case Key.B: NewBranchRequested?.Invoke(); e.Handled = true; break;
+            case Key.M: MoveWindowsRequested?.Invoke(); e.Handled = true; break;
             case Key.Delete:
                 if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
                 {
@@ -283,6 +287,7 @@ internal sealed class MapOverlay : IStageContent
         rows.Children.Add(LegendRow("Shift+Del", "delete branch"));
         rows.Children.Add(LegendRow("n", "new desktop"));
         rows.Children.Add(LegendRow("b", "new branch"));
+        rows.Children.Add(LegendRow("m", "move windows"));
         rows.Children.Add(LegendRow("Ctrl+F", "find a desktop"));
         rows.Children.Add(LegendRow("Esc", "close"));
         rows.Children.Add(new TextBlock

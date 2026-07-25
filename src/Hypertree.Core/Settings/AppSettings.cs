@@ -24,9 +24,9 @@ public sealed class AppSettings
     /// It auto-hides while the cursor is near it so the taskbar underneath stays clickable.</summary>
     public bool ShowTaskbarLabel { get; set; } = true;
 
-    /// <summary>Reusable branch recipes, offered as a picker when standing up a new branch so you don't
-    /// retype the desktop set each time. Empty by default — you build them by promoting a branch you
-    /// already made ("Save current branch as template…").</summary>
+    /// <summary>Reusable branch recipes, offered via the branch card's "Load from template" button so you
+    /// don't retype the desktop set each time. Empty by default — you build and delete them in the
+    /// "Manage templates…" command.</summary>
     public List<BranchTemplate> BranchTemplates { get; set; } = new();
 }
 

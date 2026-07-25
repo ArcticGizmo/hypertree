@@ -88,7 +88,7 @@ internal sealed class MoveContent : IStageContent
     {
         switch (e.Key)
         {
-            case Key.Escape: _stage?.Dismiss(); e.Handled = true; break;
+            case Key.Escape: _stage?.Back(); e.Handled = true; break; // return to the map if we opened over it, else hide
             case Key.Left: if (_session.MoveFocus(-1)) Highlight(); e.Handled = true; break;
             case Key.Right: if (_session.MoveFocus(+1)) Highlight(); e.Handled = true; break;
             case Key.Up: if (_session.MoveFocus(-_columns)) Highlight(); e.Handled = true; break;
@@ -105,7 +105,7 @@ internal sealed class MoveContent : IStageContent
     {
         switch (e.Key)
         {
-            case Key.Escape or Key.Back: _stage?.Dismiss(); e.Handled = true; break;
+            case Key.Escape or Key.Back: _stage?.Back(); e.Handled = true; break; // cancel → back to the map (or hide)
             case Key.Left: Navigate(NavAction.MoveLeft); e.Handled = true; break;
             case Key.Right: Navigate(NavAction.MoveRight); e.Handled = true; break;
             case Key.Up: Navigate(NavAction.Surface); e.Handled = true; break;
@@ -113,7 +113,7 @@ internal sealed class MoveContent : IStageContent
             case Key.Enter:
                 _completed = true;
                 MoveRequested?.Invoke(_session.SelectedHwnds);
-                _stage?.Dismiss();
+                _stage?.CompleteToBase(); // unwind to the map if we opened over it, else dismiss to the desktop
                 e.Handled = true;
                 break;
         }
@@ -221,7 +221,10 @@ internal sealed class MoveContent : IStageContent
     // window's physical client pixels. Cards outside the scroll viewport are hidden (DWM can't clip).
     private void PlaceThumbnails()
     {
-        if (_stage is null) return;
+        // Only ever (re)create/position thumbnails while we're the live surface. A stray LayoutUpdated during
+        // teardown (Esc/cancel) must not re-register DWM thumbnails after DisposeThumbnails — they'd outlive
+        // us and paint over whatever shows next (e.g. the command palette).
+        if (_stage is null || _stage.Current != this) return;
         nint dest = _stage.HostHandle;
         if (dest == 0) return;
         double scale = _stage.HostScaling;

@@ -128,7 +128,8 @@ public sealed class App : Application
         _overlay.DeleteDesktopRequested += DeleteSelectedDesktop;
         _overlay.DeleteBranchRequested += ConfirmRemoveBranch;
         _overlay.NewDesktopRequested += PromptNewDesktop;
-        _overlay.NewBranchRequested += () => OpenNewBranchDialog(null); // blank branch prompt over the map (templates: command palette)
+        _overlay.NewBranchRequested += () => OpenNewBranchDialog(null); // branch card over the map (with in-card "Load from template" when any exist)
+        _overlay.MoveWindowsRequested += ToggleMoveWindows; // m — start the move-windows flow (replaces the map)
         _overlay.FinderRequested += () => OpenSpotlight(); // Ctrl+F — finder pushed over the map; Esc pops back to it
         _overlay.SettingsRequested += OpenSettings;
 
@@ -249,7 +250,7 @@ public sealed class App : Application
     private void ToggleMoveWindows()
     {
         if (_model is null || _desktops is null || _stage is null) return;
-        if (_stage.Current is MoveContent) { _stage.Dismiss(); return; } // re-press cancels (via OnRemoved)
+        if (_stage.Current is MoveContent) { _stage.Back(); return; } // re-press cancels (via OnRemoved)
 
         _model.Reconcile();
         _moveOrigin = _desktops.Current;
@@ -261,7 +262,11 @@ public sealed class App : Application
         content.NavigateRequested += a => _model!.Apply(a);
         content.MoveRequested += MoveSelectedWindows;
         content.Cancelled += CancelMove;
-        _stage.Summon(content); // a fresh root — its own board flow; Esc/cancel restores the origin
+        // Launched from the map → push over it so completing/cancelling unwinds back to the map (its durable
+        // base). Otherwise (hotkey / tray, no map open) it's a fresh root that dismisses to the desktop —
+        // Back/CompleteToBase then behave exactly like the old Dismiss.
+        if (_overlay?.IsOpen == true) _stage.Present(content);
+        else _stage.Summon(content);
     }
 
     // Phase 2 commit: we've navigated to the destination (it's the current desktop), so move each
@@ -287,6 +292,7 @@ public sealed class App : Application
             _desktops.SwitchTo(origin);
         _moveOrigin = null;
         _model?.Resync();
+        RefreshOverlay(); // if we opened over the map, it's about to be re-presented — give it a fresh board
     }
 
     // ── Manage-map actions (r / Del / Shift+Del / n) ───────────────────────────────
@@ -495,25 +501,13 @@ public sealed class App : Application
                                          DisabledReason: c.DisabledReason))
             .ToList();
         _stage?.Summon(new PaletteContent("Run a command…",
-            "↑↓ move · ↵ run · Esc back · blue = you are here", items));
+            "↑↓ move · ↵ run · Esc back · blue = you are here", items,
+            clearSearchOnShow: true)); // popping back here (Esc from a command's sub-surface) lands on the full list
     }
 
-    // The command registry. A few real commands (reusing existing handlers) plus stubs for features
-    // that don't exist yet — the exact set isn't the point this iteration, the wiring is.
+    // The command registry — real commands reusing existing handlers.
     private IReadOnlyList<Command> BuildCommands()
     {
-        Action stub(string name) => () => Console.Error.WriteLine($"Command “{name}” is not implemented yet.");
-
-        // "Save current branch as template…" only makes sense inside a branch — greyed out with a reason
-        // on the main timeline, so it stays discoverable rather than disappearing.
-        bool inBranch = _model is not null && !_model.OnTop && _model.CurrentBranchIndex >= 0;
-        string? saveTemplateDisabled = inBranch ? null : "you’re on the main timeline — enter a branch first";
-
-        // The branch a "current branch" command would act on: the one you're in, or (on main) the one
-        // directly below main. Used to highlight that branch green in the command's preview board.
-        int targetBranch = _model?.CurrentBranchIndex ?? -1;
-        Func<NavMap>? branchTargetPreview = targetBranch >= 0 ? () => PreviewBranchTarget(targetBranch) : null;
-
         // Commands run synchronously. Those that push another stage surface (a palette, a prompt, the map,
         // the move flow) become the current surface, so PaletteContent.Choose sees the palette is no longer
         // current and leaves the chain in place (Esc pops back through it). Terminal commands leave the
@@ -522,34 +516,19 @@ public sealed class App : Application
         {
             new("Jump to desktop…", OpenSpotlight), // pushed over the command palette; Esc pops back to it
             new("Open map", ToggleMap),
-            new("Move windows to another desktop…", ToggleMoveWindows,
-                _desktops is not null && _desktops.WindowsOn(_desktops.Current).Count == 0 ? "no windows on this desktop" : null),
             new("Settings", OpenSettings),
             new("New branch…", PromptNewBranch),
-            new("Save current branch as template…", PromptSaveBranchAsTemplate,
-                saveTemplateDisabled, inBranch ? branchTargetPreview : null),
-            new("Manage templates…", ManageTemplatesPrompt,
-                _settings.BranchTemplates.Count == 0 ? "no templates saved yet" : null),
-            new("Delete current desktop", DeleteCurrentDesktop),
-            new("Remove current branch", RemoveCurrentBranch, Preview: branchTargetPreview),
-            // Hard reset: collapse everything back to one desktop. Pointless (and greyed out) when
-            // there's already a single desktop and no branches.
-            new("Implode — reset to a single desktop", Implode,
-                _model is not null && _model.TotalDesktops <= 1 ? "already a single desktop" : null),
-            new("Snapshot layout…", PromptSnapshot),
-            new("Restore snapshot…", RestoreSnapshotPrompt),
-            new("Move desktop to branch…", stub("Move desktop to branch…")),
+            // Create, preview and delete branch templates — always available (you can create the first one from here).
+            new("Manage templates…", ManageTemplatesPrompt),
+            // Delete-current-desktop / remove-current-branch are intentionally not commands — do them from the
+            // map, where the target is visible (each tile / branch carries its own × control). Likewise
+            // move-windows is triggered from the map ("m") or Ctrl+Alt+M, not from here.
+            // Save / restore / reset the whole desktop+branch arrangement — one manager for all three.
+            new("Layouts…", LayoutsPrompt),
         };
     }
 
-    private void RemoveCurrentBranch()
-    {
-        if (_model is null) return;
-        int index = _model.CurrentBranchIndex;
-        if (index >= 0) RemoveBranch(index);
-    }
-
-    // ── Implode: hard reset to a single desktop ────────────────────────────────────
+    // ── Reset (implode): the Layouts manager's "restore the empty layout" ───────────
 
     // Remove every desktop but one and clear all branches — a clean slate. Guarded by a confirm.
     // Mirrors RestoreSnapshot's teardown: stand on the survivor first so the current view is never
@@ -587,29 +566,54 @@ public sealed class App : Application
         RefreshOrFlash();
     }
 
-    // Preview board that marks a whole branch as the target: its tiles get the green "here" outline and
-    // the box stays bright (un-rested), so a "current branch" command shows exactly which branch it hits —
-    // even from the main timeline, where the blue cursor is elsewhere.
-    private NavMap PreviewBranchTarget(int branchIndex)
+    // ── Layouts: save / restore / reset the whole desktop+branch arrangement ─────────
+
+    // One manager for whole-layout operations, mirroring the template manager: a palette of saved layouts
+    // (each previewing the arrangement it would restore) plus a "Save current layout…" row and a bottom
+    // "Reset to a single desktop" row. Enter restores a layout; Del deletes it. Save/delete return here;
+    // restore/reset apply and exit to the resulting layout.
+    private void LayoutsPrompt() => ShowLayoutManager(refresh: false);
+
+    // <param name="refresh">false: push the manager over the command palette (Esc pops back). true: rebuild
+    // it after a save/delete taken on a card pushed over it — the card and the stale list are replaced in
+    // place, keeping the command palette beneath (see ReplaceTop).</param>
+    private void ShowLayoutManager(bool refresh)
     {
-        NavMap b = _model!.BuildMap();
-        var branches = b.Branches.Select(g => g.Index == branchIndex
-            ? g with { Desktops = g.Desktops.Select(d => d with { IsHere = true }).ToList(), IsCurrentLevel = true }
-            : g).ToList();
-        return b with { Branches = branches };
+        if (_model is null || _snapshots is null) return;
+
+        var items = new List<PaletteItem>
+        {
+            new("Save current layout…", "capture these desktops & branches", "＋", () => OpenSaveLayoutCard()),
+        };
+        foreach (Snapshot snapshot in _snapshots.Load())
+        {
+            Snapshot s = snapshot; // capture per iteration
+            items.Add(new PaletteItem(s.Name, $"{s.DesktopCount} desktops · {s.Branches.Count} branches", "⟲",
+                () => ConfirmRestore(s),                 // Enter restores (pushes a confirm over this palette)…
+                Preview: () => SnapshotPreview(s),        // preview the layout you'd land in
+                OnDelete: () => ConfirmDeleteLayout(s))); // …Del deletes it (pushes a confirm)
+        }
+        // The reset ("restore the empty layout") sits at the bottom — greyed out when already a single desktop.
+        items.Add(new PaletteItem("Reset to a single desktop", "clear every desktop & branch", "⊘",
+            Implode, DisabledReason: _model.TotalDesktops <= 1 ? "already a single desktop" : null));
+
+        // Typing a name that matches no saved layout offers to save the current one under it.
+        PaletteItem? CreateRow(string q) =>
+            new($"Save “{q}”", "save current layout", "＋", () => OpenSaveLayoutCard(prefillName: q));
+
+        var palette = new PaletteContent("Layouts…",
+            "↑↓ move · ↵ restore / save · ⌦ delete · Esc back · preview = the saved layout", items, CreateRow);
+        if (refresh) _stage?.ReplaceTop(2, palette); else _stage?.Present(palette);
     }
 
-    // ── Snapshots: capture the whole layout under a name, restore it later ─────────
-
-    // Prompt for a name, then save the current layout (main timeline + branches) under it. Pushed as a card
-    // over the command palette, so it opens with no flash and Esc pops back to the palette.
-    private void PromptSnapshot()
+    // Prompt for a name, then save the current layout under it, and return to the (refreshed) manager.
+    private void OpenSaveLayoutCard(string? prefillName = null)
     {
-        if (_model is null || _snapshots is null || _stage is null) return;
-
-        _stage.Present(new PromptContent("Snapshot layout",
+        _stage?.Present(new PromptContent("Save layout",
             "Save the current desktops and branches under a name you can restore to later.",
-            "snapshot name (e.g. before-refactor)", SaveSnapshot));
+            "layout name (e.g. before-refactor)",
+            name => { SaveSnapshot(name); ShowLayoutManager(refresh: true); },
+            confirmLabel: "Save", prefill: prefillName, selectAll: prefillName is not null));
     }
 
     private void SaveSnapshot(string name)
@@ -621,24 +625,6 @@ public sealed class App : Application
         var list = _snapshots.Load().Where(s => !s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToList();
         list.Add(_model.CaptureSnapshot(name));
         _snapshots.Save(list);
-    }
-
-    // Show a palette of saved snapshots; choosing one confirms, then restores.
-    private void RestoreSnapshotPrompt()
-    {
-        if (_snapshots is null || _activator is null) return;
-
-        IReadOnlyList<Snapshot> snaps = _snapshots.Load();
-        var items = snaps.Select(s => new PaletteItem(
-            s.Name,
-            $"{s.DesktopCount} desktops · {s.Branches.Count} branches",
-            "⟲",
-            () => ConfirmRestore(s),             // pushes a confirm card over this palette
-            Preview: () => SnapshotPreview(s)))  // show the layout you'd restore to
-            .ToList();
-
-        OpenPalette(snaps.Count == 0 ? "No snapshots saved yet" : "Restore a snapshot…",
-                    "↑↓ move · ↵ restore · Esc back · preview = the saved layout", items);
     }
 
     // Build a board from a saved snapshot (persisted labels only — no live windows), so the restore
@@ -662,8 +648,20 @@ public sealed class App : Application
     {
         if (_desktops is null) return;
         _stage?.Present(new ConfirmContent(
-            $"Restore snapshot “{snap.Name}”?\nYour desktops are rebuilt to match it. Desktops that aren’t part of the snapshot are removed (any windows on them move to another desktop).",
+            $"Restore layout “{snap.Name}”?\nYour desktops are rebuilt to match it. Desktops that aren’t part of the layout are removed (any windows on them move to another desktop).",
             () => RestoreSnapshot(snap), confirmLabel: "Restore"));
+    }
+
+    // Delete a saved layout (Del on its row), then return to the (refreshed) manager.
+    private void ConfirmDeleteLayout(Snapshot snap)
+    {
+        if (_snapshots is null) return;
+        _stage?.Present(new ConfirmContent($"Delete layout “{snap.Name}”?", () =>
+        {
+            var list = _snapshots.Load().Where(s => !s.Name.Equals(snap.Name, StringComparison.OrdinalIgnoreCase)).ToList();
+            _snapshots.Save(list);
+            ShowLayoutManager(refresh: true); // return to the manager, now without the deleted layout
+        }, confirmLabel: "Delete"));
     }
 
     // Rebuild the OS desktops + the model to match a snapshot. Re-attaches to a saved desktop by its GUID
@@ -807,34 +805,38 @@ public sealed class App : Application
 
     // ── Branch definition ─────────────────────────────────────────────────────────
 
-    // "New branch…" — template-first when any templates exist, else straight to the blank prompt.
+    // "New branch…" — always the branch card. The card itself carries a "Load from template" button (only
+    // when templates exist), so a template is an optional in-place fill, never a gate before the fields.
     private void PromptNewBranch()
     {
         if (_desktops is null) return;
-
-        // No templates yet → the blank prompt, exactly as before (nothing regresses until you make one).
-        if (_settings.BranchTemplates.Count == 0) { OpenNewBranchDialog(null); return; }
-
-        // Otherwise pick a template first. "Blank branch" is row 0 (the default selection), so the
-        // no-template path stays a quick Enter-Enter; picking a template pre-fills the labels instead. Each
-        // row pushes the branch prompt over this picker, so Esc pops back here.
-        var items = new List<PaletteItem>
-        {
-            new("Blank branch", "type your own desktops", "+", () => OpenNewBranchDialog(null)),
-        };
-        foreach (BranchTemplate template in _settings.BranchTemplates)
-        {
-            BranchTemplate t = template; // capture per iteration
-            items.Add(new PaletteItem(t.Name, string.Join(" · ", t.Labels), "▸",
-                () => OpenNewBranchDialog(t.Labels)));
-        }
-        OpenPalette("Pick a template…", "↑↓ move · ↵ use · Esc back", items);
+        OpenNewBranchDialog(null);
     }
 
-    // Open the branch prompt as a card, optionally pre-filled with a template's desktop labels.
+    // Open the branch prompt as a card, optionally pre-filled with a template's desktop labels. The card's
+    // in-card "Load from template" button is wired only when there's at least one template to load.
     private void OpenNewBranchDialog(IReadOnlyList<string>? prefillLabels)
     {
-        _stage?.Present(new BranchContent(CreateBranch, prefillLabels));
+        Action<Action<IReadOnlyList<string>>>? onLoadTemplate =
+            _settings.BranchTemplates.Count > 0 ? PickTemplateInto : null;
+        _stage?.Present(new BranchContent(CreateBranch, prefillLabels, onLoadTemplate));
+    }
+
+    // Open the template picker over the branch card. The chosen template's labels are handed to `fill`
+    // (which writes them into the card's still-editable Desktops box), then we pop back to the card — so
+    // you can tweak the loaded labels before creating, or Esc back with the card untouched.
+    private void PickTemplateInto(Action<IReadOnlyList<string>> fill)
+    {
+        var items = _settings.BranchTemplates.Select(template =>
+        {
+            BranchTemplate t = template; // capture per iteration
+            return new PaletteItem(t.Name, string.Join(" · ", t.Labels), "▸", () =>
+            {
+                fill(t.Labels);
+                _stage?.Back(); // return to the branch card, now pre-filled
+            });
+        }).ToList();
+        OpenPalette("Pick a template…", "↑↓ move · ↵ use · Esc back", items);
     }
 
     private void CreateBranch(BranchSpec spec)
@@ -864,21 +866,52 @@ public sealed class App : Application
 
     // ── Branch templates (reusable desktop recipes for new branches) ─────────────────
 
-    // Promote the current branch's desktop set into a named, reusable template.
-    private void PromptSaveBranchAsTemplate()
+    // The single template manager: a palette listing every saved template (with a live preview of what it
+    // would create) plus a "Create new template" row. Choosing a template deletes it (behind a confirm);
+    // "Create new" (or typing a name that matches nothing) opens the definition card.
+    private void ManageTemplatesPrompt() => ShowTemplateManager(refresh: false);
+
+    // <param name="refresh">false: push the manager over the current surface (the command palette; Esc pops
+    // back to it). true: rebuild it after a create/delete taken on a card pushed over it — the card and the
+    // now-stale list are replaced in place, so the new list shows while the command palette beneath is kept
+    // (Esc still returns there).</param>
+    private void ShowTemplateManager(bool refresh)
     {
-        if (_model is null || _settingsStore is null || _desktops is null) return;
-        if (_model.OnTop) return; // greyed out in the palette; guard the direct path too
+        if (_settingsStore is null) return;
 
-        int gi = _model.CurrentBranchIndex;
-        if (gi < 0) return;
-        NavMapBranch branch = _model.BuildMap().Branches[gi];
-        var labels = branch.Desktops.Select(d => d.Label).ToList();
+        var items = new List<PaletteItem>
+        {
+            new("Create new template", "name it and list its desktops", "＋", () => OpenCreateTemplateCard()),
+        };
+        foreach (BranchTemplate template in _settings.BranchTemplates)
+        {
+            BranchTemplate t = template; // capture per iteration
+            items.Add(new PaletteItem(t.Name, string.Join(" · ", t.Labels), "🗑",
+                () => ConfirmDeleteTemplate(t),          // Enter deletes (pushes a confirm card over this palette)…
+                Preview: () => TemplatePreview(t),        // show the branch this template would stand up
+                OnDelete: () => ConfirmDeleteTemplate(t))); // …and Del does the same on the highlighted row
+        }
 
-        _stage?.Present(new PromptContent("Save as template",
-            "Save this branch’s desktops as a reusable template you can pick when creating new branches.",
-            $"template name (e.g. {branch.Name})",
-            name => SaveTemplate(name, labels)));
+        // Typing a name that matches no existing template offers to create it with that name pre-filled.
+        PaletteItem? CreateRow(string q) =>
+            new($"Create “{q}”", "new template", "＋", () => OpenCreateTemplateCard(prefillName: q));
+
+        var palette = new PaletteContent("Manage templates…",
+            "↑↓ move · ↵ create/delete · ⌦ delete · Esc back · preview = what it creates", items, CreateRow);
+        // Refresh drops the card/confirm (top) + the stale manager beneath it (popCount 2), keeping the
+        // command palette under that; the initial open just pushes over the command palette.
+        if (refresh) _stage?.ReplaceTop(2, palette); else _stage?.Present(palette);
+    }
+
+    // Open the template-definition card, optionally pre-filled. On confirm the template is saved and we
+    // land back in the (refreshed) manager, so you can immediately create or delete another.
+    private void OpenCreateTemplateCard(string? prefillName = null, IReadOnlyList<string>? prefillLabels = null)
+    {
+        _stage?.Present(new TemplateContent((name, labels) =>
+        {
+            SaveTemplate(name, labels);
+            ShowTemplateManager(refresh: true); // return to the manager, now including the new template
+        }, prefillName, prefillLabels));
     }
 
     private void SaveTemplate(string name, IReadOnlyList<string> labels)
@@ -890,29 +923,27 @@ public sealed class App : Application
         _settingsStore.Save(_settings);
     }
 
-    // A palette of saved templates; choosing one confirms, then deletes it.
-    private void ManageTemplatesPrompt()
-    {
-        if (_activator is null || _settingsStore is null) return;
-
-        var items = _settings.BranchTemplates.Select(template =>
-        {
-            BranchTemplate t = template; // capture per iteration
-            return new PaletteItem(t.Name, string.Join(" · ", t.Labels), "🗑",
-                () => ConfirmDeleteTemplate(t)); // pushes a confirm card over this palette
-        }).ToList();
-
-        OpenPalette(items.Count == 0 ? "No templates saved yet" : "Delete a template…",
-                    "↑↓ move · ↵ delete · Esc back", items);
-    }
-
     private void ConfirmDeleteTemplate(BranchTemplate template)
     {
         _stage?.Present(new ConfirmContent($"Delete template “{template.Name}”?", () =>
         {
             _settings.BranchTemplates.RemoveAll(t => t.Name.Equals(template.Name, StringComparison.OrdinalIgnoreCase));
             _settingsStore?.Save(_settings);
+            ShowTemplateManager(refresh: true); // return to the manager, now without the deleted template
         }, confirmLabel: "Delete"));
+    }
+
+    // Preview board for a template: the single branch it would add (its desktops), sitting below a stub
+    // main timeline — so the manager shows, at a glance, exactly what picking this template stands up.
+    private static NavMap TemplatePreview(BranchTemplate t)
+    {
+        var tiles = t.Labels.Select(l => new NavMapTile(l, IsCurrent: false)).ToList();
+        var branch = new NavMapBranch(0, t.Name, tiles, IsCurrentLevel: true, Cursor: 0);
+        return new NavMap(
+            TopRow: new[] { new NavMapTile("main", IsCurrent: false) },
+            TopCursor: 0, OnTop: true,
+            Branches: new[] { branch },
+            TopPosition: 0);
     }
 
     private void RemoveBranch(int index)
@@ -923,14 +954,6 @@ public sealed class App : Application
     }
 
     // ── Delete a single desktop (map × badge) with a confirm prompt ───────────────
-
-    // Delete whatever desktop is currently selected (footer button).
-    private void DeleteCurrentDesktop()
-    {
-        if (_model is null) return;
-        if (_model.OnTop) DeleteTopDesktop(_model.CurrentTopIndex);
-        else if (_model.CurrentBranchDesktop is { } sel) DeleteBranchDesktop(sel.branch, sel.desktop);
-    }
 
     private void DeleteTopDesktop(int index)
     {

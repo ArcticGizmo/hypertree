@@ -24,6 +24,7 @@ internal sealed class BranchContent : IStageContent
     private static readonly IBrush Muted = new SolidColorBrush(Color.Parse("#999"));
 
     private readonly Action<BranchSpec> _onConfirm;
+    private readonly Action<Action<IReadOnlyList<string>>>? _onLoadTemplate;
     private readonly TextBox _name;
     private readonly TextBox _labels;
     private readonly PromptButton _ok;
@@ -32,13 +33,20 @@ internal sealed class BranchContent : IStageContent
     private OverlayStage? _stage;
     private bool _submitted;
 
-    /// <param name="prefillLabels">When supplied (the template flow), seeds the desktop-labels box with
-    /// these — still fully editable. Null leaves it blank (the "Blank branch" flow).</param>
-    public BranchContent(Action<BranchSpec> onConfirm, IReadOnlyList<string>? prefillLabels = null)
+    /// <param name="prefillLabels">When supplied, seeds the desktop-labels box with these — still fully
+    /// editable. Null leaves it blank.</param>
+    /// <param name="onLoadTemplate">When supplied, an in-card <b>Load from template</b> button is shown
+    /// after the name field. Pressing it hands the callback a setter; the host opens a template picker and
+    /// feeds the chosen template's labels back through the setter, which drops them into the (still
+    /// editable) labels box. Null hides the button — the caller has no templates to offer.</param>
+    public BranchContent(Action<BranchSpec> onConfirm, IReadOnlyList<string>? prefillLabels = null,
+                         Action<Action<IReadOnlyList<string>>>? onLoadTemplate = null)
     {
         _onConfirm = onConfirm;
+        _onLoadTemplate = onLoadTemplate;
 
-        // The name is always typed per-branch; labels are prefilled from a template when one was picked.
+        // The name is always typed per-branch; labels start blank (or prefilled) and can be filled from a
+        // template via the Load button below.
         _name = new TextBox { PlaceholderText = "branch name (e.g. feat-123)" };
         _labels = new TextBox
         {
@@ -53,31 +61,42 @@ internal sealed class BranchContent : IStageContent
         _cancel = new PromptButton("Cancel");
         _cancel.Invoked += Cancel;
 
+        var fields = new StackPanel
+        {
+            Spacing = 8,
+            Children =
+            {
+                new TextBlock { Text = "Define a branch", FontWeight = FontWeight.SemiBold },
+                new TextBlock { Text = "Provisions one virtual desktop per label and adds them as a new branch in the stack.",
+                                TextWrapping = TextWrapping.Wrap, Foreground = Muted, FontSize = 12 },
+                new TextBlock { Text = "Name", FontSize = 12, Margin = new Thickness(0, 4, 0, 0) },
+                _name,
+            },
+        };
+
+        // Only offered when the host has templates to load — otherwise the button would be a dead end.
+        if (_onLoadTemplate is not null)
+        {
+            var load = new PromptButton("Load from template  ▾") { HorizontalAlignment = HorizontalAlignment.Left };
+            load.Invoked += LoadTemplate;
+            fields.Children.Add(load);
+        }
+
+        fields.Children.Add(new TextBlock { Text = "Desktops", FontSize = 12 });
+        fields.Children.Add(_labels);
+        fields.Children.Add(new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0),
+            Children = { _cancel, _ok }, // Cancel on the left, so ←/→ maps left→Cancel, right→confirm
+        });
+
         var card = new Border
         {
             Background = CardBg, BorderBrush = CardStroke, BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(12), Width = 380, Padding = new Thickness(16),
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-            Child = new StackPanel
-            {
-                Spacing = 8,
-                Children =
-                {
-                    new TextBlock { Text = "Define a branch", FontWeight = FontWeight.SemiBold },
-                    new TextBlock { Text = "Provisions one virtual desktop per label and adds them as a new branch in the stack.",
-                                    TextWrapping = TextWrapping.Wrap, Foreground = Muted, FontSize = 12 },
-                    new TextBlock { Text = "Name", FontSize = 12, Margin = new Thickness(0, 4, 0, 0) },
-                    _name,
-                    new TextBlock { Text = "Desktops", FontSize = 12 },
-                    _labels,
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal, Spacing = 8,
-                        HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0),
-                        Children = { _cancel, _ok }, // Cancel on the left, so ←/→ maps left→Cancel, right→confirm
-                    },
-                },
-            },
+            Child = fields,
         };
         _root = new Grid { Children = { card } };
 
@@ -127,4 +146,9 @@ internal sealed class BranchContent : IStageContent
     }
 
     private void Cancel() => _stage?.Back();
+
+    // Ask the host to pick a template, dropping the chosen desktop labels into the (still editable) box.
+    // The picker is pushed over this card, so Esc / a pick returns here rather than restarting the flow.
+    private void LoadTemplate() =>
+        _onLoadTemplate?.Invoke(labels => _labels.Text = string.Join(", ", labels));
 }

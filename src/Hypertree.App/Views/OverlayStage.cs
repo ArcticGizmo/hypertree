@@ -108,6 +108,25 @@ internal sealed class OverlayStage
         Activate(content);
     }
 
+    /// <summary>Pop <paramref name="popCount"/> frames (running each one's <see cref="IStageContent.OnRemoved"/>)
+    /// then present <paramref name="content"/> in their place — replacing the top of the stack while everything
+    /// below is preserved, in a single activation (no flash through the intermediate frames). Used to refresh a
+    /// surface pushed-over from a card: e.g. after an action taken on a card returns to a now-stale list, pop the
+    /// card and the stale list (popCount 2) and drop a freshly-built list into its slot, so the surface beneath
+    /// (the command palette) still catches Esc.</summary>
+    public void ReplaceTop(int popCount, IStageContent content)
+    {
+        EnsureHost();
+        for (int i = 0; i < popCount && _stack.Count > 0; i++)
+        {
+            IStageContent top = _stack[^1];
+            _stack.RemoveAt(_stack.Count - 1);
+            top.OnRemoved();
+        }
+        _stack.Add(content);
+        Activate(content);
+    }
+
     /// <summary>Pop the current surface and return to the one beneath it (Esc / Cancel). Empties the stack
     /// ⇒ hides the stage. This is the browser "back" step.</summary>
     public void Back()
