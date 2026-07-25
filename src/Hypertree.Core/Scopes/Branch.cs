@@ -39,4 +39,11 @@ public sealed class Branch
         _desktops.RemoveAt(index);
         if (_desktops.Count > 0) LastUsedIndex = Math.Clamp(LastUsedIndex, 0, _desktops.Count - 1);
     }
+
+    /// <summary>Rename a desktop in place, keeping its position and the resume point.</summary>
+    public void SetLabel(int index, string label)
+    {
+        if (index < 0 || index >= _desktops.Count) return;
+        _desktops[index] = _desktops[index] with { Label = label };
+    }
 }

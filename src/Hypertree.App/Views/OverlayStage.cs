@@ -105,6 +105,18 @@ internal sealed class OverlayStage
     /// window above the host (content that mutates its view in place, rather than re-presenting).</summary>
     public void BringToFront() => BringToTop();
 
+    /// <summary>Re-grab the foreground and window-level key focus for the current content — after a child
+    /// prompt that stole focus (e.g. the rename dialog) closes, so the stage's own key handling resumes.
+    /// No-op when hidden.</summary>
+    public void Reassert()
+    {
+        if (!_shown || _host is null) return;
+        BringToTop();
+        if (HostHandle != 0) _activator.ForceForeground(HostHandle);
+        _host.Activate();
+        _host.Focus();
+    }
+
     /// <summary>Give keyboard focus to a control within the host (e.g. a palette's search box).</summary>
     public void Focus(Control c) => c.Focus();
 

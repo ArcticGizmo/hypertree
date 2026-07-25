@@ -232,6 +232,26 @@ public sealed class NavigationModel
         return removed;
     }
 
+    /// <summary>Update the stored label for a main-timeline or branch desktop after an OS rename, so the
+    /// map and the status label reflect it immediately (without waiting for a reconcile). Main-timeline
+    /// labels also re-derive from the OS name on the next <see cref="SyncTopRow"/>; branch labels are the
+    /// model's own, so this is the only path that changes them.</summary>
+    public void SetDesktopLabel(bool onMain, int branchIndex, int desktopIndex, string label)
+    {
+        if (onMain)
+        {
+            if (desktopIndex < 0 || desktopIndex >= _topRow.Count) return;
+            _topRow[desktopIndex] = _topRow[desktopIndex] with { Label = label };
+        }
+        else
+        {
+            if (branchIndex < 0 || branchIndex >= _branches.Count) return;
+            _branches[branchIndex].SetLabel(desktopIndex, label);
+        }
+        Save();
+        Changed?.Invoke();
+    }
+
     // ── Single-desktop deletion (× badge / delete button) ─────────────────────────
 
     public int TotalDesktops => _topRow.Count + _branches.Sum(g => g.Count);

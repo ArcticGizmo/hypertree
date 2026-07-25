@@ -69,6 +69,43 @@ public class NavMapTests
     }
 
     [Fact]
+    public void SetDesktopLabel_relabels_a_main_timeline_desktop()
+    {
+        var m = New();
+        m.SetDesktopLabel(onMain: true, branchIndex: -1, desktopIndex: 1, "planning");
+
+        NavMap map = m.BuildMap();
+        Assert.Equal("planning", map.TopRow[1].Label);
+        Assert.Equal((null, "planning"), m.Describe(TopIds[1]));
+    }
+
+    [Fact]
+    public void SetDesktopLabel_relabels_a_branch_desktop_leaving_others_untouched()
+    {
+        var m = New();
+        m.AddBranch(G("one", (10, "a"), (11, "b")));
+        m.SetDesktopLabel(onMain: false, branchIndex: 0, desktopIndex: 1, "editor");
+
+        NavMap map = m.BuildMap();
+        Assert.Equal(new[] { "a", "editor" }, map.Branches[0].Desktops.Select(d => d.Label));
+        Assert.Equal(("one", "editor"), m.Describe(D(11)));
+    }
+
+    [Fact]
+    public void SetDesktopLabel_ignores_out_of_range_indices()
+    {
+        var m = New();
+        m.AddBranch(G("one", (10, "a")));
+        m.SetDesktopLabel(onMain: true, branchIndex: -1, desktopIndex: 9, "x");   // no such top desktop
+        m.SetDesktopLabel(onMain: false, branchIndex: 5, desktopIndex: 0, "x");   // no such branch
+        m.SetDesktopLabel(onMain: false, branchIndex: 0, desktopIndex: 9, "x");   // no such branch desktop
+
+        NavMap map = m.BuildMap();
+        Assert.Equal(new[] { "d0", "d1", "d2" }, map.TopRow.Select(t => t.Label));
+        Assert.Equal(new[] { "a" }, map.Branches[0].Desktops.Select(d => d.Label));
+    }
+
+    [Fact]
     public void TopPosition_is_the_fixed_main_slot_unaffected_by_entering_a_branch()
     {
         var m = New();

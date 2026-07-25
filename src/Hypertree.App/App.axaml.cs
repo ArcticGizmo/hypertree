@@ -51,6 +51,7 @@ public sealed class App : Application
     private OverlayStage? _stage;
     private SettingsWindow? _settingsWindow;
     private NameDialog? _nameDialog;
+    private RenameDialog? _renameDialog;
     private ISettingsStore? _settingsStore;
     private ISnapshotStore? _snapshots;
     private AppSettings _settings = new();
@@ -163,9 +164,10 @@ public sealed class App : Application
     private void Navigate(NavAction action)
     {
         if (_model is null || _desktops is null) return;
-        // The move content owns the arrows while it's up (its own plain-arrow handlers drive it), so
-        // an out-of-habit Ctrl+Alt+Arrow mustn't also navigate underneath it.
-        if (_stage?.Current is MoveContent) return;
+        // The move / rename content owns the arrows while it's up (their own plain-arrow handlers drive
+        // them), so an out-of-habit Ctrl+Alt+Arrow mustn't also navigate underneath — and rename in
+        // particular must never switch the desktop out from under you.
+        if (_stage?.Current is MoveContent or RenameContent) return;
         // Start of a gesture: remember where we came from, so releasing Ctrl+Alt can record it as
         // "last visited". A poll watches for the release (works whether flashing or in the map).
         _gestureFrom ??= _desktops.Current;
@@ -272,6 +274,51 @@ public sealed class App : Application
             _desktops.SwitchTo(origin);
         _moveOrigin = null;
         _model?.Resync();
+    }
+
+    // ── Rename a desktop (command palette) ──────────────────────────────────────────
+
+    // A selection-only surface on the stage: plain arrow keys point at any desktop without switching to
+    // it; Enter opens a rename prompt for the selected one; the surface stays up so several desktops can
+    // be renamed in one session. Re-invoking the command toggles it closed.
+    private void ToggleRename()
+    {
+        if (_model is null || _desktops is null || _stage is null) return;
+        if (_stage.Current is RenameContent) { _stage.Dismiss(); return; }
+
+        _model.Reconcile(); // select over the live layout, not stale/externally-deleted desktops
+        var content = new RenameContent { BoardProvider = () => _model!.BuildMap() };
+        content.RenameRequested += RenameSelected;
+        _stage.Present(content);
+    }
+
+    // Enter on the rename surface: open the prompt prefilled with the selected desktop's current name. On
+    // confirm, rename the OS desktop and the model's stored label, then refresh the surface in place so
+    // it's ready for the next rename. The prompt steals focus (it's a top-most window); when it closes we
+    // hand the stage its key focus back so the arrow selection resumes.
+    private void RenameSelected(DesktopSelection sel)
+    {
+        if (_model is null || _desktops is null || _activator is null) return;
+        if (_renameDialog is not null) { _renameDialog.Activate(); return; }
+
+        var peek = sel.OnMain
+            ? _model.PeekTopDesktop(sel.DesktopIndex)
+            : _model.PeekBranchDesktop(sel.BranchIndex, sel.DesktopIndex);
+        if (peek is null) return;
+
+        _renameDialog = new RenameDialog(peek.Value.label, _activator, _desktops);
+        _renameDialog.Closed += (_, _) =>
+        {
+            _renameDialog = null;
+            if (_stage?.Current is RenameContent) _stage.Reassert(); // reclaim key focus for the selection
+        };
+        _renameDialog.Confirmed += name =>
+        {
+            try { _desktops.Rename(peek.Value.id, name); } catch { /* best-effort — desktop may have gone */ }
+            _model.SetDesktopLabel(sel.OnMain, sel.BranchIndex, sel.DesktopIndex, name);
+            if (_stage?.Current is RenameContent rc) rc.Refresh(); // keep the surface open, now relabelled
+        };
+        _renameDialog.Show();
     }
 
     // ── Spotlight (F4): jump to any existing desktop, or create one named the query ─────
@@ -389,7 +436,7 @@ public sealed class App : Application
 
     private void ToggleCommandPalette()
     {
-        if (_stage?.Current is MoveContent) return; // don't stack the palette over an active move
+        if (_stage?.Current is MoveContent or RenameContent) return; // don't stack the palette over an active move/rename
         if (_stage?.Current is PaletteContent) { _stage.Dismiss(); return; } // re-press toggles closed
         OpenCommandPalette();
     }
@@ -437,6 +484,7 @@ public sealed class App : Application
         {
             new("Jump to desktop…", OpenSpotlight),
             new("Open map", ToggleMap),
+            new("Rename a desktop…", ToggleRename),
             new("Move windows to another desktop…", ToggleMoveWindows,
                 _desktops is not null && _desktops.WindowsOn(_desktops.Current).Count == 0 ? "no windows on this desktop" : null),
             new("Settings", OpenSettings),
@@ -930,6 +978,7 @@ public sealed class App : Application
         _hud?.Close();
         _taskbarLabel?.Close();
         _nameDialog?.Close();
+        _renameDialog?.Close();
         _settingsWindow?.Close();
     }
 }
