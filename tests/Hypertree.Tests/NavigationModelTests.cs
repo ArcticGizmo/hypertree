@@ -264,6 +264,38 @@ public class NavigationModelTests
         Assert.Equal(new[] { "feat-1", "hotfix", "feat-2" }, map.Branches.Select(g => g.Name));
     }
 
+    // ── AddBranchBelow: attach below a selection anchor, not always below main ────────
+
+    [Fact]
+    public void AddBranchBelow_a_main_selection_inserts_directly_below_main()
+    {
+        var (m, _) = Pivot(); // feat-1 above main (slot 1), feat-2 below
+        m.AddBranchBelow(onMain: true, branchIndex: -1, G("hotfix", G3));
+        NavMap map = m.BuildMap();
+        Assert.Equal(1, map.TopPosition); // unchanged
+        Assert.Equal(new[] { "feat-1", "hotfix", "feat-2" }, map.Branches.Select(g => g.Name));
+    }
+
+    [Fact]
+    public void AddBranchBelow_a_below_main_branch_inserts_right_after_it()
+    {
+        var (m, _) = Pivot();
+        m.AddBranchBelow(onMain: false, branchIndex: 1, G("hotfix", G3)); // below feat-2 (below main)
+        NavMap map = m.BuildMap();
+        Assert.Equal(1, map.TopPosition); // main slot unchanged — insertion was below main
+        Assert.Equal(new[] { "feat-1", "feat-2", "hotfix" }, map.Branches.Select(g => g.Name));
+    }
+
+    [Fact]
+    public void AddBranchBelow_an_above_main_branch_stays_above_and_sinks_main_a_slot()
+    {
+        var (m, _) = Pivot();
+        m.AddBranchBelow(onMain: false, branchIndex: 0, G("hotfix", G3)); // below feat-1 (above main)
+        NavMap map = m.BuildMap();
+        Assert.Equal(2, map.TopPosition); // now two branches above main — main sank to keep place
+        Assert.Equal(new[] { "feat-1", "hotfix", "feat-2" }, map.Branches.Select(g => g.Name));
+    }
+
     // ── Click-to-navigate ────────────────────────────────────────────────────────
 
     [Fact]

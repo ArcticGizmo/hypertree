@@ -51,6 +51,7 @@ internal sealed class PaletteContent : IStageContent
     private readonly IReadOnlyList<PaletteItem> _all;
     private readonly Func<string, PaletteItem?>? _createRow;
     private readonly bool _previewMode;
+    private readonly Action? _onBack; // Esc: return to the surface we opened over (else just dismiss)
 
     private readonly TextBox _search;
     private readonly StackPanel _list;
@@ -63,11 +64,13 @@ internal sealed class PaletteContent : IStageContent
     private OverlayStage? _stage;
 
     public PaletteContent(string placeholder, string footerHint, IReadOnlyList<PaletteItem> items,
-                          Func<string, PaletteItem?>? createRow = null, bool previewMode = false)
+                          Func<string, PaletteItem?>? createRow = null, bool previewMode = false,
+                          Action? onBack = null)
     {
         _all = items;
         _createRow = createRow;
         _previewMode = previewMode;
+        _onBack = onBack;
         _filtered = items.ToList();
 
         _search = new TextBox
@@ -159,7 +162,8 @@ internal sealed class PaletteContent : IStageContent
         switch (e.Key)
         {
             case Key.Escape:
-                _stage?.Dismiss();
+                if (_onBack is not null) _onBack(); // return to the surface we came from (swaps this out)
+                else _stage?.Dismiss();
                 e.Handled = true;
                 break;
             case Key.Down or Key.Tab when !e.KeyModifiers.HasFlag(KeyModifiers.Shift):

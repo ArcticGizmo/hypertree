@@ -41,6 +41,21 @@ internal sealed class OverlayStage
     public bool IsShowing => _shown;
     public IStageContent? Current => _current;
 
+    /// <summary>Realize and size the host (and build the dims) up front — shown transparent+empty, sized to
+    /// the primary monitor, then hidden — so the very first real <see cref="Present"/> shows an already-sized
+    /// surface instead of briefly rendering at the window's default top-left size. Call once at startup.</summary>
+    public void Prewarm()
+    {
+        EnsureHost();
+        _host!.SetContent(new Panel(), dim: false); // transparent + empty: nothing visible while we size it
+        _host.Show();
+        WindowFx.DisableTransitions(HostHandle);
+        Pin(_host);
+        _host.CoverPrimary();
+        EnsureDims();
+        _host.Hide(); // stays realized + sized for the first Present; _shown remains false
+    }
+
     /// <summary>The host window handle — the destination for the move picker's DWM thumbnails.</summary>
     public nint HostHandle => _host?.TryGetPlatformHandle()?.Handle ?? 0;
     public double HostScaling => _host?.RenderScaling ?? 1.0;
@@ -67,6 +82,7 @@ internal sealed class OverlayStage
             _host.Show();
             _shown = true;
             Pin(_host);
+            WindowFx.DisableTransitions(HostHandle); // no DWM scale/fade as the overlay (re)appears
         }
         _host.CoverPrimary();
         UpdateDims(content.Dim);
@@ -145,7 +161,8 @@ internal sealed class OverlayStage
         EnsureDims();
         foreach (Window d in _dims)
         {
-            if (dim) d.Show(); else d.Hide();
+            if (dim) { d.Show(); WindowFx.DisableTransitions(d.TryGetPlatformHandle()?.Handle ?? 0); }
+            else d.Hide();
         }
         if (dim) foreach (Window d in _dims) Pin(d);
         BringToTop();

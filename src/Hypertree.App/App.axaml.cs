@@ -60,10 +60,6 @@ public sealed class App : Application
     // released) or on a discrete jump. Surfaced first in the jump palette so you can hop back.
     private DesktopId? _lastVisited;
     private DesktopId? _gestureFrom; // where the in-progress keyboard gesture started
-    // Where you were when the persistent map was opened. Unlike _gestureFrom (which resets each time
-    // Ctrl+Alt is released), this stays put for the whole time the map is open, so the green "previous
-    // location" marker holds still across navigations until the map is closed.
-    private DesktopId? _mapOpenedFrom;
     private DispatcherTimer? _gesturePoll;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
@@ -124,14 +120,17 @@ public sealed class App : Application
         _stage = new OverlayStage(_desktops, _activator);
 
         _overlay = new MapOverlay(_stage);
-        _overlay.GoToTopRequested += i => Jump(() => _model!.GoToTop(i));
-        _overlay.GoToBranchRequested += (g, d) => Jump(() => _model!.GoToBranchDesktop(g, d));
-        _overlay.DeleteTopRequested += DeleteTopDesktop;
-        _overlay.DeleteBranchDesktopRequested += DeleteBranchDesktop;
-        _overlay.DeleteCurrentRequested += DeleteCurrentDesktop;
-        _overlay.NewBranchRequested += PromptNewBranch;
-        _overlay.RemoveBranchRequested += RemoveBranch;
+        _overlay.JumpTopRequested += i => JumpFromMap(() => _model!.GoToTop(i));
+        _overlay.JumpBranchRequested += (g, d) => JumpFromMap(() => _model!.GoToBranchDesktop(g, d));
+        _overlay.RenameRequested += RenameSelected;
+        _overlay.DeleteDesktopRequested += DeleteSelectedDesktop;
+        _overlay.DeleteBranchRequested += ConfirmRemoveBranch;
+        _overlay.NewDesktopRequested += PromptNewDesktop;
+        _overlay.NewBranchRequested += () => OpenNewBranchDialog(null); // blank dialog keeps the map up (templates: command palette)
+        _overlay.FinderRequested += () => OpenSpotlight(ReopenMap); // Ctrl+F — finder over the map; Esc returns to it
         _overlay.SettingsRequested += OpenSettings;
+
+        _stage.Prewarm(); // size the overlay host now, so the first summon doesn't render at the top-left then jump
 
         RegisterHotkeys();
         BuildTray();
@@ -160,24 +159,34 @@ public sealed class App : Application
     }
 
     // Navigate. While the map overlay is open it stays open (its windows are pinned across the
-    // desktop switch) and just refreshes; otherwise the transient flash shows.
+    // desktop switch) and re-homes its selection onto the desktop we land on; otherwise the flash shows.
     private void Navigate(NavAction action)
     {
         if (_model is null || _desktops is null) return;
-        // The move / rename content owns the arrows while it's up (their own plain-arrow handlers drive
-        // them), so an out-of-habit Ctrl+Alt+Arrow mustn't also navigate underneath — and rename in
-        // particular must never switch the desktop out from under you.
-        if (_stage?.Current is MoveContent or RenameContent) return;
+        // The move flow owns the arrows while it's up (its own plain-arrow handlers drive it), so an
+        // out-of-habit Ctrl+Alt+Arrow mustn't also navigate underneath.
+        if (_stage?.Current is MoveContent) return;
         // Start of a gesture: remember where we came from, so releasing Ctrl+Alt can record it as
         // "last visited". A poll watches for the release (works whether flashing or in the map).
         _gestureFrom ??= _desktops.Current;
         _model.Apply(action);
-        // Mark the "previous location" with the green "here" outline (same cue as the jump preview).
-        // In the persistent map it stays pinned to where the map was opened; in the transient flash it
-        // tracks the current gesture's origin.
-        if (_overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap(_mapOpenedFrom));
+        // In the map, Ctrl+Alt+Arrow switches for real, so the selection follows onto the new desktop
+        // (green "here" and blue selection rejoin); in the transient flash, the green outline marks the
+        // gesture's origin so the jump's direction/distance reads at a glance.
+        if (_overlay is { IsOpen: true }) _overlay.SyncToCurrent(_model.BuildMap());
         else _hud?.Flash(_model.BuildMap(_gestureFrom));
         StartGesturePoll();
+    }
+
+    // A double-click / arrow-driven jump from the map: switch to the chosen desktop, record where we
+    // came from, then re-home the selection onto it (green + blue rejoin), keeping the map open.
+    private void JumpFromMap(Func<bool> doJump)
+    {
+        if (_desktops is null || _model is null) return;
+        DesktopId from = _desktops.Current;
+        doJump();
+        if (_desktops.Current != from) _lastVisited = from;
+        if (_overlay is { IsOpen: true }) _overlay.SyncToCurrent(_model.BuildMap());
     }
 
     private void StartGesturePoll()
@@ -218,16 +227,15 @@ public sealed class App : Application
     private void ToggleMap()
     {
         if (_model is null || _overlay is null || _desktops is null) return;
-        if (_overlay.IsOpen) { _overlay.Close(); _mapOpenedFrom = null; return; }
+        if (_overlay.IsOpen) { _overlay.Close(); return; }
 
         _model.Reconcile(); // drop any externally-deleted desktops before showing the map
-        _mapOpenedFrom = _desktops.Current; // pin the "previous location" marker until the map closes
-        _overlay.Open(_model.BuildMap(_mapOpenedFrom)); // vertical model renders the stack around main
+        _overlay.Open(_model.BuildMap()); // vertical model renders the stack around main; selection homes to current
     }
 
     private void RefreshOverlay()
     {
-        if (_model is not null && _overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap(_mapOpenedFrom));
+        if (_model is not null && _overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap());
     }
 
     // ── Move windows to another desktop (Ctrl+Alt+M) ────────────────────────────────
@@ -276,26 +284,12 @@ public sealed class App : Application
         _model?.Resync();
     }
 
-    // ── Rename a desktop (command palette) ──────────────────────────────────────────
+    // ── Manage-map actions (r / Del / Shift+Del / n) ───────────────────────────────
 
-    // A selection-only surface on the stage: plain arrow keys point at any desktop without switching to
-    // it; Enter opens a rename prompt for the selected one; the surface stays up so several desktops can
-    // be renamed in one session. Re-invoking the command toggles it closed.
-    private void ToggleRename()
-    {
-        if (_model is null || _desktops is null || _stage is null) return;
-        if (_stage.Current is RenameContent) { _stage.Dismiss(); return; }
-
-        _model.Reconcile(); // select over the live layout, not stale/externally-deleted desktops
-        var content = new RenameContent { BoardProvider = () => _model!.BuildMap() };
-        content.RenameRequested += RenameSelected;
-        _stage.Present(content);
-    }
-
-    // Enter on the rename surface: open the prompt prefilled with the selected desktop's current name. On
-    // confirm, rename the OS desktop and the model's stored label, then refresh the surface in place so
-    // it's ready for the next rename. The prompt steals focus (it's a top-most window); when it closes we
-    // hand the stage its key focus back so the arrow selection resumes.
+    // r on the map: open the rename prompt prefilled with the selected desktop's current name. On confirm,
+    // rename the OS desktop and the model's stored label, then refresh the map in place. The prompt steals
+    // focus (it's a top-most window); when it closes we hand the stage its key focus back so the arrow
+    // selection resumes.
     private void RenameSelected(DesktopSelection sel)
     {
         if (_model is null || _desktops is null || _activator is null) return;
@@ -310,20 +304,68 @@ public sealed class App : Application
         _renameDialog.Closed += (_, _) =>
         {
             _renameDialog = null;
-            if (_stage?.Current is RenameContent) _stage.Reassert(); // reclaim key focus for the selection
+            ReassertMap(); // reclaim key focus for the selection
         };
         _renameDialog.Confirmed += name =>
         {
             try { _desktops.Rename(peek.Value.id, name); } catch { /* best-effort — desktop may have gone */ }
             _model.SetDesktopLabel(sel.OnMain, sel.BranchIndex, sel.DesktopIndex, name);
-            if (_stage?.Current is RenameContent rc) rc.Refresh(); // keep the surface open, now relabelled
+            RefreshOverlay(); // keep the map open, now relabelled
         };
         _renameDialog.Show();
     }
 
+    // Del on the map: delete the selected desktop (with a confirm), resolving main vs. branch.
+    private void DeleteSelectedDesktop(DesktopSelection sel)
+    {
+        if (sel.OnMain) DeleteTopDesktop(sel.DesktopIndex);
+        else DeleteBranchDesktop(sel.BranchIndex, sel.DesktopIndex);
+    }
+
+    // Shift+Del on the map: delete an entire branch (all its desktops) behind a confirm.
+    private void ConfirmRemoveBranch(int index)
+    {
+        if (_model is null) return;
+        var map = _model.BuildMap();
+        if (index < 0 || index >= map.Branches.Count) return;
+        NavMapBranch g = map.Branches[index];
+        Confirm($"Delete branch “{g.Name}”?\nIts {g.Desktops.Count} desktop{(g.Desktops.Count == 1 ? "" : "s")} " +
+                "are removed and any windows on them move to another desktop.", () => RemoveBranch(index));
+    }
+
+    // n on the map: prompt for a name, create a new main-timeline desktop (no switch — the manage surface
+    // stays where you are), then home the selection onto it so you can rename/act on it immediately.
+    private void PromptNewDesktop()
+    {
+        if (_model is null || _desktops is null || _activator is null) return;
+        if (_nameDialog is not null) { _nameDialog.Activate(); return; }
+
+        _nameDialog = new NameDialog("New desktop",
+            "Create a new desktop on the main timeline. You stay on the current desktop.",
+            "desktop name (e.g. email)", _activator, _desktops, confirmLabel: "Create");
+        _nameDialog.Closed += (_, _) => { _nameDialog = null; ReassertMap(); };
+        _nameDialog.Confirmed += name =>
+        {
+            _desktops.Create(name); // a main-timeline desktop is the user's own — not tracked in _created
+            _model.SyncTopRow();    // picks up the new desktop (appended to the top row)
+            NavMap map = _model.BuildMap();
+            _overlay?.Refresh(map);
+            _overlay?.Select(new DesktopSelection(true, -1, map.TopRow.Count - 1)); // the just-created desktop
+        };
+        _nameDialog.Show();
+    }
+
+    // After a child prompt over the map closes, hand the stage its key focus back so arrow selection resumes.
+    private void ReassertMap()
+    {
+        if (_overlay is { IsOpen: true }) _stage?.Reassert();
+    }
+
     // ── Spotlight (F4): jump to any existing desktop, or create one named the query ─────
 
-    private void OpenSpotlight()
+    // <paramref name="onBack"/>, when supplied, is what Esc returns to (the map via Ctrl+F, or the command
+    // palette via its "Jump to desktop…" row) instead of dismissing outright.
+    private void OpenSpotlight(Action? onBack = null)
     {
         if (_model is null) return;
 
@@ -371,11 +413,14 @@ public sealed class App : Application
             items.Insert(0, lastItem);
         }
 
-        OpenPalette("Jump to or create a desktop…", "↑↓ move · ↵ jump/create · Esc close · blue = you are here", items,
+        string hint = onBack is null
+            ? "↑↓ move · ↵ jump/create · Esc close · blue = you are here"
+            : "↑↓ move · ↵ jump/create · Esc back · blue = you are here";
+        OpenPalette("Jump to or create a desktop…", hint, items,
             query => new PaletteItem($"Create desktop “{query}”", "new · main", "+",
                 () => CreateAndGoToDesktop(query),
                 Preview: () => _model!.BuildMap()), // no target tile yet — show the current board
-            previewMode: true);
+            previewMode: true, onBack: onBack);
     }
 
     // Build a board snapshot that marks a specific desktop as current (for the jump palette's preview),
@@ -427,16 +472,25 @@ public sealed class App : Application
     }
 
     private void OpenPalette(string placeholder, string hint, IReadOnlyList<PaletteItem> items,
-                             Func<string, PaletteItem?>? createRow = null, bool previewMode = false)
+                             Func<string, PaletteItem?>? createRow = null, bool previewMode = false,
+                             Action? onBack = null)
     {
-        _stage?.Present(new PaletteContent(placeholder, hint, items, createRow, previewMode));
+        _stage?.Present(new PaletteContent(placeholder, hint, items, createRow, previewMode, onBack));
+    }
+
+    // Reopen the map fresh (used as the finder's "back" target when it was summoned from the map).
+    private void ReopenMap()
+    {
+        if (_model is null || _overlay is null || _desktops is null) return;
+        _model.Reconcile();
+        _overlay.Open(_model.BuildMap());
     }
 
     // ── Command palette (F5): same look/feel, items are commands. Bones only. ───────────
 
     private void ToggleCommandPalette()
     {
-        if (_stage?.Current is MoveContent or RenameContent) return; // don't stack the palette over an active move/rename
+        if (_stage?.Current is MoveContent) return; // don't stack the palette over an active move
         if (_stage?.Current is PaletteContent) { _stage.Dismiss(); return; } // re-press toggles closed
         OpenCommandPalette();
     }
@@ -482,9 +536,8 @@ public sealed class App : Application
         // command palette current, so Choose dismisses the stage behind them. Either way, no flash.
         return new List<Command>
         {
-            new("Jump to desktop…", OpenSpotlight),
+            new("Jump to desktop…", () => OpenSpotlight(OpenCommandPalette)), // Esc returns to the command palette
             new("Open map", ToggleMap),
-            new("Rename a desktop…", ToggleRename),
             new("Move windows to another desktop…", ToggleMoveWindows,
                 _desktops is not null && _desktops.WindowsOn(_desktops.Current).Count == 0 ? "no windows on this desktop" : null),
             new("Settings", OpenSettings),
@@ -566,18 +619,16 @@ public sealed class App : Application
 
     // ── Snapshots: capture the whole layout under a name, restore it later ─────────
 
-    // Prompt for a name, then save the current layout (main timeline + branches) under it.
+    // Prompt for a name, then save the current layout (main timeline + branches) under it. A stage-content
+    // prompt (not a NameDialog window), so summoning it from the command palette is a swap in place — the
+    // palette becomes the prompt on the same host, no dim tear-down/rebuild flash.
     private void PromptSnapshot()
     {
-        if (_model is null || _snapshots is null || _activator is null || _desktops is null) return;
-        if (_nameDialog is not null) { _nameDialog.Activate(); return; }
+        if (_model is null || _snapshots is null || _stage is null) return;
 
-        _nameDialog = new NameDialog("Snapshot layout",
+        _stage.Present(new PromptContent("Snapshot layout",
             "Save the current desktops and branches under a name you can restore to later.",
-            "snapshot name (e.g. before-refactor)", _activator, _desktops);
-        _nameDialog.Closed += (_, _) => _nameDialog = null;
-        _nameDialog.Confirmed += SaveSnapshot;
-        _nameDialog.Show();
+            "snapshot name (e.g. before-refactor)", SaveSnapshot));
     }
 
     private void SaveSnapshot(string name)
@@ -742,7 +793,7 @@ public sealed class App : Application
     private void RefreshOrFlash()
     {
         if (_model is null) return;
-        if (_overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap(_mapOpenedFrom));
+        if (_overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap());
         else _hud?.Flash(_model.BuildMap());
     }
 
@@ -803,7 +854,7 @@ public sealed class App : Application
         if (_dialog is not null) { _dialog.Activate(); return; }
 
         _dialog = new BranchDialog(_activator, _desktops, prefillLabels); // pinned + top-most overlay, sits above the map
-        _dialog.Closed += (_, _) => _dialog = null;
+        _dialog.Closed += (_, _) => { _dialog = null; ReassertMap(); };
         _dialog.Confirmed += CreateBranch;
         _dialog.Show();
     }
@@ -820,7 +871,15 @@ public sealed class App : Application
             refs.Add(new DesktopRef(id, label));
         }
 
-        _model.AddBranch(new Branch(spec.Name, refs));
+        var branch = new Branch(spec.Name, refs);
+        // Created from the map: attach the branch below the highlighted desktop's row, not below main.
+        // (Tray / command-palette creation has no map selection, so it falls back to below main.)
+        if (_overlay is { IsOpen: true })
+        {
+            DesktopSelection sel = _overlay.Selection;
+            _model.AddBranchBelow(sel.OnMain, sel.BranchIndex, branch);
+        }
+        else _model.AddBranch(branch);
         RefreshOrFlash();
     }
 
@@ -950,6 +1009,7 @@ public sealed class App : Application
         // Always top-most and pinned across desktops now (OverlayPrompt), so it sits above the map on its own.
         var dlg = new ConfirmDialog(message, _activator, _desktops);
         dlg.Confirmed += onConfirm;
+        dlg.Closed += (_, _) => ReassertMap(); // hand the map its key focus back once the prompt is gone
         dlg.Show();
     }
 

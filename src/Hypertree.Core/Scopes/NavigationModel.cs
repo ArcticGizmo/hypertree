@@ -218,6 +218,31 @@ public sealed class NavigationModel
         Changed?.Invoke();
     }
 
+    /// <summary>Add a branch directly below a <b>selection anchor</b> rather than below main. A branch is a
+    /// row in the vertical stack, so "below the selection" means below the selected row: below main when the
+    /// selection is on the main timeline (identical to <see cref="AddBranch"/>), or directly below the
+    /// selected branch — which may sit above main (main then sinks one slot to keep it in place) or below it.</summary>
+    public void AddBranchBelow(bool onMain, int branchIndex, Branch branch)
+    {
+        int at;
+        if (onMain || _branches.Count == 0)
+        {
+            at = Math.Clamp(_mainSlot, 0, _branches.Count); // directly below main
+        }
+        else
+        {
+            branchIndex = Math.Clamp(branchIndex, 0, _branches.Count - 1);
+            at = branchIndex + 1;                       // right after the selected branch
+            if (branchIndex < _mainSlot) _mainSlot++;   // it's above main → keep the above-count, main sinks one
+        }
+        _branches.Insert(at, branch);
+        if (!_onMain && _currentBranch >= at) _currentBranch++; // existing selection shifted down one
+        ClampState();
+        SyncTopRow();
+        Save();
+        Changed?.Invoke();
+    }
+
     /// <summary>Remove the branch at <paramref name="index"/> and return it (for desktop teardown).</summary>
     public Branch? RemoveBranch(int index)
     {

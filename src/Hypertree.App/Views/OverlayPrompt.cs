@@ -76,6 +76,7 @@ internal abstract class OverlayPrompt : Window
         nint h = TryGetPlatformHandle()?.Handle ?? 0;
         if (h != 0)
         {
+            WindowFx.DisableTransitions(h);          // snap in — no DWM scale/fade from the corner
             _activator.ForceForeground(h);           // summoned from a background tray — grab foreground
             try { _desktops.PinWindow(h); } catch { /* best-effort — losing the pin isn't fatal */ }
         }

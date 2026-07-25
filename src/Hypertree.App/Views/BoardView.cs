@@ -33,7 +33,8 @@ internal static class BoardView
     /// </summary>
     public static Control Render(NavMap map, double screenW, double screenH, double s = 1.0,
                                  Action<int>? onTopClick = null, Action<int, int>? onBranchClick = null,
-                                 Action<int>? onTopDelete = null, Action<int, int>? onBranchDelete = null)
+                                 Action<int>? onTopDelete = null, Action<int, int>? onBranchDelete = null,
+                                 Action<int>? onTopActivate = null, Action<int, int>? onBranchActivate = null)
     {
         double tileW = 96 * s, scrH = 50 * s, capH = 22 * s, gap = 14 * s;
         double tileH = scrH + capH, lift = 6 * s, scopePad = 10 * s, labelH = 20 * s;
@@ -47,10 +48,10 @@ internal static class BoardView
         // ── The vertical sequence of rows: branches above main, main, then branches below. ──
         int split = Math.Clamp(map.TopPosition, 0, map.Branches.Count);
         var rows = new List<Row>();
-        for (int gi = 0; gi < split; gi++) rows.Add(BranchRow(map.Branches[gi], s, tileW, scrH, capH, gap, scopePad, labelH, lift, onBranchClick, onBranchDelete));
+        for (int gi = 0; gi < split; gi++) rows.Add(BranchRow(map.Branches[gi], s, tileW, scrH, capH, gap, scopePad, labelH, lift, onBranchClick, onBranchDelete, onBranchActivate));
         int mainRowIndex = rows.Count;
-        rows.Add(MainRow(map, s, tileW, scrH, capH, gap, lift, mainLabelH, onTopClick, onTopDelete));
-        for (int gi = split; gi < map.Branches.Count; gi++) rows.Add(BranchRow(map.Branches[gi], s, tileW, scrH, capH, gap, scopePad, labelH, lift, onBranchClick, onBranchDelete));
+        rows.Add(MainRow(map, s, tileW, scrH, capH, gap, lift, mainLabelH, onTopClick, onTopDelete, onTopActivate));
+        for (int gi = split; gi < map.Branches.Count; gi++) rows.Add(BranchRow(map.Branches[gi], s, tileW, scrH, capH, gap, scopePad, labelH, lift, onBranchClick, onBranchDelete, onBranchActivate));
 
         // Which row do we centre on? The row holding the current (IsCurrent) tile — main when OnTop,
         // else the branch that contains it (which may be above OR below main: a branch above main maps to
@@ -94,7 +95,8 @@ internal static class BoardView
     private sealed record Row(double Height, Action<Canvas, double, double> Place);
 
     private static Row MainRow(NavMap map, double s, double tileW, double scrH, double capH, double gap,
-                               double lift, double labelH, Action<int>? onClick, Action<int>? onDelete)
+                               double lift, double labelH, Action<int>? onClick, Action<int>? onDelete,
+                               Action<int>? onActivate)
     {
         double tileH = scrH + capH;
         double height = labelH + lift + tileH;
@@ -117,7 +119,8 @@ internal static class BoardView
                 Control tile = Tile(map.TopRow[i].Label, isStream: false, map.OnTop && map.TopRow[i].IsCurrent,
                                     map.TopRow[i].IsHere, map.TopRow[i].WindowCount, s, tileW, scrH, capH,
                                     onClick is null ? null : () => onClick(idx),
-                                    onDelete is null ? null : () => onDelete(idx));
+                                    onDelete is null ? null : () => onDelete(idx),
+                                    onActivate is null ? null : () => onActivate(idx));
                 Canvas.SetLeft(tile, originX + i * (tileW + gap));
                 Canvas.SetTop(tile, rowY);
                 canvas.Children.Add(tile);
@@ -127,12 +130,13 @@ internal static class BoardView
 
     private static Row BranchRow(NavMapBranch g, double s, double tileW, double scrH, double capH, double gap,
                                 double scopePad, double labelH, double lift,
-                                Action<int, int>? onClick, Action<int, int>? onDelete)
+                                Action<int, int>? onClick, Action<int, int>? onDelete, Action<int, int>? onActivate)
     {
         int branchIndex = g.Index;
         Action<int>? clickForThisBranch = onClick is null ? null : j => onClick(branchIndex, j);
         Action<int>? deleteForThisBranch = onDelete is null ? null : j => onDelete(branchIndex, j);
-        Control box = BuildBranchBox(g, s, tileW, scrH, capH, gap, scopePad, clickForThisBranch, deleteForThisBranch);
+        Action<int>? activateForThisBranch = onActivate is null ? null : j => onActivate(branchIndex, j);
+        Control box = BuildBranchBox(g, s, tileW, scrH, capH, gap, scopePad, clickForThisBranch, deleteForThisBranch, activateForThisBranch);
         box.Opacity = g.IsCurrentLevel ? 1.0 : 0.45;
         box.Measure(Size.Infinity);
         double height = box.DesiredSize.Height + lift; // lift = headroom for the focused-tile pop
@@ -148,7 +152,8 @@ internal static class BoardView
     }
 
     private static Control BuildBranchBox(NavMapBranch g, double s, double tileW, double screenH, double capH,
-                                         double gap, double scopePad, Action<int>? onDeskClick, Action<int>? onDeskDelete)
+                                         double gap, double scopePad, Action<int>? onDeskClick, Action<int>? onDeskDelete,
+                                         Action<int>? onDeskActivate)
     {
         var label = new TextBlock
         {
@@ -164,7 +169,8 @@ internal static class BoardView
             row.Children.Add(Tile(g.Desktops[j].Label, isStream: true, g.Desktops[j].IsCurrent,
                                   g.Desktops[j].IsHere, g.Desktops[j].WindowCount, s, tileW, screenH, capH,
                                   onDeskClick is null ? null : () => onDeskClick(idx),
-                                  onDeskDelete is null ? null : () => onDeskDelete(idx)));
+                                  onDeskDelete is null ? null : () => onDeskDelete(idx),
+                                  onDeskActivate is null ? null : () => onDeskActivate(idx)));
         }
 
         return new Border
@@ -179,7 +185,8 @@ internal static class BoardView
     }
 
     private static Control Tile(string caption, bool isStream, bool focused, bool here, int windowCount, double s,
-                                double tileW, double screenH, double capH, Action? onClick, Action? onDelete = null)
+                                double tileW, double screenH, double capH, Action? onClick, Action? onDelete = null,
+                                Action? onActivate = null)
     {
         // The focused/target tile wins the border colour; a non-target "here" tile gets the green
         // marker so current-vs-destination (and the distance between) reads at a glance.
@@ -220,10 +227,17 @@ internal static class BoardView
         };
 
         var stack = new StackPanel { Orientation = Orientation.Vertical, Width = tileW, Children = { screen, cap } };
-        if (onClick is not null)
+        if (onClick is not null || onActivate is not null)
         {
             stack.Cursor = new Cursor(StandardCursorType.Hand);
-            stack.PointerPressed += (_, _) => onClick();
+            // Single click selects (onClick); a double click activates (onActivate) — e.g. select vs. jump on
+            // the interactive map. The first press of a double still fires onClick, so activate lands on the
+            // clicked tile either way.
+            stack.PointerPressed += (_, e) =>
+            {
+                if (e.ClickCount >= 2) onActivate?.Invoke();
+                else onClick?.Invoke();
+            };
         }
 
         Control result = stack;
