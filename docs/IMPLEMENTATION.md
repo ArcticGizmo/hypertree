@@ -3,16 +3,14 @@
 > Companion to [`PLAN.md`](./PLAN.md). `PLAN.md` is the **design** source of truth
 > (the *what* and *why*); this document is the **build** plan (the *how* and *in what
 > order*). It maps the M0–M3 milestones onto concrete, gated engineering phases on an
-> **Avalonia / .NET 10** stack, reusing patterns already proven in `../perch` and
-> `../sprig`.
+> **Avalonia / .NET 10** stack, reusing patterns already proven in `../perch`.
 
 ## 0. Stack decision & why Avalonia holds
 
 Hypertree must live in the tray, capture global hotkeys with no focused window, and
 paint a small always-available overlay (the HUD). That is **exactly** what `perch`
-already is, and `sprig` already owns the git-worktree half. So this is not a
-green-field bet — it is a graft of two existing, working shapes plus **one genuinely
-new and risky component**: the virtual-desktop controller.
+already is. So this is not a green-field bet — it is a graft of an existing, working
+shape plus **one genuinely new and risky component**: the virtual-desktop controller.
 
 What we inherit, and from where:
 
@@ -23,10 +21,7 @@ What we inherit, and from where:
 | Owner-drawn always-on overlay | `perch` `OverlayCanvas` + `Rendering/OverlayDraw` + `HeadlessRenderer` | template for the HUD chip |
 | Focusing/moving native windows | `perch` `Perch.Platform.Windows/WindowActivator.cs` (EnumWindows, GA_ROOTOWNER, foreground-lock dance) | reuse for "move window to scope desktop" |
 | Core / Platform.Windows / App split behind interfaces, `#if WINDOWS` | `perch` layout + `PlatformServices` composition root | copy the topology |
-| git worktree enumeration | `sprig` `Sprig.Core/Git` (`IGitService`, `WorktreeInfo`) | reuse wholesale |
-| Persisted JSON state under a per-user dir | `sprig` `Sprig.Core/Store` (`JsonFile`, `SprigPaths`, `InstanceStore`) | template for the scope store |
-| CLI companion for provisioning | `sprig` `Sprig.Cli` | template for `hypertree new <branch>` |
-| Velopack release + icon-gen | both repos (`publish.bat`, `tools/IconGen`) | copy at M3 |
+| Velopack release + icon-gen | `perch` (`publish.bat`, `tools/IconGen`) | copy at M3 |
 
 **The only unproven primitive is virtual-desktop control** (create / switch / move a
 window onto a desktop), which has *no supported API* and drifts per Windows build.
@@ -47,10 +42,10 @@ src/
   Hypertree.Core/              net10.0  — UI-free, no Win32, no System.Drawing
     Desktops/                  IDesktopController, DesktopId, DesktopLayout   ← the risky seam
     Scopes/                    Scope, Anchor, ScopeState, IScopeStore, NavigationModel  ← Model P lives here
-    Git/                       IGitService, WorktreeInfo        (lifted from sprig)
+    Git/                       (git integration — deferred, M2+)
     Hotkeys/                   HotkeyBinding, NavAction         (chord → intent mapping)
     Platform/                  IGlobalHotkey, IWindowMover, IHud, ISystemMetrics (interfaces only)
-    Store/                     JsonFile, HypertreePaths         (lifted from sprig)
+    Store/                     JsonFile, HypertreePaths
   Hypertree.Platform.Windows/  net10.0-windows — Win32 + the desktop-primitive wrapper
     GlobalHotkey.cs            (from perch, extended for arrow VKs + Win+Ctrl chords)
     WindowMover.cs             (from perch WindowActivator + MoveWindowToDesktop)
@@ -60,12 +55,12 @@ src/
     PlatformServices.cs        composition root (#if WINDOWS)
     Views/HudChip.cs           owner-drawn HUD (from perch OverlayCanvas/OverlayDraw)
     Rendering/                 HudDraw mini-PaintKit + HeadlessRenderer (from perch)
-  Hypertree.Cli/               net10.0 — `hypertree new/list/anchor` (from sprig Cli)  [M2+]
+  Hypertree.Cli/               net10.0 — `hypertree new/list/anchor`  [M2+]
 tests/Hypertree.Tests/         xUnit over Core (NavigationModel is the priority target)
 tools/IconGen/                 raster icons from hypertree.svg (from perch)  [M3]
 ```
 
-**Testability rule (borrowed from perch/sprig):** all Model-P navigation logic —
+**Testability rule (borrowed from perch):** all Model-P navigation logic —
 dive/surface/move-within-level, anchor resolution, resume-last-used, edge behaviour —
 lives in `Hypertree.Core/Scopes/NavigationModel` as **pure state transitions over an
 `IDesktopController` interface**. The controller is faked in tests, so we can unit-test
@@ -205,43 +200,19 @@ Detailed spec: **[`docs/design/ux-iteration-2.md`](design/ux-iteration-2.md)**. 
 
 ---
 
-## M2 — Worktree integration
+## M2 — Git integration (deferred)
 
-> **Reframed — see [`design/sprig-integration.md`](design/sprig-integration.md).** Rather than
-> *lifting* sprig's git layer (Phase 2.1 below) and reimplementing provisioning, M2 now **delegates**
-> to sprig over its existing `--json` CLI: ask `sprig ls` for workspaces and `sprig layout` for how
-> each should look as desktops, then provision a group. The phases below are kept as historical
-> intent; the design doc is the live plan. Sprig stays optional — templates remain the fallback.
+**Goal (`PLAN.md` §8):** tie branches to real version-control branches / worktrees —
+create, anchor, and remove a branch's desktops in step with the repo.
 
-**Goal (`PLAN.md` §8):** `git worktree` ↔ scope create / anchor / remove. This is where
-sprig's git layer pays off and the model stops being hard-coded.
-
-### Phase 2.1 — Git worktree ingestion
-- Lift `sprig` `Sprig.Core/Git` (`IGitService`, `WorktreeInfo`) into `Hypertree.Core/Git`.
-- Enumerate worktrees for the current repo; surface them as candidate scopes.
-- *Exit:* the tray menu lists live worktrees.
-
-### Phase 2.2 — Scope provisioning (`PLAN.md` §5, open question "scope creation")
-- Decide + implement how a new worktree gets its desktops. Recommended: **on-demand at
-  first dive** (create the trio + name them after the branch) with an explicit
-  `hypertree new <branch>` CLI path (sprig `Sprig.Cli` template) for pre-provisioning.
-- Anchor assignment: a scope hangs beneath exactly one day-to-day desktop
-  (`PLAN.md` §3, sub-decision 1) — chosen at creation, editable from the tray.
-- *Exit:* creating/first-diving a worktree provisions and anchors its scope; HUD names
-  it from the branch.
-
-### Phase 2.3 — Removal semantics (`PLAN.md` §5, open question "worktree removal")
-- Detect `git worktree remove` (poll or filesystem watch on `.git/worktrees`).
-- Implement the decided policy — recommend **orphan warning + grace period**, not
-  silent auto-teardown, so live windows aren't yanked. Surface stranded windows.
-- *Exit:* removing a worktree gives a clear, non-destructive prompt; no orphaned scope
-  state lingers after the user confirms.
-
-### Phase 2.4 — Scope↔desktop reconciliation
-- Mirror sprig's `WorkspaceReconciler`: on startup and on change, reconcile the
-  persisted scope map against the *actual* desktops present (a desktop the user deleted
-  manually, a renamed one) and heal or flag drift.
-- *Exit:* Hypertree recovers gracefully when reality and stored state diverge.
+**Status: intentionally unspecified.** The approach *and the naming* are left open until
+we're ready to tackle it — an earlier concrete design was dropped so it doesn't lock us
+in prematurely. What's already in place and reusable when we pick this up: branches
+(named streams of desktops) with templates, provisioning/teardown of their OS desktops,
+persistence, and reconciliation of the branch map against the live desktops
+(`NavigationModel.Reconcile`). The remaining open questions from `PLAN.md` §5 — branch
+creation, removal semantics (avoid yanking live windows), and desktop reconciliation —
+still stand and should be settled here.
 
 ---
 
@@ -251,7 +222,7 @@ sprig's git layer pays off and the model stops being hard-coded.
 multi-monitor confirmed; then package.
 
 ### Phase 3.1 — State persistence (`PLAN.md` §5, "persistence")
-- `Core/Store` from sprig (`JsonFile`, `HypertreePaths`): persist anchor→scope map +
+- `Core/Store` (`JsonFile`, `HypertreePaths`): persist anchor→scope map +
   last-used-index-per-scope under `%APPDATA%/hypertree/`.
 - Restore on launch; re-attach to still-present desktops by name; reconcile (Phase 2.4).
 - *Exit:* reboot → dive into a scope → land on the desktop you last used there.
@@ -272,7 +243,7 @@ multi-monitor confirmed; then package.
 
 ### Phase 3.4 — Package & release
 - Velopack (`vpk`) + `publish.bat`, `tools/IconGen` from `hypertree.svg`, single-instance
-  bootstrap, GitHub Actions `v*`-tag release workflow — all copied from perch/sprig.
+  bootstrap, GitHub Actions `v*`-tag release workflow — all copied from perch.
 - *Exit:* installable, self-updating tray build.
 
 ---
@@ -280,7 +251,7 @@ multi-monitor confirmed; then package.
 ## Dependency & risk map
 
 ```
-M0 spike ──(gate: native or komorebi)──► M1 MVP ──(gate: feel survives)──► M2 worktrees ──► M3 ship
+M0 spike ──(gate: native or komorebi)──► M1 MVP ──(gate: feel survives)──► M2 git integration ──► M3 ship
    │                                        │
    └─ isolates ALL desktop interop          └─ NavigationModel unit-tested independent of the interop
       behind IDesktopController                 (design validated as code before hotkeys are wired)

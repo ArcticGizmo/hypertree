@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace Hypertree.Settings;
 
@@ -27,9 +26,7 @@ public sealed class AppSettings
 
     /// <summary>Reusable branch recipes, offered as a picker when standing up a new branch so you don't
     /// retype the desktop set each time. Empty by default — you build them by promoting a branch you
-    /// already made ("Save current branch as template…"). The on-disk key predates the group→branch
-    /// rename and is pinned so existing settings files keep loading.</summary>
-    [JsonPropertyName("GroupTemplates")]
+    /// already made ("Save current branch as template…").</summary>
     public List<BranchTemplate> BranchTemplates { get; set; } = new();
 }
 

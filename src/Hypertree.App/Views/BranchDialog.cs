@@ -14,7 +14,7 @@ internal sealed record BranchSpec(string Name, IReadOnlyList<string> Labels);
 /// A prompt for defining a branch: its name and a comma-separated list of desktop labels. Raises
 /// <see cref="Confirmed"/> with the parsed spec, then closes. Built on <see cref="OverlayPrompt"/>, so
 /// it's a persistent, pinned, top-most surface that survives desktop switches rather than a losable
-/// dialog. M1's stand-in for the M2 git-worktree-driven flow — enough to feel branch creation.
+/// dialog.
 /// </summary>
 internal sealed class BranchDialog : OverlayPrompt
 {

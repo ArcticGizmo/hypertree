@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace Hypertree.Store;
 
@@ -19,8 +18,6 @@ public sealed class Snapshot
     /// <summary>The unbranched main-timeline desktops, in order.</summary>
     public List<PersistedDesktop> MainDesktops { get; set; } = new();
 
-    // On-disk key predates the group→branch rename; pinned so existing snapshot files keep loading.
-    [JsonPropertyName("Groups")]
     public List<PersistedBranch> Branches { get; set; } = new();
 
     /// <summary>Total desktops the snapshot defines (main + every branch desktop).</summary>

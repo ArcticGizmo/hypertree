@@ -453,7 +453,6 @@ public sealed class App : Application
                 _model is not null && _model.TotalDesktops <= 1 ? "already a single desktop" : null),
             new("Snapshot layout…", PromptSnapshot),
             new("Restore snapshot…", RestoreSnapshotPrompt),
-            new("Add branch", stub("Add branch")),          // → M2 git
             new("Move desktop to branch…", stub("Move desktop to branch…")),
         };
     }
@@ -723,7 +722,7 @@ public sealed class App : Application
         TrayIcon.SetIcons(this, new TrayIcons { _tray });
     }
 
-    // ── Branch definition (M1 stand-in for M2's git-worktree flow) ─────────────────
+    // ── Branch definition ─────────────────────────────────────────────────────────
 
     // "New branch…" — template-first when any templates exist, else straight to the blank dialog.
     private void PromptNewBranch()

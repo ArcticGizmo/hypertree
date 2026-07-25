@@ -8,7 +8,7 @@ namespace Hypertree.Scopes;
 public sealed record DesktopRef(DesktopId Id, string Label);
 
 /// <summary>
-/// A branch (one worktree's stream of desktops) — a horizontal timeline in the fixed vertical stack
+/// A branch (a named stream of desktops) — a horizontal timeline in the fixed vertical stack
 /// (F2). Branches keep their listed order and never reorder; the current branch sits directly below the
 /// main timeline, and the stack splits around main (see <see cref="NavigationModel"/>). Entering a
 /// branch resumes its <see cref="LastUsedIndex"/> rather than restarting at the first desktop.
