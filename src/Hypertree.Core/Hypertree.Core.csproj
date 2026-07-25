@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The UI-free, OS-free core of Hypertree. Holds the Model-P navigation logic and the
+    platform-service INTERFACES the app resolves (IDesktopController, IGlobalHotkey, …).
+    Targets plain net10.0 — no Win32, no Avalonia — so the navigation model is unit-testable
+    against a fake controller with zero OS involvement. Every build-fragile virtual-desktop
+    call lives behind IDesktopController and is implemented in Hypertree.Platform.Windows.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Hypertree</RootNamespace>
+    <AssemblyName>Hypertree.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="hypertree" />
+    <InternalsVisibleTo Include="Hypertree.Tests" />
+  </ItemGroup>
+</Project>

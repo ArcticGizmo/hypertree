@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Windows implementations of Hypertree.Core's platform interfaces. This is the ONLY project that
+    touches Win32 / the undocumented virtual-desktop COM surface. If a Windows update shifts the
+    interface GUIDs/vtable (see ComInterop.cs), the change is contained here; the rest of Hypertree
+    is unaffected. Proven working on build 26200 — see docs/design/m0-findings.md.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Hypertree.Platform.Windows</RootNamespace>
+    <AssemblyName>Hypertree.Platform.Windows</AssemblyName>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Hypertree.Core\Hypertree.Core.csproj" />
+  </ItemGroup>
+</Project>
