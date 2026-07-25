@@ -62,7 +62,7 @@ internal sealed class MoveContent : IStageContent
     // ── IStageContent ────────────────────────────────────────────────────────────
 
     public Control View => _root;
-    public bool Dim => true;
+    public StageLayer Layer => StageLayer.FullSurface; // draws its own thumbnails / board over the stage's dim
     public bool DismissOnDeactivate => false; // survive the deactivation a desktop switch causes
     public bool DismissOnClickAway => false;  // primary clicks don't cancel; a dim-monitor click does
 

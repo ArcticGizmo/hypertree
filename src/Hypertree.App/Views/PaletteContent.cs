@@ -11,8 +11,8 @@ namespace Hypertree.App.Views;
 
 /// <summary>One filterable row in a palette: a primary <paramref name="Label"/>, an optional dimmer
 /// <paramref name="Detail"/> (also folded into the match text, so e.g. a branch name filters its
-/// desktops), an optional trailing <paramref name="Glyph"/>, the action to run when it's chosen, and —
-/// in preview mode — a <paramref name="Preview"/> board to show while it's the selected row.</summary>
+/// desktops), an optional trailing <paramref name="Glyph"/>, the action to run when it's chosen, and an
+/// optional <paramref name="Preview"/> board to show behind the palette while it's the selected row.</summary>
 internal sealed record PaletteItem(string Label, string? Detail, string? Glyph, Action Choose,
                                    Func<NavMap>? Preview = null, string? DisabledReason = null)
 {
@@ -25,16 +25,16 @@ internal sealed record PaletteItem(string Label, string? Detail, string? Glyph, 
 }
 
 /// <summary>
-/// The shared spotlight/command palette, hosted on the <see cref="OverlayStage"/>. A search box takes
-/// focus immediately; type to filter (case-insensitive Contains over label + detail), Up/Down or Tab to
-/// move, Enter to choose the highlighted row, Esc or click-away to dismiss.
+/// The shared spotlight/command palette, hosted as a <b>card</b> on the <see cref="OverlayStage"/>. A
+/// search box takes focus immediately; type to filter (case-insensitive Contains over label + detail),
+/// Up/Down or Tab to move, Enter to choose the highlighted row, Esc or a click on the board to step back.
 ///
-/// Two layouts: the default centred card (command lists — a "popover" the stage shows without a dim,
-/// dismissed by clicking away), and <b>preview mode</b> (jump / previewed commands) — a full-screen dim
-/// surface with the card anchored to the top and a live board rendered below it, re-drawn to highlight
-/// the currently-selected desktop so the destination is visible. The window-level concerns (cover the
-/// primary, force-foreground, dismiss-on-deactivate) belong to the stage; this class is just the view
-/// plus its keyboard/filter behaviour.
+/// The card floats near the top of the stage over the live map backdrop (the stage renders it); as the
+/// selection moves, a row's <see cref="PaletteItem.Preview"/> board is shown behind instead — a
+/// jump-target highlight, a command's target, a snapshot's layout — via <see cref="BackdropBoard"/> +
+/// <see cref="OverlayStage.RefreshBackdrop"/>. Rows with no preview fall back to the live map. The
+/// window-level concerns (cover the primary, force-foreground, dismiss-on-deactivate) belong to the
+/// stage; this class is just the view plus its keyboard/filter behaviour.
 /// </summary>
 internal sealed class PaletteContent : IStageContent
 {
@@ -50,13 +50,10 @@ internal sealed class PaletteContent : IStageContent
 
     private readonly IReadOnlyList<PaletteItem> _all;
     private readonly Func<string, PaletteItem?>? _createRow;
-    private readonly bool _previewMode;
-    private readonly Action? _onBack; // Esc: return to the surface we opened over (else just dismiss)
 
     private readonly TextBox _search;
     private readonly StackPanel _list;
     private readonly List<Control> _rows = new();
-    private readonly Border? _previewBorder; // holds the board in preview mode
     private readonly Control _root;
     private List<PaletteItem> _filtered;
     private int _selected;
@@ -64,13 +61,10 @@ internal sealed class PaletteContent : IStageContent
     private OverlayStage? _stage;
 
     public PaletteContent(string placeholder, string footerHint, IReadOnlyList<PaletteItem> items,
-                          Func<string, PaletteItem?>? createRow = null, bool previewMode = false,
-                          Action? onBack = null)
+                          Func<string, PaletteItem?>? createRow = null)
     {
         _all = items;
         _createRow = createRow;
-        _previewMode = previewMode;
-        _onBack = onBack;
         _filtered = items.ToList();
 
         _search = new TextBox
@@ -85,7 +79,7 @@ internal sealed class PaletteContent : IStageContent
         _list = new StackPanel { Margin = new Thickness(6) };
         var scroll = new ScrollViewer
         {
-            Content = _list, MaxHeight = previewMode ? 300 : 380,
+            Content = _list, MaxHeight = 340,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         };
@@ -107,29 +101,13 @@ internal sealed class PaletteContent : IStageContent
             BorderBrush = Stroke, BorderThickness = new Thickness(1.5),
             Child = new StackPanel { Children = { _search, scroll, footer } }, ClipToBounds = true,
             Width = 560,
+            // Anchored near the top so the map backdrop the stage draws stays visible below/around it.
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 44, 0, 0),
         };
-        // Clicks on the card must not bubble to the stage backdrop (which would dismiss the popover).
+        // Clicks on the card must not bubble to the stage backdrop (which would step back).
         card.AddHandler(InputElement.PointerPressedEvent, (_, e) => e.Handled = true, RoutingStrategies.Bubble);
-
-        if (previewMode)
-        {
-            card.HorizontalAlignment = HorizontalAlignment.Center;
-            card.VerticalAlignment = VerticalAlignment.Top;
-            card.Margin = new Thickness(0, 44, 0, 0);
-
-            _previewBorder = new Border { Margin = new Thickness(0, 0, 0, 24) };
-            _previewBorder.PropertyChanged += (_, e) => { if (e.Property == Visual.BoundsProperty) UpdatePreview(); };
-
-            DockPanel.SetDock(card, Dock.Top);
-            _root = new DockPanel { Children = { card, _previewBorder } };
-        }
-        else
-        {
-            // Centred card popover; the stage host is transparent (no dim) and dismisses on click-away.
-            card.HorizontalAlignment = HorizontalAlignment.Center;
-            card.VerticalAlignment = VerticalAlignment.Center;
-            _root = card;
-        }
+        _root = card;
 
         // Tunnel so Up/Down/Tab/Enter/Esc win before the TextBox consumes them.
         _root.AddHandler(InputElement.KeyDownEvent, OnPreviewKeyDown, RoutingStrategies.Tunnel);
@@ -140,30 +118,38 @@ internal sealed class PaletteContent : IStageContent
     // ── IStageContent ────────────────────────────────────────────────────────────
 
     public Control View => _root;
-    public bool Dim => _previewMode;
+    public StageLayer Layer => StageLayer.Card;
     public bool DismissOnDeactivate => true;
-    public bool DismissOnClickAway => !_previewMode;
+    public bool DismissOnClickAway => true; // a click on the board steps back, like Esc
+
+    // The board behind the card: the selected row's preview, or null ⇒ the stage's live map.
+    public NavMap? BackdropBoard()
+    {
+        PaletteItem? sel = _selected >= 0 && _selected < _filtered.Count ? _filtered[_selected] : null;
+        return sel?.Preview?.Invoke();
+    }
 
     public void OnPresented(OverlayStage stage)
     {
         _stage = stage;
+        _chosen = false; // re-armed each time we're (re)shown — e.g. Esc back from a pushed sub-surface
         _search.Focus();
-        if (_previewMode) UpdatePreview();
+        // The initial selection's board was already painted by the stage when it set our content; the
+        // backdrop is only re-rendered from here on as the selection moves (see Highlight).
     }
 
     public void OnRemoved() { }
 
     public void OnKey(KeyEventArgs e) { } // handled by the tunneling handler on _root
 
-    // ── Behaviour (unchanged from the old window) ──────────────────────────────────
+    // ── Behaviour ──────────────────────────────────────────────────────────────────
 
     private void OnPreviewKeyDown(object? sender, KeyEventArgs e)
     {
         switch (e.Key)
         {
             case Key.Escape:
-                if (_onBack is not null) _onBack(); // return to the surface we came from (swaps this out)
-                else _stage?.Dismiss();
+                _stage?.Back(); // return to the surface we opened over (or hide if we're the root)
                 e.Handled = true;
                 break;
             case Key.Down or Key.Tab when !e.KeyModifiers.HasFlag(KeyModifiers.Shift):
@@ -217,7 +203,7 @@ internal sealed class PaletteContent : IStageContent
             {
                 Text = "No matches", Foreground = Muted, FontSize = 13, Margin = new Thickness(12, 14),
             });
-            UpdatePreview();
+            _stage?.RefreshBackdrop();
             return;
         }
 
@@ -278,19 +264,7 @@ internal sealed class PaletteContent : IStageContent
                 b.Background = i == _selected ? RowSel : Brushes.Transparent;
         if (_selected >= 0 && _selected < _rows.Count)
             _rows[_selected].BringIntoView();
-        UpdatePreview();
-    }
-
-    // Preview mode: draw the selected row's board into the middle region (highlighting the target).
-    private void UpdatePreview()
-    {
-        if (!_previewMode || _previewBorder is null) return;
-        Size sz = _previewBorder.Bounds.Size;
-        if (sz.Width < 10 || sz.Height < 10) return;
-
-        PaletteItem? sel = _selected >= 0 && _selected < _filtered.Count ? _filtered[_selected] : null;
-        NavMap? map = sel?.Preview?.Invoke();
-        _previewBorder.Child = map is null ? null : BoardView.Render(map, sz.Width, sz.Height);
+        _stage?.RefreshBackdrop(); // repaint the board behind for the newly-selected row
     }
 
     private void Choose(PaletteItem item)
@@ -299,7 +273,8 @@ internal sealed class PaletteContent : IStageContent
         if (_chosen) return;
         _chosen = true;
         item.Choose();
-        // Dismiss the stage only if the action didn't already swap in new content (e.g. "Open map").
-        if (_stage?.Current == this) _stage.Dismiss();
+        // If the action opened another surface (pushed content), it's now current — leave it. Otherwise the
+        // action was terminal: unwind to where the chain started (the map, or dismiss).
+        if (_stage?.Current == this) _stage.CompleteToBase();
     }
 }

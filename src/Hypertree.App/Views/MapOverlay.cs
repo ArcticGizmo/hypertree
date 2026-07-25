@@ -64,21 +64,22 @@ internal sealed class MapOverlay : IStageContent
     /// <summary>The desktop the map currently has selected (for App: e.g. where a new branch should attach).</summary>
     public DesktopSelection Selection => CurrentSelection();
 
-    /// <summary>Open the map, homing the selection onto the desktop you're currently on.</summary>
+    /// <summary>Open the map, homing the selection onto the desktop you're currently on. A fresh root —
+    /// the map is the durable base other surfaces open over and return to.</summary>
     public void Open(NavMap map)
     {
         _base = map;
         _initialised = false;
-        _stage.Present(this);
+        _stage.Summon(this);
     }
 
-    /// <summary>Re-pull the board (after a rename / delete / new desktop) and redraw, keeping the selection
-    /// where it was (clamped to the new layout).</summary>
-    public void Refresh(NavMap map)
+    /// <summary>Stash a fresh board to show. Redraws now if the map is current; otherwise it's held and
+    /// applied the next time the map is (re)presented — e.g. after an action completes on a card and the
+    /// stage unwinds back to the map. Selection is preserved across the swap.</summary>
+    public void SetBoard(NavMap map)
     {
-        if (!IsOpen) return;
         _base = map;
-        Render();
+        if (IsOpen) Render();
     }
 
     /// <summary>Redraw and re-home the selection onto the desktop you're now on — after a real switch
@@ -91,24 +92,27 @@ internal sealed class MapOverlay : IStageContent
         Render();
     }
 
-    /// <summary>Point the selection at a specific desktop (e.g. a freshly created one) and redraw.</summary>
+    /// <summary>Point the selection at a specific desktop (e.g. a freshly created one). Redraws now if the
+    /// map is current; otherwise it's held for the next present (set the board via <see cref="SetBoard"/>
+    /// first, so the row/column resolve against the new layout).</summary>
     public void Select(DesktopSelection sel)
     {
-        if (!IsOpen) return;
         if (sel.OnMain) { _row = Split; _col = sel.DesktopIndex; }
         else { _row = sel.BranchIndex < Split ? sel.BranchIndex : sel.BranchIndex + 1; _col = sel.DesktopIndex; }
-        Render();
+        _initialised = true; // keep this selection — don't let InitSelection override it on re-present
+        if (IsOpen) Render();
     }
 
     public void Close()
     {
-        if (IsOpen) _stage.Dismiss();
+        if (IsOpen) _stage.Back();
     }
 
     // ── IStageContent ────────────────────────────────────────────────────────────
 
     public Control View => _root;
-    public bool Dim => true;
+    public StageLayer Layer => StageLayer.FullSurface; // draws its own board over the stage's dim
+    public bool Durable => true;              // the base surfaces open over and completed actions return to
     public bool DismissOnDeactivate => false; // must survive the deactivation a desktop switch / dialog causes
     public bool DismissOnClickAway => false;  // clicking the primary board never closes; Esc / dim click do
 

@@ -60,7 +60,31 @@ fully within its viewport (the same clipping guard `PlaceThumbnails` already use
 ## Rollout
 
 1. **Stage + map + palette** — stand up `OverlayStage`; map and palettes become content. Kills the
-   command→map flash. (this change)
-2. **Move overlay** — becomes stage content; summon and phase-1→phase-2 become content swaps.
-3. **Later** — fold in the transient HUD flash and the `OverlayPrompt` dialogs (dialogs as a modal
-   layer over the stage), then add the actual transitions.
+   command→map flash. ✅
+2. **Move overlay** — becomes stage content; summon and phase-1→phase-2 become content swaps. ✅
+3. **Dialogs + back-stack + map backdrop** — the `OverlayPrompt` windows (`NameDialog`, `RenameDialog`,
+   `ConfirmDialog`, `BranchDialog`) fold into the stage as `Card` content (`PromptContent`,
+   `ConfirmContent`, `BranchContent`), so they open with no flash. Two further standardisations landed
+   with them (see below). ✅
+4. **Later** — fold in the transient HUD flash, then add the actual content-swap transitions.
+
+## Standardised model (step 3)
+
+Three rules now hold across every overlay, so the app behaves the same everywhere:
+
+- **The map is the backdrop.** Content declares a `StageLayer`: `FullSurface` (the map and the move
+  flow draw their own board) or `Card` (palettes, prompts, confirm, branch). The stage paints a live
+  map board (`MapProvider`) behind every `Card`, so a dialog or palette always shows the map it's
+  acting on — the old plain-dim prompts and the palette-only `previewMode` board are unified into one
+  mechanism (`RenderBackdrop` + `RefreshBackdrop`; a card may override the board via `BackdropBoard()`
+  for a jump-target/snapshot preview). Two persistent `ContentControl` slots (backdrop + content) mean
+  a re-presented card never double-parents its view.
+- **A navigation back-stack.** The stage holds a stack: `Summon` starts a fresh root (the flow-opening
+  hotkeys — map, command palette, move), `Present` pushes a sub-surface, `Back` pops one step (Esc /
+  Cancel), and `CompleteToBase` unwinds a finished action to the durable base (the map) or dismisses if
+  the chain has none. So Esc always walks back to where you came from, and completing an action returns
+  you to the start — except a terminal jump, which dismisses because you've physically moved.
+- **One z-owner.** With the dialog windows gone there's a single top-most surface (the host + its dims).
+  The persistent taskbar pill (`TaskbarLabel`) is parked (`SetSuppressed`) while the stage is up, so it
+  no longer fights the stage for the top of the z-band — which was what made it flash in/out when a
+  dialog opened. It's restored on dismiss.
