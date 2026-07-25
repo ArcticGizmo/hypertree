@@ -10,9 +10,9 @@ namespace Hypertree.App.Views;
 
 /// <summary>
 /// Renders the Model-P board in the docs/design/p-vs-q.html style, laid out as the F2 vertical model:
-/// the <b>main timeline</b> (a row of desktop "tiles") is the pivot, with the fixed group stack split
-/// around it — the groups before <see cref="NavMap.TopPosition"/> stack above main, the rest below,
-/// the current group sitting directly beneath main. The board fills the whole screen (F3, no bounding
+/// the <b>main timeline</b> (a row of desktop "tiles") is the pivot, with the fixed branch stack split
+/// around it — the branches before <see cref="NavMap.TopPosition"/> stack above main, the rest below,
+/// the current branch sitting directly beneath main. The board fills the whole screen (F3, no bounding
 /// box): every row is centred horizontally on its own cursor, and the sequence scrolls vertically so
 /// the current row sits on the screen's centre line. Rows wider than the screen extend under the edges
 /// and are clipped by the canvas. Tiles can be made clickable (interactive map) to jump to a desktop.
@@ -32,8 +32,8 @@ internal static class BoardView
     /// centred on the current row (vertically) and each row's cursor (horizontally).
     /// </summary>
     public static Control Render(NavMap map, double screenW, double screenH, double s = 1.0,
-                                 Action<int>? onTopClick = null, Action<int, int>? onGroupClick = null,
-                                 Action<int>? onTopDelete = null, Action<int, int>? onGroupDelete = null)
+                                 Action<int>? onTopClick = null, Action<int, int>? onBranchClick = null,
+                                 Action<int>? onTopDelete = null, Action<int, int>? onBranchDelete = null)
     {
         double tileW = 96 * s, scrH = 50 * s, capH = 22 * s, gap = 14 * s;
         double tileH = scrH + capH, lift = 6 * s, scopePad = 10 * s, labelH = 20 * s;
@@ -44,22 +44,22 @@ internal static class BoardView
 
         var canvas = new Canvas { Width = screenW, Height = screenH, ClipToBounds = true, Background = Brushes.Transparent };
 
-        // ── The vertical sequence of rows: groups above main, main, then groups below. ──
-        int split = Math.Clamp(map.TopPosition, 0, map.Groups.Count);
+        // ── The vertical sequence of rows: branches above main, main, then branches below. ──
+        int split = Math.Clamp(map.TopPosition, 0, map.Branches.Count);
         var rows = new List<Row>();
-        for (int gi = 0; gi < split; gi++) rows.Add(GroupRow(map.Groups[gi], s, tileW, scrH, capH, gap, scopePad, labelH, lift, onGroupClick, onGroupDelete));
+        for (int gi = 0; gi < split; gi++) rows.Add(BranchRow(map.Branches[gi], s, tileW, scrH, capH, gap, scopePad, labelH, lift, onBranchClick, onBranchDelete));
         int mainRowIndex = rows.Count;
         rows.Add(MainRow(map, s, tileW, scrH, capH, gap, lift, mainLabelH, onTopClick, onTopDelete));
-        for (int gi = split; gi < map.Groups.Count; gi++) rows.Add(GroupRow(map.Groups[gi], s, tileW, scrH, capH, gap, scopePad, labelH, lift, onGroupClick, onGroupDelete));
+        for (int gi = split; gi < map.Branches.Count; gi++) rows.Add(BranchRow(map.Branches[gi], s, tileW, scrH, capH, gap, scopePad, labelH, lift, onBranchClick, onBranchDelete));
 
         // Which row do we centre on? The row holding the current (IsCurrent) tile — main when OnTop,
-        // else the group that contains it (which may be above OR below main: a group above main maps to
+        // else the branch that contains it (which may be above OR below main: a branch above main maps to
         // a row before mainRowIndex, one below to gi+1, since main occupies the slot at `split`).
         int currentRow = mainRowIndex;
         if (!map.OnTop)
         {
-            for (int gi = 0; gi < map.Groups.Count; gi++)
-                if (map.Groups[gi].Desktops.Any(d => d.IsCurrent)) { currentRow = gi < split ? gi : gi + 1; break; }
+            for (int gi = 0; gi < map.Branches.Count; gi++)
+                if (map.Branches[gi].Desktops.Any(d => d.IsCurrent)) { currentRow = gi < split ? gi : gi + 1; break; }
         }
         currentRow = Math.Clamp(currentRow, 0, rows.Count - 1);
 
@@ -125,14 +125,14 @@ internal static class BoardView
         });
     }
 
-    private static Row GroupRow(NavMapGroup g, double s, double tileW, double scrH, double capH, double gap,
+    private static Row BranchRow(NavMapBranch g, double s, double tileW, double scrH, double capH, double gap,
                                 double scopePad, double labelH, double lift,
                                 Action<int, int>? onClick, Action<int, int>? onDelete)
     {
-        int groupIndex = g.Index;
-        Action<int>? clickForThisGroup = onClick is null ? null : j => onClick(groupIndex, j);
-        Action<int>? deleteForThisGroup = onDelete is null ? null : j => onDelete(groupIndex, j);
-        Control box = BuildGroupBox(g, s, tileW, scrH, capH, gap, scopePad, clickForThisGroup, deleteForThisGroup);
+        int branchIndex = g.Index;
+        Action<int>? clickForThisBranch = onClick is null ? null : j => onClick(branchIndex, j);
+        Action<int>? deleteForThisBranch = onDelete is null ? null : j => onDelete(branchIndex, j);
+        Control box = BuildBranchBox(g, s, tileW, scrH, capH, gap, scopePad, clickForThisBranch, deleteForThisBranch);
         box.Opacity = g.IsCurrentLevel ? 1.0 : 0.45;
         box.Measure(Size.Infinity);
         double height = box.DesiredSize.Height + lift; // lift = headroom for the focused-tile pop
@@ -147,7 +147,7 @@ internal static class BoardView
         });
     }
 
-    private static Control BuildGroupBox(NavMapGroup g, double s, double tileW, double screenH, double capH,
+    private static Control BuildBranchBox(NavMapBranch g, double s, double tileW, double screenH, double capH,
                                          double gap, double scopePad, Action<int>? onDeskClick, Action<int>? onDeskDelete)
     {
         var label = new TextBlock

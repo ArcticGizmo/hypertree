@@ -7,32 +7,32 @@ using Hypertree.Platform;
 
 namespace Hypertree.App.Views;
 
-/// <summary>Result of the new-group dialog: a group name and its ordered desktop labels.</summary>
-internal sealed record ScopeSpec(string Name, IReadOnlyList<string> Labels);
+/// <summary>Result of the new-branch dialog: a branch name and its ordered desktop labels.</summary>
+internal sealed record BranchSpec(string Name, IReadOnlyList<string> Labels);
 
 /// <summary>
-/// A prompt for defining a group: its name and a comma-separated list of desktop labels. Raises
+/// A prompt for defining a branch: its name and a comma-separated list of desktop labels. Raises
 /// <see cref="Confirmed"/> with the parsed spec, then closes. Built on <see cref="OverlayPrompt"/>, so
 /// it's a persistent, pinned, top-most surface that survives desktop switches rather than a losable
-/// dialog. M1's stand-in for the M2 git-worktree-driven flow — enough to feel group creation.
+/// dialog. M1's stand-in for the M2 git-worktree-driven flow — enough to feel branch creation.
 /// </summary>
-internal sealed class ScopeDialog : OverlayPrompt
+internal sealed class BranchDialog : OverlayPrompt
 {
-    public event Action<ScopeSpec>? Confirmed;
+    public event Action<BranchSpec>? Confirmed;
 
     private readonly TextBox _name;
     protected override Control? InitialFocus => _name;
 
     /// <param name="prefillLabels">When supplied (the template flow), seeds the desktop-labels box with
-    /// these — still fully editable. Null leaves it blank (the "Blank group" flow).</param>
-    public ScopeDialog(IForegroundActivator activator, IDesktopController desktops,
+    /// these — still fully editable. Null leaves it blank (the "Blank branch" flow).</param>
+    public BranchDialog(IForegroundActivator activator, IDesktopController desktops,
                        IReadOnlyList<string>? prefillLabels = null)
         : base(activator, desktops)
     {
-        Title = "New group";
+        Title = "New branch";
 
-        // The name is always typed per-group; labels are prefilled from a template when one was picked.
-        _name = new TextBox { PlaceholderText = "scope name (e.g. feat-123)" };
+        // The name is always typed per-branch; labels are prefilled from a template when one was picked.
+        _name = new TextBox { PlaceholderText = "branch name (e.g. feat-123)" };
         var labels = new TextBox
         {
             PlaceholderText = "desktop labels, comma-separated (e.g. SPA, API)",
@@ -47,7 +47,7 @@ internal sealed class ScopeDialog : OverlayPrompt
             var parsed = (labels.Text ?? "")
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             if (n.Length == 0 || parsed.Length == 0) return; // require both
-            Confirmed?.Invoke(new ScopeSpec(n, parsed));
+            Confirmed?.Invoke(new BranchSpec(n, parsed));
             Close();
         };
         cancel.Click += (_, _) => Close();
@@ -61,8 +61,8 @@ internal sealed class ScopeDialog : OverlayPrompt
                 Spacing = 8,
                 Children =
                 {
-                    new TextBlock { Text = "Define a group", FontWeight = FontWeight.SemiBold },
-                    new TextBlock { Text = "Provisions one virtual desktop per label and adds them as a new group in the stack.",
+                    new TextBlock { Text = "Define a branch", FontWeight = FontWeight.SemiBold },
+                    new TextBlock { Text = "Provisions one virtual desktop per label and adds them as a new branch in the stack.",
                                     TextWrapping = TextWrapping.Wrap, Foreground = Muted, FontSize = 12 },
                     new TextBlock { Text = "Name", FontSize = 12, Margin = new Thickness(0, 4, 0, 0) },
                     _name,

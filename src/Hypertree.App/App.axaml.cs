@@ -15,7 +15,7 @@ namespace Hypertree.App;
 
 /// <summary>
 /// The tray/HUD/hotkey shell. Builds the desktop controller and navigation model (top row = the
-/// existing ungrouped desktops; groups are created at runtime), wires the Ctrl+Alt+Arrow nav hotkeys
+/// existing unbranched desktops; branches are created at runtime), wires the Ctrl+Alt+Arrow nav hotkeys
 /// and the Ctrl+Alt+P command palette, and flashes the board on navigation. Tray-only, outlives its
 /// windows (ShutdownMode.OnExplicitShutdown).
 /// </summary>
@@ -35,7 +35,7 @@ public sealed class App : Application
     private const HotkeyKey MoveKey = HotkeyKey.M;    // Ctrl+Alt+M — the "move windows to another desktop" flow
 
     private readonly List<IGlobalHotkey> _hotkeys = new();
-    // Desktops Hypertree created (for groups). Only these are ever torn down — the top row is the
+    // Desktops Hypertree created (for branches). Only these are ever torn down — the top row is the
     // user's own desktops and must never be removed.
     private readonly HashSet<Guid> _created = new();
     private IDesktopController? _desktops;
@@ -47,7 +47,7 @@ public sealed class App : Application
     private DesktopId? _moveOrigin; // where the current move flow started, for cancel/restore
     private TaskbarLabel? _taskbarLabel;
     private TrayIcon? _tray;
-    private ScopeDialog? _dialog;
+    private BranchDialog? _dialog;
     private OverlayStage? _stage;
     private SettingsWindow? _settingsWindow;
     private NameDialog? _nameDialog;
@@ -101,9 +101,9 @@ public sealed class App : Application
         _activator = PlatformServices.CreateForegroundActivator();
         _startup = PlatformServices.CreateStartupManager();
         _model = new NavigationModel(_desktops, new FileStateStore());
-        // Desktops restored from persisted groups were created by Hypertree — track them so the
+        // Desktops restored from persisted branches were created by Hypertree — track them so the
         // teardown guard still only ever destroys our own desktops.
-        foreach (DesktopId id in _model.GroupDesktopIds()) _created.Add(id.Value);
+        foreach (DesktopId id in _model.BranchDesktopIds()) _created.Add(id.Value);
 
         _settingsStore = new FileSettingsStore();
         _settings = _settingsStore.Load();
@@ -124,12 +124,12 @@ public sealed class App : Application
 
         _overlay = new MapOverlay(_stage);
         _overlay.GoToTopRequested += i => Jump(() => _model!.GoToTop(i));
-        _overlay.GoToGroupRequested += (g, d) => Jump(() => _model!.GoToGroupDesktop(g, d));
+        _overlay.GoToBranchRequested += (g, d) => Jump(() => _model!.GoToBranchDesktop(g, d));
         _overlay.DeleteTopRequested += DeleteTopDesktop;
-        _overlay.DeleteGroupDesktopRequested += DeleteGroupDesktop;
+        _overlay.DeleteBranchDesktopRequested += DeleteBranchDesktop;
         _overlay.DeleteCurrentRequested += DeleteCurrentDesktop;
-        _overlay.NewGroupRequested += PromptNewGroup;
-        _overlay.RemoveGroupRequested += RemoveGroup;
+        _overlay.NewBranchRequested += PromptNewBranch;
+        _overlay.RemoveBranchRequested += RemoveBranch;
         _overlay.SettingsRequested += OpenSettings;
 
         RegisterHotkeys();
@@ -290,8 +290,8 @@ public sealed class App : Application
         string Detail(string ctx, bool last) => last ? $"{ctx} · (last)" : ctx;
         string Icon(bool last) => last ? "↩" : "→";
 
-        // Every main-timeline desktop, then every group's desktops (group name in the detail so
-        // typing a group name filters to its desktops). Each carries a Preview board that highlights
+        // Every main-timeline desktop, then every branch's desktops (branch name in the detail so
+        // typing a branch name filters to its desktops). Each carries a Preview board that highlights
         // where the jump would land, shown in the middle of the palette as you move the selection.
         for (int i = 0; i < map.TopRow.Count; i++)
         {
@@ -299,19 +299,19 @@ public sealed class App : Application
             bool last = IsLast(_model.PeekTopDesktop(i)?.id);
             items.Add(new PaletteItem(map.TopRow[i].Label, Detail("main", last), Icon(last),
                 () => Jump(() => _model!.GoToTop(idx)), // no flash — the preview already showed it
-                Preview: () => PreviewMap(onMain: true, topIndex: idx, groupIndex: -1, desktopIndex: -1)));
+                Preview: () => PreviewMap(onMain: true, topIndex: idx, branchIndex: -1, desktopIndex: -1)));
             if (last) lastIndex = items.Count - 1;
         }
-        foreach (NavMapGroup g in map.Groups)
+        foreach (NavMapBranch g in map.Branches)
         {
             int gi = g.Index;
             for (int j = 0; j < g.Desktops.Count; j++)
             {
                 int dj = j;
-                bool last = IsLast(_model.PeekGroupDesktop(gi, dj)?.id);
+                bool last = IsLast(_model.PeekBranchDesktop(gi, dj)?.id);
                 items.Add(new PaletteItem(g.Desktops[j].Label, Detail(g.Name, last), Icon(last),
-                    () => Jump(() => _model!.GoToGroupDesktop(gi, dj)),
-                    Preview: () => PreviewMap(onMain: false, topIndex: -1, groupIndex: gi, desktopIndex: dj)));
+                    () => Jump(() => _model!.GoToBranchDesktop(gi, dj)),
+                    Preview: () => PreviewMap(onMain: false, topIndex: -1, branchIndex: gi, desktopIndex: dj)));
                 if (last) lastIndex = items.Count - 1;
             }
         }
@@ -337,35 +337,35 @@ public sealed class App : Application
     // Build a preview board for the jump palette. IsCurrent (blue) marks where you ARE now; IsHere
     // (green) marks the selected target (which defaults to the last-visited desktop). The board is
     // centred on your current position, so the green target shows the direction/distance of the jump.
-    // (onMain/topIndex/groupIndex/desktopIndex describe the target row.)
-    private NavMap PreviewMap(bool onMain, int topIndex, int groupIndex, int desktopIndex)
+    // (onMain/topIndex/branchIndex/desktopIndex describe the target row.)
+    private NavMap PreviewMap(bool onMain, int topIndex, int branchIndex, int desktopIndex)
     {
         NavMap b = _model!.BuildMap();
 
         bool hereMain = _model.OnTop;
         int hereTop = _model.CurrentTopIndex;
-        (int hereGroup, int hereDesktop) = _model.CurrentGroupDesktop ?? (-1, -1);
+        (int hereBranch, int hereDesktop) = _model.CurrentBranchDesktop ?? (-1, -1);
 
         var top = b.TopRow.Select((t, i) => new NavMapTile(
             t.Label,
             hereMain && i == hereTop,      // IsCurrent (blue) = you are here
             onMain && i == topIndex,       // IsHere (green) = the target
             t.WindowCount)).ToList();      // keep the at-a-glance count on the preview board
-        var groups = b.Groups.Select(g => new NavMapGroup(
+        var branches = b.Branches.Select(g => new NavMapBranch(
             g.Index, g.Name,
             g.Desktops.Select((d, j) => new NavMapTile(
                 d.Label,
-                !hereMain && g.Index == hereGroup && j == hereDesktop,   // blue = current
-                !onMain && g.Index == groupIndex && j == desktopIndex,   // green = target
+                !hereMain && g.Index == hereBranch && j == hereDesktop,   // blue = current
+                !onMain && g.Index == branchIndex && j == desktopIndex,   // green = target
                 d.WindowCount)).ToList(),
-            // Keep both the current group and the target group bright (un-rested).
-            (!hereMain && g.Index == hereGroup) || (!onMain && g.Index == groupIndex),
-            g.Index == hereGroup ? hereDesktop : g.Index == groupIndex ? desktopIndex : g.Cursor)).ToList();
+            // Keep both the current branch and the target branch bright (un-rested).
+            (!hereMain && g.Index == hereBranch) || (!onMain && g.Index == branchIndex),
+            g.Index == hereBranch ? hereDesktop : g.Index == branchIndex ? desktopIndex : g.Cursor)).ToList();
         int topCursor = hereMain ? hereTop : b.TopCursor;
-        return new NavMap(top, topCursor, hereMain, groups, b.TopPosition);
+        return new NavMap(top, topCursor, hereMain, branches, b.TopPosition);
     }
 
-    // Create a new ungrouped desktop named the query and jump straight to it.
+    // Create a new unbranched desktop named the query and jump straight to it.
     private void CreateAndGoToDesktop(string name)
     {
         if (_model is null || _desktops is null) return;
@@ -419,15 +419,15 @@ public sealed class App : Application
     {
         Action stub(string name) => () => Console.Error.WriteLine($"Command “{name}” is not implemented yet.");
 
-        // "Save current group as template…" only makes sense inside a group — greyed out with a reason
+        // "Save current branch as template…" only makes sense inside a branch — greyed out with a reason
         // on the main timeline, so it stays discoverable rather than disappearing.
-        bool inGroup = _model is not null && !_model.OnTop && _model.CurrentGroupIndex >= 0;
-        string? saveTemplateDisabled = inGroup ? null : "you’re on the main timeline — enter a group first";
+        bool inBranch = _model is not null && !_model.OnTop && _model.CurrentBranchIndex >= 0;
+        string? saveTemplateDisabled = inBranch ? null : "you’re on the main timeline — enter a branch first";
 
-        // The group a "current group" command would act on: the one you're in, or (on main) the one
-        // directly below main. Used to highlight that group green in the command's preview board.
-        int targetGroup = _model?.CurrentGroupIndex ?? -1;
-        Func<NavMap>? groupTargetPreview = targetGroup >= 0 ? () => PreviewGroupTarget(targetGroup) : null;
+        // The branch a "current branch" command would act on: the one you're in, or (on main) the one
+        // directly below main. Used to highlight that branch green in the command's preview board.
+        int targetBranch = _model?.CurrentBranchIndex ?? -1;
+        Func<NavMap>? branchTargetPreview = targetBranch >= 0 ? () => PreviewBranchTarget(targetBranch) : null;
 
         // Commands run synchronously: those that open another stage surface (map / a palette) swap it
         // in place, so PaletteContent.Choose sees the stage is no longer the command palette and leaves
@@ -440,34 +440,34 @@ public sealed class App : Application
             new("Move windows to another desktop…", ToggleMoveWindows,
                 _desktops is not null && _desktops.WindowsOn(_desktops.Current).Count == 0 ? "no windows on this desktop" : null),
             new("Settings", OpenSettings),
-            new("New group…", PromptNewGroup),
-            new("Save current group as template…", PromptSaveGroupAsTemplate,
-                saveTemplateDisabled, inGroup ? groupTargetPreview : null),
+            new("New branch…", PromptNewBranch),
+            new("Save current branch as template…", PromptSaveBranchAsTemplate,
+                saveTemplateDisabled, inBranch ? branchTargetPreview : null),
             new("Manage templates…", ManageTemplatesPrompt,
-                _settings.GroupTemplates.Count == 0 ? "no templates saved yet" : null),
+                _settings.BranchTemplates.Count == 0 ? "no templates saved yet" : null),
             new("Delete current desktop", DeleteCurrentDesktop),
-            new("Remove current group", RemoveCurrentGroup, Preview: groupTargetPreview),
+            new("Remove current branch", RemoveCurrentBranch, Preview: branchTargetPreview),
             // Hard reset: collapse everything back to one desktop. Pointless (and greyed out) when
-            // there's already a single desktop and no groups.
+            // there's already a single desktop and no branches.
             new("Implode — reset to a single desktop", Implode,
                 _model is not null && _model.TotalDesktops <= 1 ? "already a single desktop" : null),
             new("Snapshot layout…", PromptSnapshot),
             new("Restore snapshot…", RestoreSnapshotPrompt),
             new("Add branch", stub("Add branch")),          // → M2 git
-            new("Move desktop to group…", stub("Move desktop to group…")),
+            new("Move desktop to branch…", stub("Move desktop to branch…")),
         };
     }
 
-    private void RemoveCurrentGroup()
+    private void RemoveCurrentBranch()
     {
         if (_model is null) return;
-        int index = _model.CurrentGroupIndex;
-        if (index >= 0) RemoveGroup(index);
+        int index = _model.CurrentBranchIndex;
+        if (index >= 0) RemoveBranch(index);
     }
 
     // ── Implode: hard reset to a single desktop ────────────────────────────────────
 
-    // Remove every desktop but one and clear all groups — a clean slate. Guarded by a confirm.
+    // Remove every desktop but one and clear all branches — a clean slate. Guarded by a confirm.
     // Mirrors RestoreSnapshot's teardown: stand on the survivor first so the current view is never
     // yanked out from under us, then remove the rest (their windows fall back onto the survivor).
     private void Implode()
@@ -475,7 +475,7 @@ public sealed class App : Application
         if (_model is null || _desktops is null || _activator is null) return;
 
         var dlg = new ConfirmDialog(
-            "Implode all desktops?\nEvery desktop and group is removed and you’re reset to a single desktop. Windows from the others move onto it. This can’t be undone.",
+            "Implode all desktops?\nEvery desktop and branch is removed and you’re reset to a single desktop. Windows from the others move onto it. This can’t be undone.",
             _activator, _desktops, confirmLabel: "Implode");
         dlg.Confirmed += DoImplode;
         dlg.Show();
@@ -501,32 +501,32 @@ public sealed class App : Application
             try { _desktops.Remove(d.Id, survivor); } catch { /* already gone — best-effort */ }
         }
 
-        _model.RestoreStructure(0, Array.Empty<Group>()); // no groups; top row re-derives to the survivor
+        _model.RestoreStructure(0, Array.Empty<Branch>()); // no branches; top row re-derives to the survivor
         RefreshOrFlash();
     }
 
-    // Preview board that marks a whole group as the target: its tiles get the green "here" outline and
-    // the box stays bright (un-rested), so a "current group" command shows exactly which group it hits —
+    // Preview board that marks a whole branch as the target: its tiles get the green "here" outline and
+    // the box stays bright (un-rested), so a "current branch" command shows exactly which branch it hits —
     // even from the main timeline, where the blue cursor is elsewhere.
-    private NavMap PreviewGroupTarget(int groupIndex)
+    private NavMap PreviewBranchTarget(int branchIndex)
     {
         NavMap b = _model!.BuildMap();
-        var groups = b.Groups.Select(g => g.Index == groupIndex
+        var branches = b.Branches.Select(g => g.Index == branchIndex
             ? g with { Desktops = g.Desktops.Select(d => d with { IsHere = true }).ToList(), IsCurrentLevel = true }
             : g).ToList();
-        return b with { Groups = groups };
+        return b with { Branches = branches };
     }
 
     // ── Snapshots: capture the whole layout under a name, restore it later ─────────
 
-    // Prompt for a name, then save the current layout (main timeline + groups) under it.
+    // Prompt for a name, then save the current layout (main timeline + branches) under it.
     private void PromptSnapshot()
     {
         if (_model is null || _snapshots is null || _activator is null || _desktops is null) return;
         if (_nameDialog is not null) { _nameDialog.Activate(); return; }
 
         _nameDialog = new NameDialog("Snapshot layout",
-            "Save the current desktops and groups under a name you can restore to later.",
+            "Save the current desktops and branches under a name you can restore to later.",
             "snapshot name (e.g. before-refactor)", _activator, _desktops);
         _nameDialog.Closed += (_, _) => _nameDialog = null;
         _nameDialog.Confirmed += SaveSnapshot;
@@ -552,7 +552,7 @@ public sealed class App : Application
         IReadOnlyList<Snapshot> snaps = _snapshots.Load();
         var items = snaps.Select(s => new PaletteItem(
             s.Name,
-            $"{s.DesktopCount} desktops · {s.Groups.Count} groups",
+            $"{s.DesktopCount} desktops · {s.Branches.Count} branches",
             "⟲",
             () => Dispatcher.UIThread.Post(() => ConfirmRestore(s)), // let the palette close first
             Preview: () => SnapshotPreview(s)))                       // show the layout you'd restore to
@@ -564,20 +564,20 @@ public sealed class App : Application
     }
 
     // Build a board from a saved snapshot (persisted labels only — no live windows), so the restore
-    // palette previews the layout you'd land in. All groups render bright (this is the whole target),
+    // palette previews the layout you'd land in. All branches render bright (this is the whole target),
     // and window counts are absent since the desktops may not exist yet.
     private static NavMap SnapshotPreview(Snapshot snap)
     {
         var top = snap.MainDesktops.Select(d => new NavMapTile(d.Label, IsCurrent: false)).ToList();
-        var groups = new List<NavMapGroup>(snap.Groups.Count);
-        for (int gi = 0; gi < snap.Groups.Count; gi++)
+        var branches = new List<NavMapBranch>(snap.Branches.Count);
+        for (int gi = 0; gi < snap.Branches.Count; gi++)
         {
-            PersistedGroup pg = snap.Groups[gi];
+            PersistedBranch pg = snap.Branches[gi];
             var tiles = pg.Desktops.Select(d => new NavMapTile(d.Label, IsCurrent: false)).ToList();
             int cursor = tiles.Count == 0 ? 0 : Math.Clamp(pg.LastUsedIndex, 0, tiles.Count - 1);
-            groups.Add(new NavMapGroup(gi, pg.Name, tiles, IsCurrentLevel: true, cursor));
+            branches.Add(new NavMapBranch(gi, pg.Name, tiles, IsCurrentLevel: true, cursor));
         }
-        return new NavMap(top, TopCursor: 0, OnTop: true, groups, Math.Clamp(snap.MainSlot, 0, groups.Count));
+        return new NavMap(top, TopCursor: 0, OnTop: true, branches, Math.Clamp(snap.MainSlot, 0, branches.Count));
     }
 
     private void ConfirmRestore(Snapshot snap)
@@ -604,9 +604,9 @@ public sealed class App : Application
         var keep = new HashSet<Guid>();
 
         // Resolve one saved desktop to a live id: reuse its GUID if present (renamed to the saved label),
-        // else create a fresh desktop with that label. Group desktops are tracked in _created so the
+        // else create a fresh desktop with that label. Branch desktops are tracked in _created so the
         // teardown guard may remove them later; main desktops are the user's and are never tracked.
-        DesktopId Resolve(PersistedDesktop d, bool group)
+        DesktopId Resolve(PersistedDesktop d, bool branch)
         {
             DesktopId id;
             if (live.Contains(d.Id))
@@ -619,22 +619,22 @@ public sealed class App : Application
                 id = _desktops!.Create(d.Label);
             }
             keep.Add(id.Value);
-            if (group) _created.Add(id.Value);
+            if (branch) _created.Add(id.Value);
             return id;
         }
 
         // Main desktops first, so the first one exists to stand on before any removal.
-        var mainIds = snap.MainDesktops.Select(d => Resolve(d, group: false)).ToList();
+        var mainIds = snap.MainDesktops.Select(d => Resolve(d, branch: false)).ToList();
 
-        var groups = new List<Group>(snap.Groups.Count);
-        foreach (PersistedGroup pg in snap.Groups)
+        var branches = new List<Branch>(snap.Branches.Count);
+        foreach (PersistedBranch pg in snap.Branches)
         {
-            var refs = pg.Desktops.Select(d => new DesktopRef(Resolve(d, group: true), d.Label)).ToList();
-            if (refs.Count > 0) groups.Add(new Group(pg.Name, refs, pg.LastUsedIndex));
+            var refs = pg.Desktops.Select(d => new DesktopRef(Resolve(d, branch: true), d.Label)).ToList();
+            if (refs.Count > 0) branches.Add(new Branch(pg.Name, refs, pg.LastUsedIndex));
         }
 
-        // Land on the snapshot's first desktop (main[0], else the first group desktop) before removing.
-        DesktopId first = mainIds.Count > 0 ? mainIds[0] : groups[0].Desktops[0].Id;
+        // Land on the snapshot's first desktop (main[0], else the first branch desktop) before removing.
+        DesktopId first = mainIds.Count > 0 ? mainIds[0] : branches[0].Desktops[0].Id;
         _desktops.SwitchTo(first);
 
         // Remove every desktop that isn't part of the snapshot; windows fall back to the first desktop.
@@ -645,7 +645,7 @@ public sealed class App : Application
             try { _desktops.Remove(d.Id, first); } catch { /* already gone — best-effort */ }
         }
 
-        _model.RestoreStructure(snap.MainSlot, groups); // re-derives the top row + re-anchors to `first`
+        _model.RestoreStructure(snap.MainSlot, branches); // re-derives the top row + re-anchors to `first`
         RefreshOrFlash();
     }
 
@@ -683,13 +683,13 @@ public sealed class App : Application
         else _taskbarLabel.Disable();
     }
 
-    // The (group, name) the taskbar label should show for the desktop the OS is currently on — resolved
+    // The (branch, name) the taskbar label should show for the desktop the OS is currently on — resolved
     // by id, so it's right even after a switch made outside Hypertree. Null before startup / during teardown.
-    private (string? group, string name)? CurrentDesktopLabel()
+    private (string? branch, string name)? CurrentDesktopLabel()
     {
         if (_model is null || _desktops is null) return null;
-        (string? group, string label) = _model.Describe(_desktops.Current);
-        return (group, label);
+        (string? branch, string label) = _model.Describe(_desktops.Current);
+        return (branch, label);
     }
 
     private void RefreshOrFlash()
@@ -706,8 +706,8 @@ public sealed class App : Application
         map.Click += (_, _) => ToggleMap();
         var move = new NativeMenuItem("Move windows…");
         move.Click += (_, _) => ToggleMoveWindows();
-        var newGroup = new NativeMenuItem("New group…");
-        newGroup.Click += (_, _) => PromptNewGroup();
+        var newBranch = new NativeMenuItem("New branch…");
+        newBranch.Click += (_, _) => PromptNewBranch();
         var settings = new NativeMenuItem("Settings…");
         settings.Click += (_, _) => OpenSettings();
         var exit = new NativeMenuItem("Exit");
@@ -718,50 +718,50 @@ public sealed class App : Application
             Icon = TrayIconFactory.Create(),
             ToolTipText = "Hypertree",
             IsVisible = true,
-            Menu = new NativeMenu { header, new NativeMenuItemSeparator(), map, move, newGroup, settings, new NativeMenuItemSeparator(), exit },
+            Menu = new NativeMenu { header, new NativeMenuItemSeparator(), map, move, newBranch, settings, new NativeMenuItemSeparator(), exit },
         };
         TrayIcon.SetIcons(this, new TrayIcons { _tray });
     }
 
-    // ── Group definition (M1 stand-in for M2's git-worktree flow) ─────────────────
+    // ── Branch definition (M1 stand-in for M2's git-worktree flow) ─────────────────
 
-    // "New group…" — template-first when any templates exist, else straight to the blank dialog.
-    private void PromptNewGroup()
+    // "New branch…" — template-first when any templates exist, else straight to the blank dialog.
+    private void PromptNewBranch()
     {
         if (_desktops is null || _activator is null) return;
 
         // No templates yet → the blank dialog, exactly as before (nothing regresses until you make one).
-        if (_settings.GroupTemplates.Count == 0) { OpenNewGroupDialog(null); return; }
+        if (_settings.BranchTemplates.Count == 0) { OpenNewBranchDialog(null); return; }
 
-        // Otherwise pick a template first. "Blank group" is row 0 (the default selection), so the
+        // Otherwise pick a template first. "Blank branch" is row 0 (the default selection), so the
         // no-template path stays a quick Enter-Enter; picking a template pre-fills the labels instead.
         var items = new List<PaletteItem>
         {
-            new("Blank group", "type your own desktops", "+",
-                () => Dispatcher.UIThread.Post(() => OpenNewGroupDialog(null))),
+            new("Blank branch", "type your own desktops", "+",
+                () => Dispatcher.UIThread.Post(() => OpenNewBranchDialog(null))),
         };
-        foreach (GroupTemplate template in _settings.GroupTemplates)
+        foreach (BranchTemplate template in _settings.BranchTemplates)
         {
-            GroupTemplate t = template; // capture per iteration
+            BranchTemplate t = template; // capture per iteration
             items.Add(new PaletteItem(t.Name, string.Join(" · ", t.Labels), "▸",
-                () => Dispatcher.UIThread.Post(() => OpenNewGroupDialog(t.Labels))));
+                () => Dispatcher.UIThread.Post(() => OpenNewBranchDialog(t.Labels))));
         }
         OpenPalette("Pick a template…", "↑↓ move · ↵ use · Esc close", items);
     }
 
-    // Open the group dialog, optionally pre-filled with a template's desktop labels.
-    private void OpenNewGroupDialog(IReadOnlyList<string>? prefillLabels)
+    // Open the branch dialog, optionally pre-filled with a template's desktop labels.
+    private void OpenNewBranchDialog(IReadOnlyList<string>? prefillLabels)
     {
         if (_desktops is null || _activator is null) return;
         if (_dialog is not null) { _dialog.Activate(); return; }
 
-        _dialog = new ScopeDialog(_activator, _desktops, prefillLabels); // pinned + top-most overlay, sits above the map
+        _dialog = new BranchDialog(_activator, _desktops, prefillLabels); // pinned + top-most overlay, sits above the map
         _dialog.Closed += (_, _) => _dialog = null;
-        _dialog.Confirmed += CreateGroup;
+        _dialog.Confirmed += CreateBranch;
         _dialog.Show();
     }
 
-    private void CreateGroup(ScopeSpec spec)
+    private void CreateBranch(BranchSpec spec)
     {
         if (_model is null || _desktops is null) return;
 
@@ -773,27 +773,27 @@ public sealed class App : Application
             refs.Add(new DesktopRef(id, label));
         }
 
-        _model.AddGroup(new Group(spec.Name, refs));
+        _model.AddBranch(new Branch(spec.Name, refs));
         RefreshOrFlash();
     }
 
-    // ── Group templates (reusable desktop recipes for new groups) ─────────────────
+    // ── Branch templates (reusable desktop recipes for new branches) ─────────────────
 
-    // Promote the current group's desktop set into a named, reusable template.
-    private void PromptSaveGroupAsTemplate()
+    // Promote the current branch's desktop set into a named, reusable template.
+    private void PromptSaveBranchAsTemplate()
     {
         if (_model is null || _activator is null || _settingsStore is null || _desktops is null) return;
         if (_model.OnTop) return; // greyed out in the palette; guard the direct path too
         if (_nameDialog is not null) { _nameDialog.Activate(); return; }
 
-        int gi = _model.CurrentGroupIndex;
+        int gi = _model.CurrentBranchIndex;
         if (gi < 0) return;
-        NavMapGroup group = _model.BuildMap().Groups[gi];
-        var labels = group.Desktops.Select(d => d.Label).ToList();
+        NavMapBranch branch = _model.BuildMap().Branches[gi];
+        var labels = branch.Desktops.Select(d => d.Label).ToList();
 
         _nameDialog = new NameDialog("Save as template",
-            "Save this group’s desktops as a reusable template you can pick when creating new groups.",
-            $"template name (e.g. {group.Name})", _activator, _desktops);
+            "Save this branch’s desktops as a reusable template you can pick when creating new branches.",
+            $"template name (e.g. {branch.Name})", _activator, _desktops);
         _nameDialog.Closed += (_, _) => _nameDialog = null;
         _nameDialog.Confirmed += name => SaveTemplate(name, labels);
         _nameDialog.Show();
@@ -803,8 +803,8 @@ public sealed class App : Application
     {
         if (_settingsStore is null) return;
         // Same name overwrites, so re-saving updates a template in place (mirrors snapshots).
-        _settings.GroupTemplates.RemoveAll(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-        _settings.GroupTemplates.Add(new GroupTemplate(name, labels));
+        _settings.BranchTemplates.RemoveAll(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        _settings.BranchTemplates.Add(new BranchTemplate(name, labels));
         _settingsStore.Save(_settings);
     }
 
@@ -813,9 +813,9 @@ public sealed class App : Application
     {
         if (_activator is null || _settingsStore is null) return;
 
-        var items = _settings.GroupTemplates.Select(template =>
+        var items = _settings.BranchTemplates.Select(template =>
         {
-            GroupTemplate t = template; // capture per iteration
+            BranchTemplate t = template; // capture per iteration
             return new PaletteItem(t.Name, string.Join(" · ", t.Labels), "🗑",
                 () => Dispatcher.UIThread.Post(() => ConfirmDeleteTemplate(t)));
         }).ToList();
@@ -824,22 +824,22 @@ public sealed class App : Application
                     "↑↓ move · ↵ delete · Esc close", items);
     }
 
-    private void ConfirmDeleteTemplate(GroupTemplate template)
+    private void ConfirmDeleteTemplate(BranchTemplate template)
     {
         if (_activator is null || _desktops is null) return;
         var dlg = new ConfirmDialog($"Delete template “{template.Name}”?", _activator, _desktops, confirmLabel: "Delete");
         dlg.Confirmed += () =>
         {
-            _settings.GroupTemplates.RemoveAll(t => t.Name.Equals(template.Name, StringComparison.OrdinalIgnoreCase));
+            _settings.BranchTemplates.RemoveAll(t => t.Name.Equals(template.Name, StringComparison.OrdinalIgnoreCase));
             _settingsStore?.Save(_settings);
         };
         dlg.Show();
     }
 
-    private void RemoveGroup(int index)
+    private void RemoveBranch(int index)
     {
         if (_model is null) return;
-        TearDown(_model.RemoveGroup(index));
+        TearDown(_model.RemoveBranch(index));
         RefreshOrFlash();
     }
 
@@ -850,7 +850,7 @@ public sealed class App : Application
     {
         if (_model is null) return;
         if (_model.OnTop) DeleteTopDesktop(_model.CurrentTopIndex);
-        else if (_model.CurrentGroupDesktop is { } sel) DeleteGroupDesktop(sel.group, sel.desktop);
+        else if (_model.CurrentBranchDesktop is { } sel) DeleteBranchDesktop(sel.branch, sel.desktop);
     }
 
     private void DeleteTopDesktop(int index)
@@ -868,16 +868,16 @@ public sealed class App : Application
         });
     }
 
-    private void DeleteGroupDesktop(int groupIndex, int desktopIndex)
+    private void DeleteBranchDesktop(int branchIndex, int desktopIndex)
     {
         if (_model is null || _desktops is null) return;
-        var peek = _model.PeekGroupDesktop(groupIndex, desktopIndex);
+        var peek = _model.PeekBranchDesktop(branchIndex, desktopIndex);
         if (peek is null || _model.TotalDesktops <= 1) return;
 
         Confirm($"Delete desktop “{peek.Value.label}”?\nAny windows on it move to another desktop.", () =>
         {
             DesktopId fallback = Fallback(peek.Value.id);
-            DesktopId? id = _model.DetachGroupDesktop(groupIndex, desktopIndex);
+            DesktopId? id = _model.DetachBranchDesktop(branchIndex, desktopIndex);
             if (id is not null)
             {
                 _created.Remove(id.Value.Value);
@@ -906,12 +906,12 @@ public sealed class App : Application
         dlg.Show();
     }
 
-    // Remove a group's desktops — but ONLY ones Hypertree created, never the user's own desktops.
-    private void TearDown(Group? group)
+    // Remove a branch's desktops — but ONLY ones Hypertree created, never the user's own desktops.
+    private void TearDown(Branch? branch)
     {
-        if (group is null || _model is null || _desktops is null) return;
+        if (branch is null || _model is null || _desktops is null) return;
         DesktopId fallback = _model.FallbackDesktopId;
-        foreach (DesktopRef d in group.Desktops)
+        foreach (DesktopRef d in branch.Desktops)
         {
             if (_created.Remove(d.Id.Value))
             {

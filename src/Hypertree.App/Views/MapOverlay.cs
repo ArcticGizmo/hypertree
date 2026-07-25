@@ -24,18 +24,18 @@ internal sealed class MapOverlay : IStageContent
 
     private Control _view = new Panel();
     private Border? _boardLayer;
-    private NavMap _map = new(Array.Empty<NavMapTile>(), 0, true, Array.Empty<NavMapGroup>());
+    private NavMap _map = new(Array.Empty<NavMapTile>(), 0, true, Array.Empty<NavMapBranch>());
 
     /// <summary>Click a top-row desktop (index) to jump there.</summary>
     public event Action<int>? GoToTopRequested;
-    /// <summary>Click a group desktop (group index, desktop index) to jump there.</summary>
-    public event Action<int, int>? GoToGroupRequested;
-    /// <summary>Delete a desktop (× badge) — top-row index, or group index + desktop index.</summary>
+    /// <summary>Click a branch desktop (branch index, desktop index) to jump there.</summary>
+    public event Action<int, int>? GoToBranchRequested;
+    /// <summary>Delete a desktop (× badge) — top-row index, or branch index + desktop index.</summary>
     public event Action<int>? DeleteTopRequested;
-    public event Action<int, int>? DeleteGroupDesktopRequested;
+    public event Action<int, int>? DeleteBranchDesktopRequested;
     /// <summary>Footer actions.</summary>
-    public event Action? NewGroupRequested;
-    public event Action<int>? RemoveGroupRequested;
+    public event Action? NewBranchRequested;
+    public event Action<int>? RemoveBranchRequested;
     public event Action? DeleteCurrentRequested;
     /// <summary>The cog icon — open settings.</summary>
     public event Action? SettingsRequested;
@@ -114,12 +114,12 @@ internal sealed class MapOverlay : IStageContent
         cog.PointerPressed += (_, e) => { e.Handled = true; SettingsRequested?.Invoke(); };
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-        buttons.Children.Add(ActionButton("+ New group", () => NewGroupRequested?.Invoke()));
+        buttons.Children.Add(ActionButton("+ New branch", () => NewBranchRequested?.Invoke()));
         buttons.Children.Add(ActionButton("Delete desktop", () => DeleteCurrentRequested?.Invoke()));
-        if (map.Groups.Count > 0)
+        if (map.Branches.Count > 0)
         {
-            int firstIndex = map.Groups[0].Index;
-            buttons.Children.Add(ActionButton($"Remove “{map.Groups[0].Name}”", () => RemoveGroupRequested?.Invoke(firstIndex)));
+            int firstIndex = map.Branches[0].Index;
+            buttons.Children.Add(ActionButton($"Remove “{map.Branches[0].Name}”", () => RemoveBranchRequested?.Invoke(firstIndex)));
         }
 
         var footer = new Border
@@ -140,9 +140,9 @@ internal sealed class MapOverlay : IStageContent
         if (sz.Width < 10 || sz.Height < 10) return;
         _boardLayer.Child = BoardView.Render(_map, sz.Width, sz.Height, 1.0,
             onTopClick: i => GoToTopRequested?.Invoke(i),
-            onGroupClick: (g, d) => GoToGroupRequested?.Invoke(g, d),
+            onBranchClick: (g, d) => GoToBranchRequested?.Invoke(g, d),
             onTopDelete: i => DeleteTopRequested?.Invoke(i),
-            onGroupDelete: (g, d) => DeleteGroupDesktopRequested?.Invoke(g, d));
+            onBranchDelete: (g, d) => DeleteBranchDesktopRequested?.Invoke(g, d));
     }
 
     // A clearly-visible action control for the footer. The default themed Button renders dark-on-dark

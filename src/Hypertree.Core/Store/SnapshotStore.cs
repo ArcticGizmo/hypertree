@@ -1,10 +1,11 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Hypertree.Store;
 
 /// <summary>
-/// A named capture of the whole desktop layout — the main timeline plus every group — so a working
-/// arrangement can be re-created later. Reuses <see cref="PersistedDesktop"/>/<see cref="PersistedGroup"/>
+/// A named capture of the whole desktop layout — the main timeline plus every branch — so a working
+/// arrangement can be re-created later. Reuses <see cref="PersistedDesktop"/>/<see cref="PersistedBranch"/>
 /// so the on-disk shape matches the live state store. Desktops keep their OS GUID: a restore re-attaches
 /// to the same desktop when it still exists, and re-creates it by <c>Label</c> when it doesn't.
 /// </summary>
@@ -12,16 +13,18 @@ public sealed class Snapshot
 {
     public string Name { get; set; } = "";
 
-    /// <summary>The main timeline's fixed slot in the vertical stack (how many groups sit above main).</summary>
+    /// <summary>The main timeline's fixed slot in the vertical stack (how many branches sit above main).</summary>
     public int MainSlot { get; set; }
 
-    /// <summary>The ungrouped main-timeline desktops, in order.</summary>
+    /// <summary>The unbranched main-timeline desktops, in order.</summary>
     public List<PersistedDesktop> MainDesktops { get; set; } = new();
 
-    public List<PersistedGroup> Groups { get; set; } = new();
+    // On-disk key predates the group→branch rename; pinned so existing snapshot files keep loading.
+    [JsonPropertyName("Groups")]
+    public List<PersistedBranch> Branches { get; set; } = new();
 
-    /// <summary>Total desktops the snapshot defines (main + every group desktop).</summary>
-    public int DesktopCount => MainDesktops.Count + Groups.Sum(g => g.Desktops.Count);
+    /// <summary>Total desktops the snapshot defines (main + every branch desktop).</summary>
+    public int DesktopCount => MainDesktops.Count + Branches.Sum(g => g.Desktops.Count);
 }
 
 /// <summary>Load/save the named snapshots. Behind an interface so tests use an in-memory fake.</summary>

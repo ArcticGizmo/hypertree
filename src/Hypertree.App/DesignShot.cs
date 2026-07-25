@@ -28,23 +28,23 @@ internal static class DesignShot
             new("Home", current == 0, here == 0, 4), new("Comms", current == 1, here == 1, 2),
             new("Web", current == 2, here == 2, 7), new("Notes", current == 3, here == 3, 0),
         };
-        NavMapGroup Feat(bool live, int cur) => new(0, "FEAT-123", new List<NavMapTile>
+        NavMapBranch Feat(bool live, int cur) => new(0, "FEAT-123", new List<NavMapTile>
         {
             new("SPA", live && cur == 0, WindowCount: 3), new("API", live && cur == 1, WindowCount: 1),
             new("Mobile", live && cur == 2, WindowCount: 0),
         }, live, cur);
-        NavMapGroup Hotfix() => new(1, "hotfix", new List<NavMapTile>
+        NavMapBranch Hotfix() => new(1, "hotfix", new List<NavMapTile>
             { new("db", false, WindowCount: 1), new("api", false, WindowCount: 0) }, false, 0);
 
         // Stable pivot: FEAT-123 sits above main, hotfix below (main slot 1). On the main timeline,
-        // Web (cursor 2) is current and main renders between the two groups.
-        Save(new NavMap(Top(2), 2, true, new List<NavMapGroup> { Feat(false, 1), Hotfix() }, 1),
+        // Web (cursor 2) is current and main renders between the two branches.
+        Save(new NavMap(Top(2), 2, true, new List<NavMapBranch> { Feat(false, 1), Hotfix() }, 1),
              Path.Combine(outDir, "board-top-row.png"));
 
-        // Same fixed layout, now with the cursor inside FEAT-123 (on API=cursor 1) — the group above
+        // Same fixed layout, now with the cursor inside FEAT-123 (on API=cursor 1) — the branch above
         // main. Main keeps its slot; it does not move. We dived from Web, so it wears the green
         // "came from" outline.
-        Save(new NavMap(Top(2, here: 2), 2, false, new List<NavMapGroup> { Feat(true, 1), Hotfix() }, 1),
+        Save(new NavMap(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1),
              Path.Combine(outDir, "board-dived.png"));
     }
 
@@ -59,7 +59,7 @@ internal static class DesignShot
             Width = ScreenW, Height = ScreenH,
             Background = new SolidColorBrush(Color.Parse("#0F131B")), // design --bg (dark)
             // Pass delete callbacks so the × badges render in the verification shot.
-            Child = BoardView.Render(map, ScreenW, ScreenH, 1.0, onTopDelete: _ => { }, onGroupDelete: (_, _) => { }),
+            Child = BoardView.Render(map, ScreenW, ScreenH, 1.0, onTopDelete: _ => { }, onBranchDelete: (_, _) => { }),
         };
         host.Measure(Size.Infinity);
         host.Arrange(new Rect(new Size(ScreenW, ScreenH)));

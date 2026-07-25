@@ -10,7 +10,7 @@ using Hypertree.Scopes;
 namespace Hypertree.App.Views;
 
 /// <summary>One filterable row in a palette: a primary <paramref name="Label"/>, an optional dimmer
-/// <paramref name="Detail"/> (also folded into the match text, so e.g. a group name filters its
+/// <paramref name="Detail"/> (also folded into the match text, so e.g. a branch name filters its
 /// desktops), an optional trailing <paramref name="Glyph"/>, the action to run when it's chosen, and —
 /// in preview mode — a <paramref name="Preview"/> board to show while it's the selected row.</summary>
 internal sealed record PaletteItem(string Label, string? Detail, string? Glyph, Action Choose,

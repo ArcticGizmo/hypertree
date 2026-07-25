@@ -129,7 +129,7 @@ internal sealed class SettingsWindow : Window
             FlashGraceMs = (int)(_grace.Value ?? 100),
             FlashTimeoutMs = (int)(_timeout.Value ?? 1500),
             ShowTaskbarLabel = _showTaskbarLabel.IsChecked ?? true,
-            GroupTemplates = _initial.GroupTemplates, // not edited here — carry through untouched
+            BranchTemplates = _initial.BranchTemplates, // not edited here — carry through untouched
         };
         _onSave(settings, _startOnLogin.IsChecked ?? false);
         Close();

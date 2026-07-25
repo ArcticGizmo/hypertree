@@ -1,22 +1,27 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Hypertree.Store;
 
-/// <summary>Persisted group state — the anchor↔scope map that must survive a reboot (PLAN.md §5) so
-/// Hypertree re-associates its created desktops instead of treating them as orphaned/ungrouped.</summary>
+/// <summary>Persisted branch state — the anchor↔branch map that must survive a reboot (PLAN.md §5) so
+/// Hypertree re-associates its created desktops instead of treating them as orphaned/unbranched.
+/// The on-disk JSON keys predate the group→branch rename and are pinned via <see cref="JsonPropertyName"/>
+/// so existing state files keep loading.</summary>
 public sealed class PersistedState
 {
-    /// <summary>The cursor's group (resume point) when inside a group.</summary>
-    public int ActiveGroup { get; set; }
+    /// <summary>The cursor's branch (resume point) when inside a branch.</summary>
+    [JsonPropertyName("ActiveGroup")]
+    public int ActiveBranch { get; set; }
 
-    /// <summary>The main timeline's fixed slot in the vertical stack: how many groups render above
-    /// main. <c>Groups[0..MainSlot-1]</c> sit above main, the rest below (F2 stable pivot).</summary>
+    /// <summary>The main timeline's fixed slot in the vertical stack: how many branches render above
+    /// main. <c>Branches[0..MainSlot-1]</c> sit above main, the rest below (F2 stable pivot).</summary>
     public int MainSlot { get; set; }
 
-    public List<PersistedGroup> Groups { get; set; } = new();
+    [JsonPropertyName("Groups")]
+    public List<PersistedBranch> Branches { get; set; } = new();
 }
 
-public sealed class PersistedGroup
+public sealed class PersistedBranch
 {
     public string Name { get; set; } = "";
     public int LastUsedIndex { get; set; }

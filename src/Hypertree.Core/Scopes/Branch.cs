@@ -8,12 +8,12 @@ namespace Hypertree.Scopes;
 public sealed record DesktopRef(DesktopId Id, string Label);
 
 /// <summary>
-/// A group (one worktree's stream of desktops) — a horizontal timeline in the fixed vertical stack
-/// (F2). Groups keep their listed order and never reorder; the current group sits directly below the
+/// A branch (one worktree's stream of desktops) — a horizontal timeline in the fixed vertical stack
+/// (F2). Branches keep their listed order and never reorder; the current branch sits directly below the
 /// main timeline, and the stack splits around main (see <see cref="NavigationModel"/>). Entering a
-/// group resumes its <see cref="LastUsedIndex"/> rather than restarting at the first desktop.
+/// branch resumes its <see cref="LastUsedIndex"/> rather than restarting at the first desktop.
 /// </summary>
-public sealed class Group
+public sealed class Branch
 {
     private readonly List<DesktopRef> _desktops;
 
@@ -23,9 +23,9 @@ public sealed class Group
     /// <summary>Index within <see cref="Desktops"/> last occupied — the resume point. Always valid.</summary>
     public int LastUsedIndex { get; set; }
 
-    public Group(string name, IReadOnlyList<DesktopRef> desktops, int lastUsedIndex = 0)
+    public Branch(string name, IReadOnlyList<DesktopRef> desktops, int lastUsedIndex = 0)
     {
-        if (desktops.Count == 0) throw new ArgumentException("A group needs at least one desktop.", nameof(desktops));
+        if (desktops.Count == 0) throw new ArgumentException("A branch needs at least one desktop.", nameof(desktops));
         Name = name;
         _desktops = desktops.ToList();
         LastUsedIndex = Math.Clamp(lastUsedIndex, 0, _desktops.Count - 1);
@@ -33,7 +33,7 @@ public sealed class Group
 
     public int Count => _desktops.Count;
 
-    /// <summary>Remove a desktop from the group, keeping <see cref="LastUsedIndex"/> valid.</summary>
+    /// <summary>Remove a desktop from the branch, keeping <see cref="LastUsedIndex"/> valid.</summary>
     public void RemoveDesktopAt(int index)
     {
         _desktops.RemoveAt(index);

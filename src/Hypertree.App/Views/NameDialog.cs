@@ -11,7 +11,7 @@ namespace Hypertree.App.Views;
 /// A tiny single-field prompt: a title, a one-line explanation, and a text box. Raises
 /// <see cref="Confirmed"/> with the trimmed text (never empty), then closes. Built on
 /// <see cref="OverlayPrompt"/>, so it's a persistent, pinned, top-most surface that survives desktop
-/// switches rather than a losable dialog. Used for naming a snapshot or a group template.
+/// switches rather than a losable dialog. Used for naming a snapshot or a branch template.
 /// </summary>
 internal sealed class NameDialog : OverlayPrompt
 {

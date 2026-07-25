@@ -13,7 +13,7 @@ using Hypertree.Platform;
 namespace Hypertree.App.Views;
 
 /// <summary>
-/// Base for the app's input prompts (name a snapshot/template, define a group, confirm a delete).
+/// Base for the app's input prompts (name a snapshot/template, define a branch, confirm a delete).
 /// Unlike an ordinary dialog — which lives on one desktop and is easily lost the moment you get pulled
 /// to another screen — an overlay prompt is a full-screen dim surface on the primary monitor that
 /// (a) force-foregrounds on open, (b) is PINNED to every virtual desktop so a desktop switch can't

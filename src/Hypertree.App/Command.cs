@@ -12,6 +12,6 @@ namespace Hypertree.App;
 /// why (shown alongside the row) so the command stays discoverable rather than vanishing.</param>
 /// <param name="Preview">The board to show behind the command in the preview palette. Null falls back to
 /// the current map (ambient context); a command with a distinct target supplies a map that highlights
-/// what it will act on — e.g. the group it would remove.</param>
+/// what it will act on — e.g. the branch it would remove.</param>
 internal sealed record Command(string Name, Action Run, string? DisabledReason = null,
                                Func<NavMap>? Preview = null);

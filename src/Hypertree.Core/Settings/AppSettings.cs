@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Hypertree.Settings;
 
@@ -20,22 +21,24 @@ public sealed class AppSettings
     public int FlashTimeoutMs { get; set; } = 1500;
 
     /// <summary>When true a persistent pill sits over the bottom of the primary screen naming the
-    /// desktop you're on (prefixed with the group name, in the group's colour, when inside a group).
+    /// desktop you're on (prefixed with the branch name, in the branch's colour, when inside a branch).
     /// It auto-hides while the cursor is near it so the taskbar underneath stays clickable.</summary>
     public bool ShowTaskbarLabel { get; set; } = true;
 
-    /// <summary>Reusable group recipes, offered as a picker when standing up a new group so you don't
-    /// retype the desktop set each time. Empty by default — you build them by promoting a group you
-    /// already made ("Save current group as template…").</summary>
-    public List<GroupTemplate> GroupTemplates { get; set; } = new();
+    /// <summary>Reusable branch recipes, offered as a picker when standing up a new branch so you don't
+    /// retype the desktop set each time. Empty by default — you build them by promoting a branch you
+    /// already made ("Save current branch as template…"). The on-disk key predates the group→branch
+    /// rename and is pinned so existing settings files keep loading.</summary>
+    [JsonPropertyName("GroupTemplates")]
+    public List<BranchTemplate> BranchTemplates { get; set; } = new();
 }
 
 /// <summary>
-/// A reusable recipe for a group: a display <paramref name="Name"/> and its ordered desktop
-/// <paramref name="Labels"/>. Picked when creating a new group to pre-fill the desktop set (the group's
+/// A reusable recipe for a branch: a display <paramref name="Name"/> and its ordered desktop
+/// <paramref name="Labels"/>. Picked when creating a new branch to pre-fill the desktop set (the branch's
 /// own instance name is still typed per-branch — the template only carries the desktops).
 /// </summary>
-public sealed record GroupTemplate(string Name, IReadOnlyList<string> Labels);
+public sealed record BranchTemplate(string Name, IReadOnlyList<string> Labels);
 
 /// <summary>Load/save the persisted settings. Behind an interface so tests use an in-memory fake.</summary>
 public interface ISettingsStore
