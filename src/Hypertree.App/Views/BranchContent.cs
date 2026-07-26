@@ -23,6 +23,9 @@ internal sealed class BranchContent : IStageContent
     private static readonly IBrush CardStroke = new SolidColorBrush(Color.Parse("#2A3444"));
     private static readonly IBrush Muted = new SolidColorBrush(Color.Parse("#999"));
 
+    /// <summary>What an empty Desktops box provisions: one desktop, so a branch is only ever a name away.</summary>
+    private static readonly string[] DefaultLabels = { "default" };
+
     private readonly Action<BranchSpec> _onConfirm;
     private readonly Action<Action<IReadOnlyList<string>>>? _onLoadTemplate;
     private readonly TextBox _name;
@@ -67,7 +70,8 @@ internal sealed class BranchContent : IStageContent
             Children =
             {
                 new TextBlock { Text = "Define a branch", FontWeight = FontWeight.SemiBold },
-                new TextBlock { Text = "Provisions one virtual desktop per label and adds them as a new branch in the stack.",
+                new TextBlock { Text = "Provisions one virtual desktop per label and adds them as a new branch in the stack. " +
+                                       "Leave the desktops blank and you get one, called “default”.",
                                 TextWrapping = TextWrapping.Wrap, Foreground = Muted, FontSize = 12 },
                 new TextBlock { Text = "Name", FontSize = 12, Margin = new Thickness(0, 4, 0, 0) },
                 _name,
@@ -82,7 +86,7 @@ internal sealed class BranchContent : IStageContent
             fields.Children.Add(load);
         }
 
-        fields.Children.Add(new TextBlock { Text = "Desktops", FontSize = 12 });
+        fields.Children.Add(new TextBlock { Text = "Desktops (optional)", FontSize = 12 });
         fields.Children.Add(_labels);
         fields.Children.Add(new StackPanel
         {
@@ -137,11 +141,13 @@ internal sealed class BranchContent : IStageContent
     {
         if (_submitted) return;
         string n = _name.Text?.Trim() ?? "";
+        if (n.Length == 0) return; // the name is the one thing we can't invent
         var parsed = (_labels.Text ?? "")
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (n.Length == 0 || parsed.Length == 0) return; // require both
+        // Blank (or all-separators) Desktops box → a single "default" desktop, so naming a branch is
+        // enough to stand one up; the labels are for when you already know how you'll split the work.
         _submitted = true;
-        _onConfirm(new BranchSpec(n, parsed));
+        _onConfirm(new BranchSpec(n, parsed.Length > 0 ? parsed : DefaultLabels));
         if (_stage?.Current == this) _stage.CompleteToBase();
     }
 

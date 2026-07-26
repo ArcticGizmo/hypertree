@@ -157,7 +157,9 @@ internal static class BoardView
     {
         var label = new TextBlock
         {
-            Text = "● " + g.Name + (g.IsCurrentLevel ? "" : "  · resting"),
+            // Just the name. The dimming (see BranchRow) already says "not the branch you're in", and a
+            // "· resting" suffix only widened every unselected box past the tiles it wraps.
+            Text = "● " + g.Name,
             FontFamily = Mono, FontSize = 11 * s, FontWeight = FontWeight.Bold,
             Foreground = new SolidColorBrush(StrInk), Margin = new Thickness(2 * s, 0, 0, 6 * s),
         };

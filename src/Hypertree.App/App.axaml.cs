@@ -523,7 +523,7 @@ public sealed class App : Application
                 !hereMain && g.Index == hereBranch && j == hereDesktop,   // blue = current
                 !onMain && g.Index == branchIndex && j == desktopIndex,   // green = target
                 d.WindowCount)).ToList(),
-            // Keep both the current branch and the target branch bright (un-rested).
+            // Keep both the current branch and the target branch bright (undimmed).
             (!hereMain && g.Index == hereBranch) || (!onMain && g.Index == branchIndex),
             g.Index == hereBranch ? hereDesktop : g.Index == branchIndex ? desktopIndex : g.Cursor)).ToList();
         int topCursor = hereMain ? hereTop : b.TopCursor;
@@ -1171,7 +1171,16 @@ public sealed class App : Application
         var peek = _model.PeekBranchDesktop(branchIndex, desktopIndex);
         if (peek is null || _model.TotalDesktops <= 1) return;
 
-        Confirm($"Delete desktop “{peek.Value.label}”?\nAny windows on it move to another desktop.", () =>
+        // Name the branch in the prompt: a label like "api" says nothing about which branch it sits in, and
+        // the same label commonly repeats across branches (that's the point of templates).
+        NavMapBranch g = _model.BuildMap().Branches[branchIndex];
+        // Taking a branch's only desktop takes the branch with it (see DetachBranchDesktop), which is a
+        // bigger deal than the prompt would otherwise let on.
+        string consequence = g.Desktops.Count == 1
+            ? $"It’s the only desktop in “{g.Name}”, so the branch goes too. Any windows on it move to another desktop."
+            : "Any windows on it move to another desktop.";
+
+        Confirm($"Delete desktop “{peek.Value.label}” from branch “{g.Name}”?\n{consequence}", () =>
         {
             DesktopId fallback = Fallback(peek.Value.id);
             DesktopId? id = _model.DetachBranchDesktop(branchIndex, desktopIndex);

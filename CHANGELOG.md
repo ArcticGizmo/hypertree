@@ -9,6 +9,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.1.2] - 2026-07-26
+
+### Changed
+
+- Branches you're not in drop the "· resting" tag on the map; their boxes no longer stretch to fit it.
+- Desktops are optional on the branch card — a blank list gives one desktop called "default".
+- The delete-desktop confirm names the branch a desktop sits in, and says when removing it takes the branch too.
+
+---
+
 ## [v0.1.1] - 2026-07-26
 
 ### Changed
