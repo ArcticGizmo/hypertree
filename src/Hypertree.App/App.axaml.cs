@@ -4,6 +4,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using Hypertree.App.Views;
+using Hypertree.Changelog;
 using Hypertree.Desktops;
 using Hypertree.Platform;
 using Hypertree.Scopes;
@@ -50,6 +51,10 @@ public sealed class App : Application
     private ISettingsStore? _settingsStore;
     private ISnapshotStore? _snapshots;
     private AppSettings _settings = new();
+    private ChangelogWindow? _changelogWindow;
+    // Changelog entries newer than the version that last ran here, collected at startup to pop once the
+    // tray/HUD are up. Null when there's nothing to show (fresh install, same version, or feature off).
+    private IReadOnlyList<ChangelogSection>? _pendingChangelog;
     private bool _shuttingDown; // set in Teardown so the settings-window Closed handler doesn't re-register hotkeys
 
     // "Last visited" = the desktop you came from, committed when a navigation completes (Ctrl+Alt
@@ -112,6 +117,16 @@ public sealed class App : Application
             _settingsStore.Save(_settings);
         }
 
+        // First launch after a version bump: collect the changelog entries newer than the version that last
+        // ran here, to pop once the tray/HUD are up (see the tail of Startup). A fresh install has no
+        // LastSeenVersion, so it shows nothing — we just seed it. Stamp the current version either way.
+        _pendingChangelog = ResolvePendingChangelog(_settings);
+        if (_settings.LastSeenVersion != AppVersion)
+        {
+            _settings.LastSeenVersion = AppVersion;
+            _settingsStore.Save(_settings);
+        }
+
         _hud = new HudWindow();
 
         // Persistent desktop-name pill over the taskbar. It re-reads the current desktop itself, but we
@@ -145,6 +160,44 @@ public sealed class App : Application
 
         RegisterHotkeys();
         BuildTray();
+
+        // Pop the "what's new" window once everything else is up, so it lands over a fully-drawn tray rather
+        // than racing startup. Background priority keeps it from delaying the first paint.
+        if (_pendingChangelog is { Count: > 0 } changelog)
+            Dispatcher.UIThread.Post(() => ShowChangelog(changelog), DispatcherPriority.Background);
+    }
+
+    // Picks the changelog sections to surface on this launch: nothing unless the feature is on, we have a
+    // recorded last-seen version, and it differs from the running one. Fresh installs (null last-seen) and
+    // same-version launches show nothing.
+    private static IReadOnlyList<ChangelogSection>? ResolvePendingChangelog(AppSettings settings)
+    {
+        if (!settings.ShowChangelogOnUpdate) return null;
+        if (string.IsNullOrWhiteSpace(settings.LastSeenVersion)) return null; // fresh install — nothing to diff
+        if (settings.LastSeenVersion == AppVersion) return null;              // same version — no update
+        var markdown = ChangelogMarkdown.LoadEmbedded();
+        if (markdown is null) return null;
+        var sections = ChangelogParser.UnseenSince(markdown, settings.LastSeenVersion, AppVersion);
+        return sections.Count > 0 ? sections : null;
+    }
+
+    private void ShowChangelog(IReadOnlyList<ChangelogSection> sections)
+    {
+        if (_activator is null) return;
+        string subhead = sections.Count == 1
+            ? "Here's what changed in this update."
+            : $"Here's what changed across the last {sections.Count} releases.";
+
+        _changelogWindow?.Close();
+        _changelogWindow = new ChangelogWindow("What's new in Hypertree", subhead, sections, _activator,
+            // "Don't show changelogs again" flips the feature off for good.
+            onSuppress: () => { _settings.ShowChangelogOnUpdate = false; _settingsStore?.Save(_settings); })
+        {
+            Topmost = true, // sit above the map/flash if one is showing
+        };
+        _changelogWindow.Closed += (_, _) => _changelogWindow = null;
+        _changelogWindow.Show();
+        _changelogWindow.TakeFocus();
     }
 
     // Register every command's current chord (defaults overlaid with the user's rebindings). Called at
@@ -1079,5 +1132,6 @@ public sealed class App : Application
         _hud?.Close();
         _taskbarLabel?.Close();
         _settingsWindow?.Close();
+        _changelogWindow?.Close();
     }
 }

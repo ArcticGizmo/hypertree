@@ -7,6 +7,7 @@ using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using Hypertree.Changelog;
 using Hypertree.Platform;
 using Hypertree.Settings;
 
@@ -36,6 +37,7 @@ internal sealed class SettingsWindow : Window
 
     private readonly ToggleSwitch _startOnLogin;
     private readonly ToggleSwitch _showTaskbarLabel;
+    private readonly ToggleSwitch _showChangelog;
 
     // The working set of chords, edited in place by the rebind capture; committed to overrides on Save.
     private readonly Dictionary<HotkeyCommand, HotkeyChord> _chords;
@@ -62,6 +64,7 @@ internal sealed class SettingsWindow : Window
 
         _startOnLogin = Toggle(startOnLogin);
         _showTaskbarLabel = Toggle(settings.ShowTaskbarLabel);
+        _showChangelog = Toggle(settings.ShowChangelogOnUpdate);
         _hotkeyHint = new TextBlock
         {
             Foreground = Muted, FontSize = 11, Margin = new Thickness(0, 6, 0, 0),
@@ -93,6 +96,11 @@ internal sealed class SettingsWindow : Window
                     HotkeyRows(),
                     _hotkeyHint,
 
+                    Divider(),
+                    Title2("Changelog"),
+                    ToggleRow("Show what's new after an update", _showChangelog),
+                    ChangelogRow(),
+
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal, Spacing = 8,
@@ -122,6 +130,8 @@ internal sealed class SettingsWindow : Window
         var settings = new AppSettings
         {
             ShowTaskbarLabel = _showTaskbarLabel.IsChecked ?? true,
+            ShowChangelogOnUpdate = _showChangelog.IsChecked ?? true,
+            LastSeenVersion = _initial.LastSeenVersion, // stamped at startup, not edited here — carry through
             BranchTemplates = _initial.BranchTemplates, // not edited here — carry through untouched
             HotkeyBindings = overrides,
         };
@@ -274,6 +284,40 @@ internal sealed class SettingsWindow : Window
         if (TryGetPlatformHandle() is { } handle) _activator.ForceForeground(handle.Handle);
         Activate();
         Dispatcher.UIThread.Post(() => (_startOnLogin as Control)?.Focus());
+    }
+
+    // ── Changelog ────────────────────────────────────────────────────────────────────
+
+    // A caption and a "View changelog" button that pops the whole file in the same window the post-update
+    // "what's new" uses (without the suppress button — this is a deliberate look, not an interruption).
+    private Control ChangelogRow()
+    {
+        var caption = new TextBlock
+        {
+            Text = "Pop a “what’s new” window listing the releases since the version you were last on.",
+            Foreground = Muted, FontSize = 11, TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(24, 2, 0, 0),
+        };
+        var view = new Button { Content = "View changelog", HorizontalAlignment = HorizontalAlignment.Right };
+        view.Click += (_, _) => OpenFullChangelog();
+
+        return new StackPanel { Spacing = 6, Children = { caption, view } };
+    }
+
+    private void OpenFullChangelog()
+    {
+        string? markdown = ChangelogMarkdown.LoadEmbedded();
+        var sections = markdown is null
+            ? Array.Empty<ChangelogSection>()
+            : ChangelogParser.Parse(markdown);
+
+        var window = new ChangelogWindow("What's new in Hypertree",
+            "Everything Hypertree can do, newest first.", sections, _activator)
+        {
+            Topmost = true, // sit above the settings window that launched it
+        };
+        window.Show(this);
+        window.TakeFocus();
     }
 
     // ── Layout helpers ───────────────────────────────────────────────────────────────

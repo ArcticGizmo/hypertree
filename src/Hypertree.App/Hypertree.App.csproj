@@ -26,6 +26,9 @@
     <!-- icon.png / icon.ico (generated from hypertree.svg) embedded so the tray + windows can load them
          at runtime via avares://hypertree/Assets/... -->
     <AvaloniaResource Include="Assets/**" />
+    <!-- The changelog is embedded so the Settings "View changelog" page and the post-update "what's new"
+         window can render it at runtime (read via the assembly manifest as "Hypertree.CHANGELOG.md"). -->
+    <EmbeddedResource Include="..\..\CHANGELOG.md" LogicalName="Hypertree.CHANGELOG.md" />
   </ItemGroup>
 
   <ItemGroup>

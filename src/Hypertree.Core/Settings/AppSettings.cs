@@ -28,6 +28,17 @@ public sealed class AppSettings
     /// everything else resolves to <see cref="Hotkeys.Defaults"/>. See <see cref="ResolveHotkeys"/>.</summary>
     public List<HotkeyBinding> HotkeyBindings { get; set; } = new();
 
+    /// <summary>When true, the first launch after the version changes pops a "what's new" window listing
+    /// only the changelog entries newer than <see cref="LastSeenVersion"/>. On by default; the window's
+    /// "Don't show changelogs again" button (and the Settings toggle) flip it off. See <c>ChangelogWindow</c>
+    /// and <c>App.Startup</c>.</summary>
+    public bool ShowChangelogOnUpdate { get; set; } = true;
+
+    /// <summary>The app version that last ran on this machine, stamped every launch. Compared against the
+    /// running version at startup to detect an update and pick which changelog entries are new. Null on a
+    /// fresh install (nothing to show — seeded silently on first run). See the startup changelog check.</summary>
+    public string? LastSeenVersion { get; set; }
+
     /// <summary>The effective chord for every command: the built-in defaults overlaid with the stored
     /// overrides. This is what the composition root registers with the OS.</summary>
     public IReadOnlyDictionary<HotkeyCommand, HotkeyChord> ResolveHotkeys()
