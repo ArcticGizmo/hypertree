@@ -30,11 +30,14 @@ internal static class BoardView
     /// <summary>
     /// Lay the board out to fill a <paramref name="screenW"/>×<paramref name="screenH"/> surface,
     /// centred on the current row (vertically) and each row's cursor (horizontally).
+    /// <paramref name="layout"/>, when supplied, is filled with where every tile and row landed — the
+    /// interactive map's drag needs the geometry back to resolve a pointer to a tile or a drop slot.
     /// </summary>
     public static Control Render(NavMap map, double screenW, double screenH, double s = 1.0,
                                  Action<int>? onTopClick = null, Action<int, int>? onBranchClick = null,
                                  Action<int>? onTopDelete = null, Action<int, int>? onBranchDelete = null,
-                                 Action<int>? onTopActivate = null, Action<int, int>? onBranchActivate = null)
+                                 Action<int>? onTopActivate = null, Action<int, int>? onBranchActivate = null,
+                                 BoardLayout? layout = null)
     {
         double tileW = 96 * s, scrH = 50 * s, capH = 22 * s, gap = 14 * s;
         double tileH = scrH + capH, lift = 6 * s, scopePad = 10 * s, labelH = 20 * s;
@@ -48,10 +51,10 @@ internal static class BoardView
         // ── The vertical sequence of rows: branches above main, main, then branches below. ──
         int split = Math.Clamp(map.TopPosition, 0, map.Branches.Count);
         var rows = new List<Row>();
-        for (int gi = 0; gi < split; gi++) rows.Add(BranchRow(map.Branches[gi], s, tileW, scrH, capH, gap, scopePad, labelH, lift, onBranchClick, onBranchDelete, onBranchActivate));
+        for (int gi = 0; gi < split; gi++) rows.Add(BranchRow(map.Branches[gi], s, tileW, scrH, capH, gap, scopePad, labelH, lift, onBranchClick, onBranchDelete, onBranchActivate, layout));
         int mainRowIndex = rows.Count;
-        rows.Add(MainRow(map, s, tileW, scrH, capH, gap, lift, mainLabelH, onTopClick, onTopDelete, onTopActivate));
-        for (int gi = split; gi < map.Branches.Count; gi++) rows.Add(BranchRow(map.Branches[gi], s, tileW, scrH, capH, gap, scopePad, labelH, lift, onBranchClick, onBranchDelete, onBranchActivate));
+        rows.Add(MainRow(map, s, tileW, scrH, capH, gap, lift, mainLabelH, onTopClick, onTopDelete, onTopActivate, layout));
+        for (int gi = split; gi < map.Branches.Count; gi++) rows.Add(BranchRow(map.Branches[gi], s, tileW, scrH, capH, gap, scopePad, labelH, lift, onBranchClick, onBranchDelete, onBranchActivate, layout));
 
         // Which row do we centre on? The row holding the current (IsCurrent) tile — main when OnTop,
         // else the branch that contains it (which may be above OR below main: a branch above main maps to
@@ -96,7 +99,7 @@ internal static class BoardView
 
     private static Row MainRow(NavMap map, double s, double tileW, double scrH, double capH, double gap,
                                double lift, double labelH, Action<int>? onClick, Action<int>? onDelete,
-                               Action<int>? onActivate)
+                               Action<int>? onActivate, BoardLayout? layout)
     {
         double tileH = scrH + capH;
         double height = labelH + lift + tileH;
@@ -113,9 +116,15 @@ internal static class BoardView
 
             double rowY = y + labelH + lift;
             double originX = cx - (map.TopCursor * (tileW + gap) + tileW / 2); // centre the cursor tile on cx
+            layout?.Add(new BoardRow(new Rect(originX, y, RowSpan(map.TopRow.Count, tileW, gap), height),
+                                     IsMain: true, BranchIndex: -1, DesktopCount: map.TopRow.Count,
+                                     FirstTileLeft: originX, TileStride: tileW + gap, TileGap: gap,
+                                     TileTop: rowY, TileHeight: tileH));
             for (int i = 0; i < map.TopRow.Count; i++)
             {
                 int idx = i;
+                layout?.Add(new BoardTile(new Rect(originX + i * (tileW + gap), rowY, tileW, tileH),
+                                          OnMain: true, BranchIndex: -1, DesktopIndex: i));
                 Control tile = Tile(map.TopRow[i].Label, isStream: false, map.OnTop && map.TopRow[i].IsCurrent,
                                     map.TopRow[i].IsHere, map.TopRow[i].WindowCount, s, tileW, scrH, capH,
                                     onClick is null ? null : () => onClick(idx),
@@ -130,16 +139,18 @@ internal static class BoardView
 
     private static Row BranchRow(NavMapBranch g, double s, double tileW, double scrH, double capH, double gap,
                                 double scopePad, double labelH, double lift,
-                                Action<int, int>? onClick, Action<int, int>? onDelete, Action<int, int>? onActivate)
+                                Action<int, int>? onClick, Action<int, int>? onDelete, Action<int, int>? onActivate,
+                                BoardLayout? layout)
     {
         int branchIndex = g.Index;
         Action<int>? clickForThisBranch = onClick is null ? null : j => onClick(branchIndex, j);
         Action<int>? deleteForThisBranch = onDelete is null ? null : j => onDelete(branchIndex, j);
         Action<int>? activateForThisBranch = onActivate is null ? null : j => onActivate(branchIndex, j);
-        Control box = BuildBranchBox(g, s, tileW, scrH, capH, gap, scopePad, clickForThisBranch, deleteForThisBranch, activateForThisBranch);
+        BranchBox built = BuildBranchBox(g, s, tileW, scrH, capH, gap, scopePad, clickForThisBranch, deleteForThisBranch, activateForThisBranch);
+        Control box = built.Box;
         box.Opacity = g.IsCurrentLevel ? 1.0 : 0.45;
-        box.Measure(Size.Infinity);
         double height = box.DesiredSize.Height + lift; // lift = headroom for the focused-tile pop
+        double tileH = scrH + capH;
 
         return new Row(height, (canvas, cx, y) =>
         {
@@ -148,12 +159,27 @@ internal static class BoardView
             Canvas.SetLeft(box, boxX);
             Canvas.SetTop(box, y + lift);
             canvas.Children.Add(box);
+
+            // Report the box's band and its tile strip, so a drag can hit-test the branch and its desktops.
+            if (layout is null) return;
+            double tileLeft = boxX + built.TileX, tileTop = y + lift + built.TileY;
+            layout.Add(new BoardRow(new Rect(boxX, y + lift, box.DesiredSize.Width, box.DesiredSize.Height),
+                                    IsMain: false, branchIndex, DesktopCount: g.Desktops.Count,
+                                    FirstTileLeft: tileLeft, TileStride: tileW + gap, TileGap: gap,
+                                    TileTop: tileTop, TileHeight: tileH));
+            for (int j = 0; j < g.Desktops.Count; j++)
+                layout.Add(new BoardTile(new Rect(tileLeft + j * (tileW + gap), tileTop, tileW, tileH),
+                                         OnMain: false, branchIndex, j));
         });
     }
 
-    private static Control BuildBranchBox(NavMapBranch g, double s, double tileW, double screenH, double capH,
-                                         double gap, double scopePad, Action<int>? onDeskClick, Action<int>? onDeskDelete,
-                                         Action<int>? onDeskActivate)
+    // A branch's built box plus where its tile strip starts inside it (border + padding, and the label
+    // above the tiles) — the map needs those offsets to know what a pointer is over.
+    private sealed record BranchBox(Control Box, double TileX, double TileY);
+
+    private static BranchBox BuildBranchBox(NavMapBranch g, double s, double tileW, double screenH, double capH,
+                                            double gap, double scopePad, Action<int>? onDeskClick, Action<int>? onDeskDelete,
+                                            Action<int>? onDeskActivate)
     {
         var label = new TextBlock
         {
@@ -175,16 +201,25 @@ internal static class BoardView
                                   onDeskActivate is null ? null : () => onDeskActivate(idx)));
         }
 
-        return new Border
+        double bt = Math.Max(1, 1.5 * s);
+        var box = new Border
         {
             Background = new SolidColorBrush(StrBg),
             BorderBrush = new SolidColorBrush(StrBorder),
-            BorderThickness = new Thickness(Math.Max(1, 1.5 * s)),
+            BorderThickness = new Thickness(bt),
             CornerRadius = new CornerRadius(12 * s),
             Padding = new Thickness(scopePad),
             Child = new StackPanel { Orientation = Orientation.Vertical, Children = { label, row } },
         };
+        // Measure now: the caller needs the box's height to stack rows, and the label's measured height to
+        // say where the tile strip starts.
+        box.Measure(Size.Infinity);
+        return new BranchBox(box, bt + scopePad, bt + scopePad + label.DesiredSize.Height);
     }
+
+    // The horizontal span a row of tiles covers (tiles plus the gaps between them).
+    private static double RowSpan(int count, double tileW, double gap)
+        => count <= 0 ? tileW : count * (tileW + gap) - gap;
 
     private static Control Tile(string caption, bool isStream, bool focused, bool here, int windowCount, double s,
                                 double tileW, double screenH, double capH, Action? onClick, Action? onDelete = null,
@@ -325,4 +360,96 @@ internal static class BoardView
         Canvas.SetTop(r, y);
         c.Children.Add(r);
     }
+}
+
+/// <summary>
+/// Where a rendered board put its tiles and rows, in board-canvas coordinates.
+/// <see cref="BoardView.Render"/> fills one when asked so the interactive map can turn a pointer position
+/// into a drag source or a drop slot without re-deriving the layout maths. <see cref="Rows"/> is in draw
+/// order (top to bottom), which is exactly the map's combined row sequence — branches above main, main,
+/// then the branches below — so a row's list position is its row index.
+/// </summary>
+internal sealed class BoardLayout
+{
+    private readonly List<BoardTile> _tiles = new();
+    private readonly List<BoardRow> _rows = new();
+
+    public IReadOnlyList<BoardTile> Tiles => _tiles;
+    public IReadOnlyList<BoardRow> Rows => _rows;
+
+    public void Add(BoardTile tile) => _tiles.Add(tile);
+    public void Add(BoardRow row) => _rows.Add(row);
+
+    // ── Row boundaries (where a dragged branch slots in) ───────────────────────────
+    // The vertical counterpart of a row's tile boundaries: 0 is above the first row, <see cref="Rows"/>.Count
+    // is below the last, and boundary i splits rows i-1 and i. A dragged branch inserts at one of these, so
+    // the separator the map draws and the slot the drop resolves to come from the same geometry.
+
+    /// <summary>The number of insertion boundaries — one more than there are rows.</summary>
+    public int BoundaryCount => _rows.Count + 1;
+
+    /// <summary>The y a separator for <paramref name="boundary"/> is drawn at: the middle of the gap between
+    /// the two rows it splits, or just clear of the stack at either end.</summary>
+    public double BoundaryY(int boundary)
+    {
+        if (_rows.Count == 0) return 0;
+        if (boundary <= 0) return _rows[0].Bounds.Top - EndOffset;
+        if (boundary >= _rows.Count) return _rows[^1].Bounds.Bottom + EndOffset;
+        return (_rows[boundary - 1].Bounds.Bottom + _rows[boundary].Bounds.Top) / 2;
+    }
+
+    /// <summary>How wide to draw that separator: across both rows it splits, so it reads as belonging to the
+    /// gap between them.</summary>
+    public (double Left, double Right) BoundarySpan(int boundary)
+    {
+        if (_rows.Count == 0) return (0, 0);
+        Rect above = _rows[Math.Clamp(boundary - 1, 0, _rows.Count - 1)].Bounds;
+        Rect below = _rows[Math.Clamp(boundary, 0, _rows.Count - 1)].Bounds;
+        return (Math.Min(above.Left, below.Left), Math.Max(above.Right, below.Right));
+    }
+
+    /// <summary>The boundary a drop at <paramref name="y"/> asks for — the nearest one, so a drop anywhere
+    /// in the stack resolves.</summary>
+    public int NearestBoundary(double y)
+    {
+        int best = 0;
+        double bestDistance = double.MaxValue;
+        for (int b = 0; b < BoundaryCount; b++)
+        {
+            double d = Math.Abs(y - BoundaryY(b));
+            if (d < bestDistance) { best = b; bestDistance = d; }
+        }
+        return best;
+    }
+
+    // How far clear of the top/bottom row the two end separators sit. A visual nudge, not the real row gap —
+    // it only has to read as "outside the stack".
+    private const double EndOffset = 12;
+}
+
+/// <summary>One tile's rectangle, tagged with the slot it draws (main-timeline index, or branch + index).</summary>
+internal sealed record BoardTile(Rect Bounds, bool OnMain, int BranchIndex, int DesktopIndex);
+
+/// <summary>
+/// One row's band on the board — the whole main row, or a branch's box — plus the tile-strip geometry a
+/// drop needs: the left edge of the first tile, the per-tile stride, and the strip's vertical extent.
+/// </summary>
+internal sealed record BoardRow(Rect Bounds, bool IsMain, int BranchIndex, int DesktopCount,
+                               double FirstTileLeft, double TileStride, double TileGap,
+                               double TileTop, double TileHeight)
+{
+    /// <summary>The insertion point (0..<see cref="DesktopCount"/>) a drop at <paramref name="x"/> asks
+    /// for — the boundary nearest the pointer, so the left half of a tile inserts before it.</summary>
+    public int InsertIndexAt(double x)
+        => Math.Clamp((int)Math.Round((x - FirstTileLeft) / TileStride), 0, DesktopCount);
+
+    /// <summary>The x of insertion boundary <paramref name="index"/> — where the drop caret is drawn: the
+    /// middle of the gap before that tile (and just off the ends for the first/last boundary).</summary>
+    public double BoundaryX(int index)
+        => FirstTileLeft + index * TileStride - TileGap / 2;
+
+    /// <summary>How far <paramref name="y"/> is outside this row's band (0 when inside) — used to pick the
+    /// row a drop in the gap between rows belongs to.</summary>
+    public double VerticalDistanceTo(double y)
+        => y < Bounds.Top ? Bounds.Top - y : y > Bounds.Bottom ? y - Bounds.Bottom : 0;
 }

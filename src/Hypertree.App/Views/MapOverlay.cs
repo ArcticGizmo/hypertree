@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Shapes;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -23,6 +24,14 @@ namespace Hypertree.App.Views;
 /// move this desktop's windows elsewhere. Because it lives on the persistent stage it survives the desktop
 /// switches of navigation (the stage is pinned to every desktop). Closes on Esc, a backdrop click on
 /// another monitor, or toggling it off.
+///
+/// The map is also where the layout gets <b>rearranged</b>, since it's the only surface that shows the
+/// whole stack: <b>Shift+↑/↓</b> re-slots the selected branch in the vertical stack (crossing main just
+/// re-slots main), and <b>Ctrl+arrows</b> move the selected desktop along its row or into the row
+/// above/below — main ↔ branch. The same two moves are available by dragging: a tile by its face, a branch
+/// by its box, each showing an accent separator where it would drop — between two tiles for a desktop,
+/// between two rows for a branch. Both resolve against the <see cref="BoardLayout"/> the last render
+/// reported, and both are raised for <c>App</c> to apply to the model — the map never mutates state itself.
 /// </summary>
 internal sealed class MapOverlay : IStageContent
 {
@@ -34,6 +43,7 @@ internal sealed class MapOverlay : IStageContent
     private static readonly Color BtnBg = Color.Parse("#2A3444"), BtnBgHover = Color.Parse("#37455B"), BtnBorder = Color.Parse("#3C4A5E");
     private static readonly Color LegendBg = Color.FromArgb(0xC8, 0x14, 0x19, 0x22);
     private static readonly Color KeyCapBg = Color.FromArgb(0xFF, 0x22, 0x2C, 0x3A);
+    private static readonly Color DragScrim = Color.FromArgb(0x9E, 0x0E, 0x12, 0x1A);
 
     private readonly Grid _root = new();
     private NavMap _base = new(Array.Empty<NavMapTile>(), 0, true, Array.Empty<NavMapBranch>());
@@ -48,6 +58,13 @@ internal sealed class MapOverlay : IStageContent
     public event Action<DesktopSelection>? DeleteDesktopRequested;
     /// <summary>Delete an entire branch (Shift+Del) by its index.</summary>
     public event Action<int>? DeleteBranchRequested;
+    /// <summary>Re-slot a branch (Shift+↑/↓, or a dragged branch box): its index, and the row of the
+    /// combined sequence it should end up on — branches above main, main, then the branches below.</summary>
+    public event Action<int, int>? MoveBranchRequested;
+    /// <summary>Move a desktop to another slot (Ctrl+arrows, or a dragged tile): where it is now, and where
+    /// it should land. The destination's <c>DesktopIndex</c> is an <em>insertion point</em> in its row,
+    /// counting the desktop itself when it isn't leaving that row.</summary>
+    public event Action<DesktopSelection, DesktopSelection>? MoveDesktopRequested;
     /// <summary>Rename the selected desktop (r).</summary>
     public event Action<DesktopSelection>? RenameRequested;
     /// <summary>Create a new desktop (n) / a new branch (b).</summary>
@@ -60,7 +77,16 @@ internal sealed class MapOverlay : IStageContent
     /// <summary>The cog icon — open settings.</summary>
     public event Action? SettingsRequested;
 
-    public MapOverlay(OverlayStage stage) => _stage = stage;
+    public MapOverlay(OverlayStage stage)
+    {
+        _stage = stage;
+        // Drag-to-rearrange. The tiles' own handlers select/activate without marking the press handled, so
+        // it bubbles up here and a press is both "select this" and "maybe start dragging it".
+        _root.PointerPressed += OnPointerPressed;
+        _root.PointerMoved += OnPointerMoved;
+        _root.PointerReleased += OnPointerReleased;
+        _root.PointerCaptureLost += (_, _) => CancelDrag();
+    }
 
     public bool IsOpen => _stage.Current == this;
 
@@ -101,7 +127,7 @@ internal sealed class MapOverlay : IStageContent
     public void Select(DesktopSelection sel)
     {
         if (sel.OnMain) { _row = Split; _col = sel.DesktopIndex; }
-        else { _row = sel.BranchIndex < Split ? sel.BranchIndex : sel.BranchIndex + 1; _col = sel.DesktopIndex; }
+        else { _row = RowOfBranch(sel.BranchIndex); _col = sel.DesktopIndex; }
         _initialised = true; // keep this selection — don't let InitSelection override it on re-present
         if (IsOpen) Render();
     }
@@ -120,12 +146,22 @@ internal sealed class MapOverlay : IStageContent
     public bool DismissOnClickAway => false;  // clicking the primary board never closes; Esc / dim click do
 
     public void OnPresented(OverlayStage stage) => Render();
-    public void OnRemoved() => _initialised = false;
+    public void OnRemoved() { _initialised = false; CancelDrag(); }
 
     public void OnKey(KeyEventArgs e)
     {
+        // The rearrange chords come first: a plain-arrow case would otherwise swallow them (it matches on
+        // the key alone). Exact-modifier guards keep the nav chord (Ctrl+Alt+arrow, handled globally by
+        // App) from ever reading as a rearrange if it does reach us.
         switch (e.Key)
         {
+            case Key.Up when e.KeyModifiers == KeyModifiers.Shift: MoveBranchRow(-1); e.Handled = true; break;
+            case Key.Down when e.KeyModifiers == KeyModifiers.Shift: MoveBranchRow(+1); e.Handled = true; break;
+            case Key.Up when e.KeyModifiers == KeyModifiers.Control: MoveDesktopRow(-1); e.Handled = true; break;
+            case Key.Down when e.KeyModifiers == KeyModifiers.Control: MoveDesktopRow(+1); e.Handled = true; break;
+            case Key.Left when e.KeyModifiers == KeyModifiers.Control: MoveDesktopAlongRow(-1); e.Handled = true; break;
+            case Key.Right when e.KeyModifiers == KeyModifiers.Control: MoveDesktopAlongRow(+1); e.Handled = true; break;
+
             case Key.Escape: e.Handled = true; Close(); break;
             case Key.Enter: JumpToSelection(); e.Handled = true; break;
             case Key.Left: Move(0, -1); e.Handled = true; break;
@@ -156,6 +192,7 @@ internal sealed class MapOverlay : IStageContent
     private int RowCount => _base.Branches.Count + 1;
     private bool RowIsMain(int row) => row == Split;
     private int BranchOfRow(int row) => row < Split ? row : row - 1;
+    private int RowOfBranch(int branchIndex) => branchIndex < Split ? branchIndex : branchIndex + 1;
     private int TilesInRow(int row)
         => RowIsMain(row) ? _base.TopRow.Count : _base.Branches[BranchOfRow(row)].Desktops.Count;
 
@@ -180,13 +217,267 @@ internal sealed class MapOverlay : IStageContent
     }
 
     // A single click points the selection at the clicked tile (no switch); a double click jumps (raised
-    // to App). onTop/onBranch mirror BoardView's tile callbacks.
-    private void SelectTop(int index) { _row = Split; _col = index; Render(); }
+    // to App). onTop/onBranch mirror BoardView's tile callbacks. Only a tile press reaches these, so they
+    // double as "the press that's bubbling up landed on a tile" — see OnPointerPressed.
+    private void SelectTop(int index) { _tilePressed = true; _row = Split; _col = index; Render(); }
     private void SelectBranch(int branchIndex, int desktopIndex)
     {
-        _row = branchIndex < Split ? branchIndex : branchIndex + 1;
+        _tilePressed = true;
+        _row = RowOfBranch(branchIndex);
         _col = desktopIndex;
         Render();
+    }
+
+    // ── Rearranging the layout (Shift/Ctrl+arrows, and the drop half of a drag) ─────
+
+    // Shift+↑/↓ — lift the selected branch one row up or down the stack. Main is a row too, so a branch
+    // stepping across it swaps places with main; App applies it and re-homes the selection on the branch.
+    private void MoveBranchRow(int delta)
+    {
+        if (RowIsMain(_row)) return; // main is the pivot, not a branch — there's nothing to re-slot
+        int target = _row + delta;
+        if (target < 0 || target >= RowCount) return;
+        MoveBranchRequested?.Invoke(BranchOfRow(_row), target);
+    }
+
+    // Ctrl+↑/↓ — move the selected desktop into the row above/below (branch ↔ main ↔ branch), keeping it
+    // at roughly the same column.
+    private void MoveDesktopRow(int delta)
+    {
+        int target = _row + delta;
+        if (target < 0 || target >= RowCount) return;
+        RequestDesktopMove(CurrentSelection(), target, Math.Min(_col, TilesInRow(target)));
+    }
+
+    // Ctrl+←/→ — slide the selected desktop one place along its own row. Insertion points count the
+    // desktop itself, so stepping right is "insert two along" (past its own slot and its neighbour's).
+    private void MoveDesktopAlongRow(int delta)
+    {
+        int insertAt = delta > 0 ? _col + 2 : _col - 1;
+        if (insertAt < 0 || insertAt > TilesInRow(_row)) return;
+        RequestDesktopMove(CurrentSelection(), _row, insertAt);
+    }
+
+    private void RequestDesktopMove(DesktopSelection from, int toRow, int insertAt)
+    {
+        DesktopSelection to = RowIsMain(toRow)
+            ? new DesktopSelection(true, -1, insertAt)
+            : new DesktopSelection(false, BranchOfRow(toRow), insertAt);
+        MoveDesktopRequested?.Invoke(from, to);
+    }
+
+    // ── Drag to rearrange ──────────────────────────────────────────────────────────
+    // Pointer-driven rather than Avalonia's DragDrop: the board is an absolutely-positioned canvas the map
+    // rebuilds wholesale, so there are no durable drop targets to register — but the render hands back a
+    // BoardLayout, and hit-testing that is both exact and cheap.
+
+    private const double DragThreshold = 6; // px of travel before a press becomes a drag (not a click)
+
+    private enum Grab { None, Desktop, Branch }
+
+    private readonly Canvas _dragLayer = new() { IsHitTestVisible = false };
+    private BoardLayout? _layout;          // where the last render put everything
+    private bool _tilePressed;             // the press bubbling up to us started on a tile
+    private Grab _grab;                    // what the current press picked up (None once released)
+    private bool _dragging;                // past the threshold — indicators show and a drop will commit
+    private DesktopSelection _grabbedTile;
+    private int _grabbedBranch = -1;
+    private Point _pressAt, _pointerAt;
+    private int _dropRow = -1;             // desktop drags: the row a drop would land on
+    private int _dropIndex;                // desktop drags: the insertion point within _dropRow
+    private int _dropBoundary = -1;        // branch drags: the row boundary a drop would slot into
+
+    private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        bool onTile = _tilePressed; // the tile's own handler ran first, on the way up to here
+        _tilePressed = false;
+        CancelDrag();
+        if (e.ClickCount >= 2) return; // a double-click is "jump to this desktop", never a drag
+        if (!e.GetCurrentPoint(_root).Properties.IsLeftButtonPressed) return;
+
+        _pressAt = _pointerAt = e.GetPosition(_root);
+        if (onTile)
+        {
+            // Take the grabbed tile from the selection the tile's click just set, not from a fresh
+            // hit-test: selecting re-centres the board on that tile, so by the time the press reaches us
+            // the layout has moved out from under the pointer.
+            _grab = Grab.Desktop;
+            _grabbedTile = CurrentSelection();
+        }
+        else if (RowContaining(_pressAt) is { IsMain: false } row)
+        {
+            // Anywhere in a branch's box that isn't a tile — its label, its padding — is the branch's own
+            // drag handle. Main has no box, so it can't be dragged (it's the pivot the stack splits around).
+            _grab = Grab.Branch;
+            _grabbedBranch = row.BranchIndex;
+        }
+    }
+
+    private void OnPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_grab == Grab.None) return;
+        _pointerAt = e.GetPosition(_root);
+        if (!_dragging)
+        {
+            if (Math.Abs(_pointerAt.X - _pressAt.X) < DragThreshold &&
+                Math.Abs(_pointerAt.Y - _pressAt.Y) < DragThreshold) return;
+            _dragging = true;
+            e.Pointer.Capture(_root); // keep the moves coming even once the pointer leaves the board
+        }
+        ResolveDrop(_pointerAt);
+        RenderDragLayer();
+    }
+
+    private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        (Grab grab, bool dragging) = (_grab, _dragging);
+        (int row, int index, int boundary) = (_dropRow, _dropIndex, _dropBoundary);
+        (DesktopSelection tile, int branch) = (_grabbedTile, _grabbedBranch);
+        e.Pointer.Capture(null);
+        CancelDrag();
+        if (!dragging) return;
+
+        // Raise the move last: App re-renders the map from the model, and the drag state is already clear.
+        if (grab == Grab.Desktop && row >= 0) RequestDesktopMove(tile, row, index);
+        else if (grab == Grab.Branch && branch >= 0 && boundary >= 0)
+        {
+            // A boundary counts the branch's own row, so slotting in below itself is one row lower than the
+            // boundary's number once the branch is lifted out — the same shift a desktop's insertion point has.
+            int at = RowOfBranch(branch);
+            MoveBranchRequested?.Invoke(branch, boundary > at ? boundary - 1 : boundary);
+        }
+    }
+
+    private void CancelDrag()
+    {
+        if (_grab == Grab.None && !_dragging) return;
+        _grab = Grab.None;
+        _dragging = false;
+        _grabbedBranch = -1;
+        _dropRow = -1;
+        _dropBoundary = -1;
+        _dragLayer.Children.Clear();
+    }
+
+    private BoardRow? RowContaining(Point p)
+    {
+        if (_layout is null) return null;
+        foreach (BoardRow r in _layout.Rows) if (r.Bounds.Contains(p)) return r;
+        return null;
+    }
+
+    // Where would a drop here land? A desktop goes *into* a row, so it resolves to the nearest row (dropping
+    // in the gap between two still counts) plus the nearest tile boundary within it. A branch is a row, so it
+    // resolves to the nearest boundary *between* rows instead — the separator the drag draws.
+    private void ResolveDrop(Point p)
+    {
+        _dropRow = -1;
+        _dropBoundary = -1;
+        if (_layout is null || _layout.Rows.Count == 0) return;
+
+        if (_grab == Grab.Branch) { _dropBoundary = _layout.NearestBoundary(p.Y); return; }
+
+        int best = 0;
+        double bestDistance = double.MaxValue;
+        for (int i = 0; i < _layout.Rows.Count; i++)
+        {
+            double d = _layout.Rows[i].VerticalDistanceTo(p.Y);
+            if (d < bestDistance) { best = i; bestDistance = d; }
+        }
+        _dropRow = best;
+        _dropIndex = _layout.Rows[best].InsertIndexAt(p.X);
+    }
+
+    // The drag feedback, in its own layer over the board: a scrim on what you picked up, a separator where it
+    // would drop — vertical between two tiles, horizontal between two rows — and a chip on the pointer. Kept
+    // separate so following the pointer never re-renders the board underneath.
+    private void RenderDragLayer()
+    {
+        _dragLayer.Children.Clear();
+        if (!_dragging || _layout is null) return;
+
+        if (_grab == Grab.Desktop)
+        {
+            if (TileRectOf(_grabbedTile) is { } src) Add(Scrim(src), src.X, src.Y);
+            if (_dropRow >= 0 && _dropRow < _layout.Rows.Count)
+            {
+                BoardRow row = _layout.Rows[_dropRow];
+                Add(Separator(3, row.TileHeight + 8), row.BoundaryX(_dropIndex) - 1.5, row.TileTop - 4);
+            }
+            Add(Chip(LabelOf(_grabbedTile)), _pointerAt.X + 14, _pointerAt.Y + 14);
+        }
+        else if (_grab == Grab.Branch)
+        {
+            if (BandOfBranch(_grabbedBranch) is { } src) Add(Scrim(src.Bounds), src.Bounds.X, src.Bounds.Y);
+            if (_dropBoundary >= 0)
+            {
+                // The same insertion-line idea turned on its side: a branch is a row, so it slots between two
+                // rows rather than into one.
+                (double left, double right) = _layout.BoundarySpan(_dropBoundary);
+                Add(Separator(right - left, 3), left, _layout.BoundaryY(_dropBoundary) - 1.5);
+            }
+            Add(Chip("● " + (BranchName(_grabbedBranch) ?? "branch")), _pointerAt.X + 14, _pointerAt.Y + 14);
+        }
+    }
+
+    private static Control Separator(double width, double height) => new Rectangle
+    {
+        Width = width, Height = height, RadiusX = 2, RadiusY = 2, Fill = Accent,
+    };
+
+    private void Add(Control c, double left, double top)
+    {
+        Canvas.SetLeft(c, left);
+        Canvas.SetTop(c, top);
+        _dragLayer.Children.Add(c);
+    }
+
+    // What you picked up reads as "lifted out": veiled in place, so the caret and the chip are the live
+    // part of the drag.
+    private static Control Scrim(Rect r) => new Border
+    {
+        Width = r.Width, Height = r.Height, CornerRadius = new CornerRadius(10),
+        Background = new SolidColorBrush(DragScrim),
+    };
+
+    private static Control Chip(string text) => new Border
+    {
+        Background = new SolidColorBrush(KeyCapBg), BorderBrush = Accent, BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(6), Padding = new Thickness(9, 4),
+        Child = new TextBlock
+        {
+            Text = text, FontSize = 11, Foreground = Fg,
+            FontFamily = new FontFamily("Cascadia Code,Consolas,monospace"),
+        },
+    };
+
+    private Rect? TileRectOf(DesktopSelection sel)
+    {
+        if (_layout is null) return null;
+        foreach (BoardTile t in _layout.Tiles)
+            if (t.OnMain == sel.OnMain && t.BranchIndex == sel.BranchIndex && t.DesktopIndex == sel.DesktopIndex)
+                return t.Bounds;
+        return null;
+    }
+
+    private BoardRow? BandOfBranch(int branchIndex)
+    {
+        if (_layout is null) return null;
+        foreach (BoardRow r in _layout.Rows) if (!r.IsMain && r.BranchIndex == branchIndex) return r;
+        return null;
+    }
+
+    private string? BranchName(int branchIndex)
+        => branchIndex >= 0 && branchIndex < _base.Branches.Count ? _base.Branches[branchIndex].Name : null;
+
+    private string LabelOf(DesktopSelection sel)
+    {
+        if (sel.OnMain)
+            return sel.DesktopIndex >= 0 && sel.DesktopIndex < _base.TopRow.Count
+                ? _base.TopRow[sel.DesktopIndex].Label : "desktop";
+        if (sel.BranchIndex < 0 || sel.BranchIndex >= _base.Branches.Count) return "desktop";
+        IReadOnlyList<NavMapTile> desks = _base.Branches[sel.BranchIndex].Desktops;
+        return sel.DesktopIndex >= 0 && sel.DesktopIndex < desks.Count ? desks[sel.DesktopIndex].Label : "desktop";
     }
 
     // ── Render ───────────────────────────────────────────────────────────────────
@@ -199,18 +490,24 @@ internal sealed class MapOverlay : IStageContent
         double width = _stage.HostWidth > 0 ? _stage.HostWidth : 1280;
         double height = _stage.HostHeight > 0 ? _stage.HostHeight : 800;
 
+        // The layout the render reports is what a drag hit-tests against, so it's refreshed with the board.
+        var layout = new BoardLayout();
         Control board = BoardView.Render(BuildDisplayMap(), width, height, 1.0,
             onTopClick: SelectTop,
             onBranchClick: SelectBranch,
             onTopDelete: i => DeleteDesktopRequested?.Invoke(new DesktopSelection(true, -1, i)),
             onBranchDelete: (g, d) => DeleteDesktopRequested?.Invoke(new DesktopSelection(false, g, d)),
             onTopActivate: i => JumpTopRequested?.Invoke(i),
-            onBranchActivate: (g, d) => JumpBranchRequested?.Invoke(g, d));
+            onBranchActivate: (g, d) => JumpBranchRequested?.Invoke(g, d),
+            layout: layout);
+        _layout = layout;
 
         _root.Children.Clear();
         _root.Children.Add(board);
         _root.Children.Add(BuildLegend());
         _root.Children.Add(BuildCog());
+        _root.Children.Add(_dragLayer); // topmost: drag feedback draws over the board and the legend
+        RenderDragLayer();
 
         // A switch or a closing prompt can surface a foreground window above the pinned host — re-lift so
         // the board stays visible (mirrors MoveContent.RenderTargeting).
@@ -282,6 +579,8 @@ internal sealed class MapOverlay : IStageContent
         rows.Children.Add(LegendRow("←→↑↓", "select a desktop"));
         rows.Children.Add(LegendRow("Enter", "switch to selected"));
         rows.Children.Add(LegendRow("Ctrl+Alt+←→↑↓", "switch to a desktop"));
+        rows.Children.Add(LegendRow("Ctrl+←→↑↓", "move this desktop"));
+        rows.Children.Add(LegendRow("Shift+↑↓", "move this branch"));
         rows.Children.Add(LegendRow("r", "rename desktop"));
         rows.Children.Add(LegendRow("Del", "delete desktop"));
         rows.Children.Add(LegendRow("Shift+Del", "delete branch"));
@@ -295,14 +594,22 @@ internal sealed class MapOverlay : IStageContent
             Text = "click to select · double-click to switch", FontSize = 11, Foreground = FgDim,
             Margin = new Thickness(0, 5, 0, 0),
         });
+        rows.Children.Add(new TextBlock
+        {
+            Text = "drag a desktop or a branch to move it", FontSize = 11, Foreground = FgDim,
+        });
 
-        return new Border
+        var legend = new Border
         {
             Background = new SolidColorBrush(LegendBg),
             CornerRadius = new CornerRadius(12), Padding = new Thickness(16, 14),
             HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
             Margin = new Thickness(24, 24, 0, 0), Child = rows,
         };
+        // A row's band can run under the legend; swallow presses here so reading the legend never grabs the
+        // branch behind it.
+        legend.PointerPressed += (_, e) => e.Handled = true;
+        return legend;
     }
 
     private static Control LegendRow(string key, string desc)

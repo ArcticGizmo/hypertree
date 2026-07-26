@@ -44,6 +44,14 @@ public interface IDesktopController
     void Rename(DesktopId id, string name);
 
     /// <summary>
+    /// Move <paramref name="id"/> to ordinal <paramref name="index"/> in the OS order — the same reorder
+    /// Task View's own drag performs. The main timeline <em>is</em> the OS order (every desktop we haven't
+    /// branched, in the order the OS lists them), so dropping a desktop at a position on main only sticks
+    /// if the OS agrees. Best-effort: a stale id, or a shell that refuses, is a no-op rather than a throw.
+    /// </summary>
+    void Reorder(DesktopId id, int index);
+
+    /// <summary>
     /// Remove <paramref name="id"/>; any windows on it fall back to <paramref name="fallback"/>.
     /// </summary>
     void Remove(DesktopId id, DesktopId fallback);

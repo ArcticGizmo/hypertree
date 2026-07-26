@@ -51,6 +51,22 @@ internal sealed class FakeDesktopController : IDesktopController
         if (Current == id) Current = fallback;
     }
 
+    /// <summary>Every Reorder call, in order — so a main-timeline drop's OS reorder is assertable.</summary>
+    public List<(DesktopId id, int index)> Reorders { get; } = new();
+
+    /// <summary>Reorder like the shell does (remove, then insert at the given ordinal), so the fake's
+    /// <see cref="List"/> — and therefore the model's re-derived main timeline — reflects the move.</summary>
+    public void Reorder(DesktopId id, int index)
+    {
+        Reorders.Add((id, index));
+        int at = _desktops.FindIndex(d => d.Id == id);
+        if (at < 0) return;
+        DesktopInfo moved = _desktops[at];
+        _desktops.RemoveAt(at);
+        _desktops.Insert(Math.Clamp(index, 0, _desktops.Count), moved);
+        for (int i = 0; i < _desktops.Count; i++) _desktops[i] = _desktops[i] with { Index = i };
+    }
+
     // Not exercised by the navigation model — the fake only needs Current + SwitchTo + Remove.
     public DesktopId Create(string name) => throw new NotSupportedException();
     public void Rename(DesktopId id, string name) => throw new NotSupportedException();

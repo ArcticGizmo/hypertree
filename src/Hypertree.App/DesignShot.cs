@@ -46,20 +46,86 @@ internal static class DesignShot
         // "came from" outline.
         Save(new NavMap(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1),
              Path.Combine(outDir, "board-dived.png"));
+
+        // The drag geometry: the same board with the BoardLayout it reported drawn back over it. The map's
+        // drag hit-tests that layout rather than the visual tree, so this is how we check the two agree —
+        // every outline should sit exactly on the tile (or branch box) it claims, and each caret in the
+        // middle of the gap it inserts at.
+        SaveLayoutCheck(new NavMap(Top(2), 2, true, new List<NavMapBranch> { Feat(false, 1), Hotfix() }, 1),
+                        Path.Combine(outDir, "board-drag-layout.png"));
     }
 
     // A representative primary-monitor size, so the shot shows the real full-screen, centred layout
     // (F1/F3) rather than a size-to-content card.
     private const int ScreenW = 1440, ScreenH = 900;
 
+    // Render the board, then draw the layout it reported on top: a box per tile, a box per row band, and a
+    // caret at every insertion point of every row.
+    private static void SaveLayoutCheck(NavMap map, string path)
+    {
+        var layout = new BoardLayout();
+        Control board = BoardView.Render(map, ScreenW, ScreenH, 1.0, layout: layout);
+
+        var marks = new Canvas { Width = ScreenW, Height = ScreenH };
+        void Outline(Rect r, Color c, double thickness)
+        {
+            var b = new Border
+            {
+                Width = r.Width, Height = r.Height,
+                BorderBrush = new SolidColorBrush(c), BorderThickness = new Thickness(thickness),
+            };
+            Canvas.SetLeft(b, r.X);
+            Canvas.SetTop(b, r.Y);
+            marks.Children.Add(b);
+        }
+
+        foreach (BoardRow row in layout.Rows)
+        {
+            Outline(row.Bounds, Color.Parse("#38BDF8"), 1); // row band — what a branch drag grabs
+            // Every insertion point, drawn as the map's own drop caret is (a filled bar, not an outline).
+            for (int i = 0; i <= row.DesktopCount; i++)
+            {
+                var caret = new Avalonia.Controls.Shapes.Rectangle
+                {
+                    Width = 3, Height = row.TileHeight + 8, RadiusX = 2, RadiusY = 2,
+                    Fill = new SolidColorBrush(Color.Parse("#F472B6")),
+                };
+                Canvas.SetLeft(caret, row.BoundaryX(i) - 1.5);
+                Canvas.SetTop(caret, row.TileTop - 4);
+                marks.Children.Add(caret);
+            }
+        }
+        // Every row boundary, drawn as the map's branch-drop separator is: across both rows it splits.
+        for (int b = 0; b < layout.BoundaryCount; b++)
+        {
+            (double left, double right) = layout.BoundarySpan(b);
+            var sep = new Avalonia.Controls.Shapes.Rectangle
+            {
+                Width = right - left, Height = 3, RadiusX = 2, RadiusY = 2,
+                Fill = new SolidColorBrush(Color.Parse("#FBBF24")),
+            };
+            Canvas.SetLeft(sep, left);
+            Canvas.SetTop(sep, layout.BoundaryY(b) - 1.5);
+            marks.Children.Add(sep);
+        }
+
+        foreach (BoardTile tile in layout.Tiles)
+            Outline(tile.Bounds, Color.Parse("#34D399"), 1); // tile hit rects
+
+        Save(new Panel { Children = { board, marks } }, path);
+    }
+
     private static void Save(NavMap map, string path)
+        // Pass delete callbacks so the × badges render in the verification shot.
+        => Save(BoardView.Render(map, ScreenW, ScreenH, 1.0, onTopDelete: _ => { }, onBranchDelete: (_, _) => { }), path);
+
+    private static void Save(Control content, string path)
     {
         var host = new Border
         {
             Width = ScreenW, Height = ScreenH,
             Background = new SolidColorBrush(Color.Parse("#0F131B")), // design --bg (dark)
-            // Pass delete callbacks so the × badges render in the verification shot.
-            Child = BoardView.Render(map, ScreenW, ScreenH, 1.0, onTopDelete: _ => { }, onBranchDelete: (_, _) => { }),
+            Child = content,
         };
         host.Measure(Size.Infinity);
         host.Arrange(new Rect(new Size(ScreenW, ScreenH)));

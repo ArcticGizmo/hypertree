@@ -154,6 +154,8 @@ public sealed class App : Application
         _overlay.RenameRequested += RenameSelected;
         _overlay.DeleteDesktopRequested += DeleteSelectedDesktop;
         _overlay.DeleteBranchRequested += ConfirmRemoveBranch;
+        _overlay.MoveBranchRequested += MoveBranchOnMap;     // Shift+↑↓ / a dragged branch box
+        _overlay.MoveDesktopRequested += MoveDesktopOnMap;   // Ctrl+arrows / a dragged tile
         _overlay.NewDesktopRequested += PromptNewDesktop;
         _overlay.NewBranchRequested += () => OpenNewBranchDialog(null); // branch card over the map (with in-card "Load from template" when any exist)
         _overlay.MoveWindowsRequested += ToggleMoveWindows; // m — start the move-windows flow (replaces the map)
@@ -415,6 +417,41 @@ public sealed class App : Application
         NavMapBranch g = map.Branches[index];
         Confirm($"Delete branch “{g.Name}”?\nIts {g.Desktops.Count} desktop{(g.Desktops.Count == 1 ? "" : "s")} " +
                 "are removed and any windows on them move to another desktop.", () => RemoveBranch(index));
+    }
+
+    // ── Rearranging the layout from the map (Shift/Ctrl+arrows, drag) ───────────────
+
+    // Re-slot a branch in the vertical stack. Structure only — nothing is created, destroyed or switched —
+    // so we just redraw and keep the selection on the branch as it moves, which is what makes repeated
+    // Shift+↑ feel like carrying it up the stack.
+    private void MoveBranchOnMap(int index, int row)
+    {
+        if (_model is null || _overlay is null) return;
+        DesktopSelection was = _overlay.Selection;
+        if (_model.MoveBranchToRow(index, row) is not { } moved) return;
+
+        NavMap map = _model.BuildMap();
+        _overlay.SetBoard(map);
+        // Stay on the same desktop within the branch when the selection was already in it; otherwise land
+        // on the branch's own resume point.
+        int col = !was.OnMain && was.BranchIndex == index ? was.DesktopIndex
+                : moved < map.Branches.Count ? map.Branches[moved].Cursor : 0;
+        _overlay.Select(new DesktopSelection(false, moved, col));
+    }
+
+    // Move a desktop to another slot: along its row, into another branch, or on/off main. The model does
+    // the whole move (including asking the OS to reorder when it lands on main, since main *is* the OS
+    // order) and reports where the desktop ended up, so the selection can follow it there — the row it came
+    // from may have dissolved under it.
+    private void MoveDesktopOnMap(DesktopSelection from, DesktopSelection to)
+    {
+        if (_model is null || _overlay is null) return;
+        var landed = _model.MoveDesktop(from.OnMain, from.BranchIndex, from.DesktopIndex,
+                                       to.OnMain, to.BranchIndex, to.DesktopIndex);
+        if (landed is not { } slot) return;
+
+        _overlay.SetBoard(_model.BuildMap());
+        _overlay.Select(new DesktopSelection(slot.onMain, slot.branchIndex, slot.desktopIndex));
     }
 
     // n on the map: prompt for a name, create a new main-timeline desktop (no switch — the manage surface

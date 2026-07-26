@@ -7,7 +7,8 @@ namespace Hypertree.Scopes;
 /// Model P as pure state, vertical model (F2 — "stable pivot"). The <b>main timeline</b>
 /// (<see cref="_topRow"/>) is every OS desktop not assigned to a branch; it sits at a <b>fixed slot</b>
 /// in the vertical stack (<see cref="_mainSlot"/> = how many branches render above it). <b>Branches</b> are
-/// a fixed vertical list that never reorders. The full top-to-bottom sequence of rows is therefore:
+/// a vertical list that never reorders under the cursor — only an explicit re-slot from the map moves one
+/// (<see cref="MoveBranchToRow"/>). The full top-to-bottom sequence of rows is therefore:
 ///   branches[0..mainSlot-1]  /  MAIN  /  branches[mainSlot..]
 /// and navigation is a plain ladder that walks a cursor through it — <b>main never moves</b>:
 ///   • <b>Up</b> / <b>Down</b>: move the cursor one row up / down, crossing main in place (no leap).
@@ -241,6 +242,159 @@ public sealed class NavigationModel
         SyncTopRow();
         Save();
         Changed?.Invoke();
+    }
+
+    // ── Reordering (map: Shift+arrows / drag) ─────────────────────────────────────
+
+    /// <summary>
+    /// Re-slot the branch at <paramref name="index"/> to <paramref name="row"/> in the combined row
+    /// sequence — <c>branches[0..mainSlot-1] / MAIN / branches[mainSlot..]</c>, the order the map draws.
+    /// Main is a row like any other here, so a branch stepping across it simply re-slots main (the
+    /// "stable pivot" invariant is about navigation, not about the stack being unarrangeable). The branch
+    /// keeps its desktops and the cursor stays with it, so nothing switches desktop. Returns the branch's
+    /// new index, or null when the move is a no-op (out of range, or already on that row).
+    /// </summary>
+    public int? MoveBranchToRow(int index, int row)
+    {
+        if (index < 0 || index >= _branches.Count) return null;
+
+        // The row sequence as a list of branch indices, with -1 standing in for main.
+        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
+        var seq = new List<int>(_branches.Count + 1);
+        for (int i = 0; i < slot; i++) seq.Add(i);
+        seq.Add(-1);
+        for (int i = slot; i < _branches.Count; i++) seq.Add(i);
+
+        int at = seq.IndexOf(index);
+        row = Math.Clamp(row, 0, seq.Count - 1);
+        if (row == at) return null;
+        seq.RemoveAt(at);
+        seq.Insert(row, index);
+
+        // Rebuild the stack in the new order, keeping the cursor (and the caller's branch) on the same
+        // branch objects rather than on indices that have just shifted.
+        Branch? cursorBranch = _onMain ? null : _branches[_currentBranch];
+        Branch theBranch = _branches[index];
+        var reordered = seq.Where(i => i >= 0).Select(i => _branches[i]).ToList();
+        _mainSlot = seq.IndexOf(-1);
+        _branches.Clear();
+        _branches.AddRange(reordered);
+        if (cursorBranch is not null) _currentBranch = _branches.IndexOf(cursorBranch);
+        ClampState();
+
+        Save();
+        Changed?.Invoke();
+        return _branches.IndexOf(theBranch);
+    }
+
+    /// <summary>
+    /// Move a single desktop to another slot in the stack: along its own row, into another branch, or
+    /// on/off the main timeline. <paramref name="toIndex"/> is an <em>insertion point</em> in the
+    /// destination row as the map draws it (0..count), so a drop between two tiles lands where the caret
+    /// was. Nothing is created, destroyed or switched — but taking a branch's last desktop dissolves that
+    /// branch (a branch can't be empty), and landing on main asks the OS to reorder its desktop list,
+    /// since the main timeline <em>is</em> that order. Returns the desktop's new slot, or null if the move
+    /// was rejected or resolved to a no-op.
+    /// </summary>
+    public (bool onMain, int branchIndex, int desktopIndex)? MoveDesktop(
+        bool fromMain, int fromBranch, int fromDesktop, bool toMain, int toBranch, int toIndex)
+    {
+        DesktopRef? source = fromMain
+            ? (fromDesktop >= 0 && fromDesktop < _topRow.Count ? _topRow[fromDesktop] : null)
+            : (fromBranch >= 0 && fromBranch < _branches.Count
+               && fromDesktop >= 0 && fromDesktop < _branches[fromBranch].Count
+                ? _branches[fromBranch].Desktops[fromDesktop] : null);
+        if (source is not { } moved) return null;
+        if (!toMain && (toBranch < 0 || toBranch >= _branches.Count)) return null;
+        // A record the OS has since lost (a desktop deleted from Task View) can't rejoin the main timeline —
+        // the map is showing a ghost, and Reconcile will drop it. Refusing keeps "null means nothing
+        // changed" true for the caller.
+        if (toMain && _desktops.List().All(d => d.Id != moved.Id)) return null;
+
+        if (fromMain)
+        {
+            // Main → main is purely an OS reorder; main → branch just claims the desktop (SyncTopRow then
+            // drops it from the top row, which is "every desktop no branch has claimed").
+            if (toMain && !ReorderOnMain(moved, toIndex)) return null;
+            if (!toMain) _branches[toBranch].InsertDesktop(toIndex, moved);
+        }
+        else
+        {
+            Branch from = _branches[fromBranch];
+            if (!toMain && toBranch == fromBranch)
+            {
+                if (!from.MoveDesktop(fromDesktop, toIndex)) return null;
+            }
+            else
+            {
+                from.RemoveDesktopAt(fromDesktop);
+                if (from.Count == 0)
+                {
+                    _branches.RemoveAt(fromBranch);          // a branch can't be empty — it dissolves
+                    AdjustForRemoval(fromBranch);
+                    if (!toMain && toBranch > fromBranch) toBranch--; // the stack closed up behind it
+                }
+                // Leaving every branch already returns the desktop to main; the reorder is only about
+                // honouring *where* on main it was dropped.
+                if (toMain) ReorderOnMain(moved, toIndex);
+                else _branches[toBranch].InsertDesktop(toIndex, moved);
+            }
+        }
+
+        Resync(); // rebuild the top row, re-anchor on the desktop we're actually on, save, notify
+        return Locate(moved.Id);
+    }
+
+    /// <summary>Where a desktop sits in the stack right now — main (branch index -1) or a branch — or null
+    /// if we don't track it. Used to follow a desktop after a structural change moved it.</summary>
+    public (bool onMain, int branchIndex, int desktopIndex)? Locate(DesktopId id)
+    {
+        for (int i = 0; i < _topRow.Count; i++)
+            if (_topRow[i].Id == id) return (true, -1, i);
+        for (int gi = 0; gi < _branches.Count; gi++)
+            for (int j = 0; j < _branches[gi].Desktops.Count; j++)
+                if (_branches[gi].Desktops[j].Id == id) return (false, gi, j);
+        return null;
+    }
+
+    // Ask the OS to place `moved` at insertion point `insertAt` among the main timeline's desktops. Main's
+    // order isn't ours to keep — it's read back from the OS every SyncTopRow — so honouring a drop position
+    // means moving the desktop in the OS list, anchored to whichever main desktop it should sit next to.
+    // Branch desktops interleaved in the OS order are ignored: only main's own neighbours are visible on
+    // that row, so anchoring to them is what makes the board match. Best-effort — if the shell won't
+    // reorder, the desktop still sits on main, just in its own slot.
+    private bool ReorderOnMain(DesktopRef moved, int insertAt)
+    {
+        var others = new List<DesktopRef>(_topRow);
+        int at = others.FindIndex(d => d.Id == moved.Id);
+        if (at >= 0)
+        {
+            others.RemoveAt(at);
+            if (insertAt > at) insertAt--; // lifting it out shifts everything after it left
+        }
+        if (others.Count == 0) return false; // the only desktop on main — nowhere to move it to
+        insertAt = Math.Clamp(insertAt, 0, others.Count);
+
+        IReadOnlyList<DesktopInfo> os = _desktops.List();
+        int Ordinal(DesktopId id)
+        {
+            for (int i = 0; i < os.Count; i++) if (os[i].Id == id) return i;
+            return -1;
+        }
+
+        int from = Ordinal(moved.Id);
+        if (from < 0) return false;
+
+        // Sit before others[insertAt], or after the last one when dropped past the end. The anchor's
+        // ordinal shifts left by one if we're lifting the desktop out from in front of it.
+        bool past = insertAt >= others.Count;
+        int anchor = Ordinal(past ? others[^1].Id : others[insertAt].Id);
+        if (anchor < 0) return false;
+        int target = anchor - (from < anchor ? 1 : 0) + (past ? 1 : 0);
+        if (target == from) return false;
+
+        _desktops.Reorder(moved.Id, target);
+        return true;
     }
 
     /// <summary>Remove the branch at <paramref name="index"/> and return it (for desktop teardown).</summary>

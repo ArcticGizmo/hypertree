@@ -9,6 +9,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.1.3] - 2026-07-26
+
+### Added
+
+- `Shift+↑↓` on the map moves the selected branch up or down the stack.
+- `Ctrl+←→↑↓` on the map moves the selected desktop along its row, or into the row above or below.
+- Or drag: a desktop by its tile, a branch by its box, with a separator line marking where it lands.
+- A branch moved across the main timeline re-slots main with it.
+- A desktop dropped on the main timeline keeps that position; the OS desktop order is updated to match.
+- Taking a branch's last desktop dissolves the branch, the same as deleting it.
+
+---
+
 ## [v0.1.2] - 2026-07-26
 
 ### Changed

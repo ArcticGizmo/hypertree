@@ -175,6 +175,34 @@ public sealed class VirtualDesktopController : IDesktopController
         if (TryResolve(id) is { } vd) SetName(vd, name);
     }
 
+    // MoveDesktop is the one call whose index convention we can't read off a spec, so we don't trust it
+    // blindly: after the move we re-read the desktop's ordinal and, if the shell landed it somewhere other
+    // than asked, correct once by the same offset. A second miss is left alone — the desktop is still on
+    // the timeline, just not in the requested slot.
+    public void Reorder(DesktopId id, int index)
+    {
+        IVirtualDesktop? vd = TryResolve(id);
+        if (vd is null) return;                 // already gone
+        int n = _vdm.GetCount();
+        if (n <= 1) return;
+        index = Math.Clamp(index, 0, n - 1);
+        try
+        {
+            _vdm.MoveDesktop(vd, index);
+            int landed = OrdinalOf(id);
+            if (landed >= 0 && landed != index)
+                _vdm.MoveDesktop(vd, Math.Clamp(index + (index - landed), 0, n - 1));
+        }
+        catch (COMException) { /* shell refused the reorder — the desktop keeps its place */ }
+    }
+
+    private int OrdinalOf(DesktopId id)
+    {
+        IReadOnlyList<DesktopInfo> all = List();
+        for (int i = 0; i < all.Count; i++) if (all[i].Id == id) return i;
+        return -1;
+    }
+
     public void Remove(DesktopId id, DesktopId fallback)
     {
         IVirtualDesktop? vd = TryResolve(id);
