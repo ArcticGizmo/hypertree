@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -21,18 +20,17 @@ namespace Hypertree.App;
 /// </summary>
 public sealed class App : Application
 {
-    // Ctrl+Alt+Arrow — the default layer from M0 (Win+Ctrl+Arrow is the native desktop switch).
-    // Down = dive, Up = surface, Left/Right = within the current level.
-    private const HotkeyModifiers Mods = HotkeyModifiers.Control | HotkeyModifiers.Alt;
-    private static readonly (HotkeyKey key, NavAction action)[] Bindings =
-    {
-        (HotkeyKey.ArrowDown,  NavAction.Dive),
-        (HotkeyKey.ArrowUp,    NavAction.Surface),
-        (HotkeyKey.ArrowLeft,  NavAction.MoveLeft),
-        (HotkeyKey.ArrowRight, NavAction.MoveRight),
-    };
-    private const HotkeyKey PaletteKey = HotkeyKey.P; // Ctrl+Alt+P — command palette (spotlight/jump lives inside it)
-    private const HotkeyKey MoveKey = HotkeyKey.M;    // Ctrl+Alt+M — the "move windows to another desktop" flow
+    // Which NavAction each navigation command drives. The chords themselves are resolved from settings
+    // (defaults: Ctrl+Alt+Arrow — the M0 layer, since Win+Ctrl+Arrow is the native desktop switch) and
+    // are rebindable in the settings window.
+    private static readonly IReadOnlyDictionary<HotkeyCommand, NavAction> NavCommands =
+        new Dictionary<HotkeyCommand, NavAction>
+        {
+            [HotkeyCommand.Dive]      = NavAction.Dive,
+            [HotkeyCommand.Surface]   = NavAction.Surface,
+            [HotkeyCommand.MoveLeft]  = NavAction.MoveLeft,
+            [HotkeyCommand.MoveRight] = NavAction.MoveRight,
+        };
 
     private readonly List<IGlobalHotkey> _hotkeys = new();
     // Desktops Hypertree created (for branches). Only these are ever torn down — the top row is the
@@ -47,19 +45,18 @@ public sealed class App : Application
     private DesktopId? _moveOrigin; // where the current move flow started, for cancel/restore
     private TaskbarLabel? _taskbarLabel;
     private TrayIcon? _tray;
-    private BranchDialog? _dialog;
     private OverlayStage? _stage;
     private SettingsWindow? _settingsWindow;
-    private NameDialog? _nameDialog;
-    private RenameDialog? _renameDialog;
     private ISettingsStore? _settingsStore;
     private ISnapshotStore? _snapshots;
     private AppSettings _settings = new();
+    private bool _shuttingDown; // set in Teardown so the settings-window Closed handler doesn't re-register hotkeys
 
     // "Last visited" = the desktop you came from, committed when a navigation completes (Ctrl+Alt
     // released) or on a discrete jump. Surfaced first in the jump palette so you can hop back.
     private DesktopId? _lastVisited;
     private DesktopId? _gestureFrom; // where the in-progress keyboard gesture started
+    private HotkeyModifiers _gestureMods; // the modifiers of the in-progress gesture's chord (watched for release)
     private DispatcherTimer? _gesturePoll;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
@@ -102,12 +99,20 @@ public sealed class App : Application
         // teardown guard still only ever destroys our own desktops.
         foreach (DesktopId id in _model.BranchDesktopIds()) _created.Add(id.Value);
 
-        _settingsStore = new FileSettingsStore();
+        var settingsStore = new FileSettingsStore();
+        // First run = no settings file yet. Hypertree defaults to launching at login; we enable it and
+        // write the settings file so this one-time default doesn't re-assert if the user later opts out.
+        bool firstRun = !System.IO.File.Exists(settingsStore.Path);
+        _settingsStore = settingsStore;
         _settings = _settingsStore.Load();
         _snapshots = new FileSnapshotStore();
+        if (firstRun)
+        {
+            _startup.SetEnabled(true);
+            _settingsStore.Save(_settings);
+        }
 
         _hud = new HudWindow();
-        ApplyFlashSettings();
 
         // Persistent desktop-name pill over the taskbar. It re-reads the current desktop itself, but we
         // also poke it on every navigation so it never lags a keystroke.
@@ -115,9 +120,14 @@ public sealed class App : Application
         _model.Changed += () => _taskbarLabel?.Sync();
         ApplyTaskbarLabel();
 
-        // One shared, persistent presentation surface for the full-screen overlays (map + palettes).
-        // Swapping between them is an in-place content change, not a window teardown — no flash.
-        _stage = new OverlayStage(_desktops, _activator);
+        // One shared, persistent presentation surface for every overlay (map, palettes, prompts, move).
+        // Swapping between them is an in-place content change, not a window teardown — no flash. Card
+        // content floats over the live map, which the stage pulls from here.
+        _stage = new OverlayStage(_desktops, _activator) { MapProvider = () => _model!.BuildMap() };
+        // Park the taskbar pill while the overlay is up (the map already shows where you are) — this also
+        // removes the topmost-z fight that made the pill flash in/out when a dialog opened.
+        _stage.Shown += () => _taskbarLabel?.SetSuppressed(true);
+        _stage.Hidden += () => _taskbarLabel?.SetSuppressed(false);
 
         _overlay = new MapOverlay(_stage);
         _overlay.JumpTopRequested += i => JumpFromMap(() => _model!.GoToTop(i));
@@ -126,8 +136,9 @@ public sealed class App : Application
         _overlay.DeleteDesktopRequested += DeleteSelectedDesktop;
         _overlay.DeleteBranchRequested += ConfirmRemoveBranch;
         _overlay.NewDesktopRequested += PromptNewDesktop;
-        _overlay.NewBranchRequested += () => OpenNewBranchDialog(null); // blank dialog keeps the map up (templates: command palette)
-        _overlay.FinderRequested += () => OpenSpotlight(ReopenMap); // Ctrl+F — finder over the map; Esc returns to it
+        _overlay.NewBranchRequested += () => OpenNewBranchDialog(null); // branch card over the map (with in-card "Load from template" when any exist)
+        _overlay.MoveWindowsRequested += ToggleMoveWindows; // m — start the move-windows flow (replaces the map)
+        _overlay.FinderRequested += () => OpenSpotlight(); // Ctrl+F — finder pushed over the map; Esc pops back to it
         _overlay.SettingsRequested += OpenSettings;
 
         _stage.Prewarm(); // size the overlay host now, so the first summon doesn't render at the top-left then jump
@@ -136,45 +147,56 @@ public sealed class App : Application
         BuildTray();
     }
 
+    // Register every command's current chord (defaults overlaid with the user's rebindings). Called at
+    // startup and again when the settings window closes (resuming after SuspendHotkeys), picking up rebinds.
     private void RegisterHotkeys()
     {
-        foreach (var (key, action) in Bindings)
+        foreach ((HotkeyCommand cmd, HotkeyChord chord) in _settings.ResolveHotkeys())
         {
             var hk = PlatformServices.CreateGlobalHotkey();
-            bool ok = hk.Register(Mods, key, () => Dispatcher.UIThread.Post(() => Navigate(action)));
-            if (ok) _hotkeys.Add(hk);
-            else { hk.Dispose(); Console.Error.WriteLine($"Hotkey Ctrl+Alt+{key} was refused by the OS."); }
+            Action onPressed = ActionFor(cmd, chord.Modifiers);
+            if (hk.Register(chord.Modifiers, chord.Key, () => Dispatcher.UIThread.Post(onPressed))) _hotkeys.Add(hk);
+            else { hk.Dispose(); Console.Error.WriteLine($"Hotkey {chord.Display()} ({cmd}) was refused by the OS."); }
         }
+    }
 
-        // Ctrl+Alt+P — command palette. (The spotlight/jump is still reachable from there via the
-        // "Jump to desktop…" command.)
-        var cmdHk = PlatformServices.CreateGlobalHotkey();
-        if (cmdHk.Register(Mods, PaletteKey, () => Dispatcher.UIThread.Post(ToggleCommandPalette))) _hotkeys.Add(cmdHk);
-        else { cmdHk.Dispose(); Console.Error.WriteLine("Hotkey Ctrl+Alt+P (command palette) was refused by the OS."); }
+    // What each command does when its chord fires. Navigation carries the chord's modifiers so the flash
+    // knows which keys to watch for the hold-to-keep release (they're rebindable, not always Ctrl+Alt).
+    private Action ActionFor(HotkeyCommand cmd, HotkeyModifiers mods) => cmd switch
+    {
+        HotkeyCommand.CommandPalette => ToggleCommandPalette,
+        HotkeyCommand.MoveWindows    => ToggleMoveWindows,
+        _ when NavCommands.TryGetValue(cmd, out NavAction action) => () => Navigate(action, mods),
+        _ => () => { },
+    };
 
-        // Ctrl+Alt+M — move the current desktop's windows to another desktop.
-        var moveHk = PlatformServices.CreateGlobalHotkey();
-        if (moveHk.Register(Mods, MoveKey, () => Dispatcher.UIThread.Post(ToggleMoveWindows))) _hotkeys.Add(moveHk);
-        else { moveHk.Dispose(); Console.Error.WriteLine("Hotkey Ctrl+Alt+M (move windows) was refused by the OS."); }
+    // Unregister every global hotkey (each IGlobalHotkey owns a message-loop thread; Dispose posts WM_QUIT
+    // to unwind it). Used to suspend hotkeys while the settings window is open; RegisterHotkeys resumes them.
+    private void SuspendHotkeys()
+    {
+        foreach (IGlobalHotkey hk in _hotkeys) hk.Dispose();
+        _hotkeys.Clear();
     }
 
     // Navigate. While the map overlay is open it stays open (its windows are pinned across the
     // desktop switch) and re-homes its selection onto the desktop we land on; otherwise the flash shows.
-    private void Navigate(NavAction action)
+    // <paramref name="mods"/> is the chord's modifier layer — the flash holds while these are down.
+    private void Navigate(NavAction action, HotkeyModifiers mods)
     {
         if (_model is null || _desktops is null) return;
         // The move flow owns the arrows while it's up (its own plain-arrow handlers drive it), so an
-        // out-of-habit Ctrl+Alt+Arrow mustn't also navigate underneath.
+        // out-of-habit nav chord mustn't also navigate underneath.
         if (_stage?.Current is MoveContent) return;
-        // Start of a gesture: remember where we came from, so releasing Ctrl+Alt can record it as
-        // "last visited". A poll watches for the release (works whether flashing or in the map).
+        // Start of a gesture: remember where we came from (and which modifiers to watch), so releasing
+        // them can record it as "last visited". A poll watches for the release (flashing or in the map).
         _gestureFrom ??= _desktops.Current;
+        _gestureMods = mods;
         _model.Apply(action);
-        // In the map, Ctrl+Alt+Arrow switches for real, so the selection follows onto the new desktop
+        // In the map, the nav chord switches for real, so the selection follows onto the new desktop
         // (green "here" and blue selection rejoin); in the transient flash, the green outline marks the
         // gesture's origin so the jump's direction/distance reads at a glance.
         if (_overlay is { IsOpen: true }) _overlay.SyncToCurrent(_model.BuildMap());
-        else _hud?.Flash(_model.BuildMap(_gestureFrom));
+        else _hud?.Flash(_model.BuildMap(_gestureFrom), mods);
         StartGesturePoll();
     }
 
@@ -194,7 +216,7 @@ public sealed class App : Application
         if (_gesturePoll is null)
         {
             _gesturePoll = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(80) };
-            _gesturePoll.Tick += (_, _) => { if (!CtrlAltHeld()) CompleteGesture(); };
+            _gesturePoll.Tick += (_, _) => { if (!ModifierKeys.ModifiersHeld(_gestureMods)) CompleteGesture(); };
         }
         if (!_gesturePoll.IsEnabled) _gesturePoll.Start();
     }
@@ -209,20 +231,16 @@ public sealed class App : Application
         _gestureFrom = null;
     }
 
-    // A discrete jump (palette / map click): record where we came from immediately.
+    // A discrete jump from the spotlight palette: switch, record where we came from, then close the overlay
+    // outright — a jump physically moves you, so it's terminal (you don't return to the map behind it).
     private void Jump(Func<bool> doJump)
     {
         if (_desktops is null) return;
         DesktopId from = _desktops.Current;
         doJump();
         if (_desktops.Current != from) _lastVisited = from;
-        RefreshOverlay();
+        _stage?.Dismiss();
     }
-
-    private const int VK_CONTROL = 0x11, VK_MENU = 0x12;
-    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vKey);
-    private static bool CtrlAltHeld()
-        => (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
 
     private void ToggleMap()
     {
@@ -233,9 +251,11 @@ public sealed class App : Application
         _overlay.Open(_model.BuildMap()); // vertical model renders the stack around main; selection homes to current
     }
 
+    // Prime the map with a fresh board: redraws now if it's the current surface, else stashes it so the
+    // map shows the update the next time the stage unwinds back to it (after an action completes on a card).
     private void RefreshOverlay()
     {
-        if (_model is not null && _overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap());
+        if (_model is not null) _overlay?.SetBoard(_model.BuildMap());
     }
 
     // ── Move windows to another desktop (Ctrl+Alt+M) ────────────────────────────────
@@ -244,7 +264,7 @@ public sealed class App : Application
     private void ToggleMoveWindows()
     {
         if (_model is null || _desktops is null || _stage is null) return;
-        if (_stage.Current is MoveContent) { _stage.Dismiss(); return; } // re-press cancels (via OnRemoved)
+        if (_stage.Current is MoveContent) { _stage.Back(); return; } // re-press cancels (via OnRemoved)
 
         _model.Reconcile();
         _moveOrigin = _desktops.Current;
@@ -256,7 +276,11 @@ public sealed class App : Application
         content.NavigateRequested += a => _model!.Apply(a);
         content.MoveRequested += MoveSelectedWindows;
         content.Cancelled += CancelMove;
-        _stage.Present(content);
+        // Launched from the map → push over it so completing/cancelling unwinds back to the map (its durable
+        // base). Otherwise (hotkey / tray, no map open) it's a fresh root that dismisses to the desktop —
+        // Back/CompleteToBase then behave exactly like the old Dismiss.
+        if (_overlay?.IsOpen == true) _stage.Present(content);
+        else _stage.Summon(content);
     }
 
     // Phase 2 commit: we've navigated to the destination (it's the current desktop), so move each
@@ -282,6 +306,7 @@ public sealed class App : Application
             _desktops.SwitchTo(origin);
         _moveOrigin = null;
         _model?.Resync();
+        RefreshOverlay(); // if we opened over the map, it's about to be re-presented — give it a fresh board
     }
 
     // ── Manage-map actions (r / Del / Shift+Del / n) ───────────────────────────────
@@ -292,27 +317,24 @@ public sealed class App : Application
     // selection resumes.
     private void RenameSelected(DesktopSelection sel)
     {
-        if (_model is null || _desktops is null || _activator is null) return;
-        if (_renameDialog is not null) { _renameDialog.Activate(); return; }
+        if (_model is null || _desktops is null) return;
 
         var peek = sel.OnMain
             ? _model.PeekTopDesktop(sel.DesktopIndex)
             : _model.PeekBranchDesktop(sel.BranchIndex, sel.DesktopIndex);
         if (peek is null) return;
 
-        _renameDialog = new RenameDialog(peek.Value.label, _activator, _desktops);
-        _renameDialog.Closed += (_, _) =>
-        {
-            _renameDialog = null;
-            ReassertMap(); // reclaim key focus for the selection
-        };
-        _renameDialog.Confirmed += name =>
-        {
-            try { _desktops.Rename(peek.Value.id, name); } catch { /* best-effort — desktop may have gone */ }
-            _model.SetDesktopLabel(sel.OnMain, sel.BranchIndex, sel.DesktopIndex, name);
-            RefreshOverlay(); // keep the map open, now relabelled
-        };
-        _renameDialog.Show();
+        // A card over the map, prefilled + select-all so the first keystroke replaces the name. On confirm
+        // the model is relabelled and the map primed; CompleteToBase then unwinds to the map, now relabelled.
+        _stage?.Present(new PromptContent("Rename desktop",
+            "Type a new name for this desktop.", "desktop name",
+            name =>
+            {
+                try { _desktops.Rename(peek.Value.id, name); } catch { /* best-effort — desktop may have gone */ }
+                _model.SetDesktopLabel(sel.OnMain, sel.BranchIndex, sel.DesktopIndex, name);
+                RefreshOverlay();
+            },
+            confirmLabel: "Rename", prefill: peek.Value.label, selectAll: true));
     }
 
     // Del on the map: delete the selected desktop (with a confirm), resolving main vs. branch.
@@ -337,35 +359,27 @@ public sealed class App : Application
     // stays where you are), then home the selection onto it so you can rename/act on it immediately.
     private void PromptNewDesktop()
     {
-        if (_model is null || _desktops is null || _activator is null) return;
-        if (_nameDialog is not null) { _nameDialog.Activate(); return; }
+        if (_model is null || _desktops is null) return;
 
-        _nameDialog = new NameDialog("New desktop",
+        _stage?.Present(new PromptContent("New desktop",
             "Create a new desktop on the main timeline. You stay on the current desktop.",
-            "desktop name (e.g. email)", _activator, _desktops, confirmLabel: "Create");
-        _nameDialog.Closed += (_, _) => { _nameDialog = null; ReassertMap(); };
-        _nameDialog.Confirmed += name =>
-        {
-            _desktops.Create(name); // a main-timeline desktop is the user's own — not tracked in _created
-            _model.SyncTopRow();    // picks up the new desktop (appended to the top row)
-            NavMap map = _model.BuildMap();
-            _overlay?.Refresh(map);
-            _overlay?.Select(new DesktopSelection(true, -1, map.TopRow.Count - 1)); // the just-created desktop
-        };
-        _nameDialog.Show();
+            "desktop name (e.g. email)",
+            name =>
+            {
+                _desktops.Create(name); // a main-timeline desktop is the user's own — not tracked in _created
+                _model.SyncTopRow();    // picks up the new desktop (appended to the top row)
+                NavMap map = _model.BuildMap();
+                _overlay?.SetBoard(map);
+                _overlay?.Select(new DesktopSelection(true, -1, map.TopRow.Count - 1)); // home to the just-created desktop
+            },
+            confirmLabel: "Create"));
     }
 
-    // After a child prompt over the map closes, hand the stage its key focus back so arrow selection resumes.
-    private void ReassertMap()
-    {
-        if (_overlay is { IsOpen: true }) _stage?.Reassert();
-    }
+    // ── Spotlight: jump to any existing desktop, or create one named the query ─────
 
-    // ── Spotlight (F4): jump to any existing desktop, or create one named the query ─────
-
-    // <paramref name="onBack"/>, when supplied, is what Esc returns to (the map via Ctrl+F, or the command
-    // palette via its "Jump to desktop…" row) instead of dismissing outright.
-    private void OpenSpotlight(Action? onBack = null)
+    // Pushed over whatever opened it (the map via Ctrl+F, or the command palette's "Jump to desktop…"
+    // row), so Esc always pops straight back there.
+    private void OpenSpotlight()
     {
         if (_model is null) return;
 
@@ -413,14 +427,11 @@ public sealed class App : Application
             items.Insert(0, lastItem);
         }
 
-        string hint = onBack is null
-            ? "↑↓ move · ↵ jump/create · Esc close · blue = you are here"
-            : "↑↓ move · ↵ jump/create · Esc back · blue = you are here";
-        OpenPalette("Jump to or create a desktop…", hint, items,
+        OpenPalette("Jump to or create a desktop…",
+            "↑↓ move · ↵ jump/create · Esc back · blue = you are here", items,
             query => new PaletteItem($"Create desktop “{query}”", "new · main", "+",
                 () => CreateAndGoToDesktop(query),
-                Preview: () => _model!.BuildMap()), // no target tile yet — show the current board
-            previewMode: true, onBack: onBack);
+                Preview: () => _model!.BuildMap())); // no target tile yet — show the current board
     }
 
     // Build a board snapshot that marks a specific desktop as current (for the jump palette's preview),
@@ -468,25 +479,18 @@ public sealed class App : Application
         _desktops.SwitchTo(id);
         _model.Resync(); // land the model on the freshly-created desktop
         if (_desktops.Current != from) _lastVisited = from;
-        RefreshOverlay(); // no flash — the jump/create is decisive on its own
+        _stage?.Dismiss(); // decisive: you're now on the new desktop, so close the overlay
     }
 
+    // Push a palette over the current surface (or as a fresh root when nothing is showing). Esc pops back.
     private void OpenPalette(string placeholder, string hint, IReadOnlyList<PaletteItem> items,
-                             Func<string, PaletteItem?>? createRow = null, bool previewMode = false,
-                             Action? onBack = null)
+                             Func<string, PaletteItem?>? createRow = null)
     {
-        _stage?.Present(new PaletteContent(placeholder, hint, items, createRow, previewMode, onBack));
+        _stage?.Present(new PaletteContent(placeholder, hint, items, createRow));
     }
 
     // Reopen the map fresh (used as the finder's "back" target when it was summoned from the map).
-    private void ReopenMap()
-    {
-        if (_model is null || _overlay is null || _desktops is null) return;
-        _model.Reconcile();
-        _overlay.Open(_model.BuildMap());
-    }
-
-    // ── Command palette (F5): same look/feel, items are commands. Bones only. ───────────
+    // ── Command palette: same look/feel, items are commands. ────────────────────────────
 
     private void ToggleCommandPalette()
     {
@@ -501,84 +505,58 @@ public sealed class App : Application
 
         _model.Reconcile(); // drop any externally-deleted desktops so the context board is accurate
 
-        // Preview mode, like the jump palette: show a board underneath so a command reads in context
-        // ("blue = you are here"). Most rows fall back to the current map; commands with a distinct
-        // target supply their own board that highlights what they'll act on (green).
+        // Show the live map behind each command ("blue = you are here"); commands with a distinct target
+        // supply their own board that highlights what they'll act on (green). A fresh root (Summon), so a
+        // re-press over a half-open chain resets to a clean command palette rather than stacking deeper.
         var items = BuildCommands()
             .Select(c => new PaletteItem(c.Name, c.DisabledReason,
                                          c.DisabledReason is null ? "▸" : null, c.Run,
                                          Preview: c.Preview ?? (() => _model!.BuildMap()),
                                          DisabledReason: c.DisabledReason))
             .ToList();
-        OpenPalette("Run a command…", "↑↓ move · ↵ run · Esc close · blue = you are here", items,
-                    previewMode: true);
+        _stage?.Summon(new PaletteContent("Run a command…",
+            "↑↓ move · ↵ run · Esc back · blue = you are here", items,
+            clearSearchOnShow: true)); // popping back here (Esc from a command's sub-surface) lands on the full list
     }
 
-    // The command registry. A few real commands (reusing existing handlers) plus stubs for features
-    // that don't exist yet — the exact set isn't the point this iteration, the wiring is.
+    // The command registry — real commands reusing existing handlers.
     private IReadOnlyList<Command> BuildCommands()
     {
-        Action stub(string name) => () => Console.Error.WriteLine($"Command “{name}” is not implemented yet.");
-
-        // "Save current branch as template…" only makes sense inside a branch — greyed out with a reason
-        // on the main timeline, so it stays discoverable rather than disappearing.
-        bool inBranch = _model is not null && !_model.OnTop && _model.CurrentBranchIndex >= 0;
-        string? saveTemplateDisabled = inBranch ? null : "you’re on the main timeline — enter a branch first";
-
-        // The branch a "current branch" command would act on: the one you're in, or (on main) the one
-        // directly below main. Used to highlight that branch green in the command's preview board.
-        int targetBranch = _model?.CurrentBranchIndex ?? -1;
-        Func<NavMap>? branchTargetPreview = targetBranch >= 0 ? () => PreviewBranchTarget(targetBranch) : null;
-
-        // Commands run synchronously: those that open another stage surface (map / a palette) swap it
-        // in place, so PaletteContent.Choose sees the stage is no longer the command palette and leaves
-        // it be; those that open a separate window (dialogs, settings, the move overlay) leave the
-        // command palette current, so Choose dismisses the stage behind them. Either way, no flash.
+        // Commands run synchronously. Those that push another stage surface (a palette, a prompt, the map,
+        // the move flow) become the current surface, so PaletteContent.Choose sees the palette is no longer
+        // current and leaves the chain in place (Esc pops back through it). Terminal commands leave the
+        // palette current, so Choose unwinds to the start. Either way, no flash — one surface throughout.
         return new List<Command>
         {
-            new("Jump to desktop…", () => OpenSpotlight(OpenCommandPalette)), // Esc returns to the command palette
+            new("Jump to desktop…", OpenSpotlight), // pushed over the command palette; Esc pops back to it
             new("Open map", ToggleMap),
-            new("Move windows to another desktop…", ToggleMoveWindows,
-                _desktops is not null && _desktops.WindowsOn(_desktops.Current).Count == 0 ? "no windows on this desktop" : null),
             new("Settings", OpenSettings),
             new("New branch…", PromptNewBranch),
-            new("Save current branch as template…", PromptSaveBranchAsTemplate,
-                saveTemplateDisabled, inBranch ? branchTargetPreview : null),
-            new("Manage templates…", ManageTemplatesPrompt,
-                _settings.BranchTemplates.Count == 0 ? "no templates saved yet" : null),
-            new("Delete current desktop", DeleteCurrentDesktop),
-            new("Remove current branch", RemoveCurrentBranch, Preview: branchTargetPreview),
-            // Hard reset: collapse everything back to one desktop. Pointless (and greyed out) when
-            // there's already a single desktop and no branches.
-            new("Implode — reset to a single desktop", Implode,
-                _model is not null && _model.TotalDesktops <= 1 ? "already a single desktop" : null),
-            new("Snapshot layout…", PromptSnapshot),
-            new("Restore snapshot…", RestoreSnapshotPrompt),
-            new("Move desktop to branch…", stub("Move desktop to branch…")),
+            // Create, preview and delete branch templates — always available (you can create the first one from here).
+            new("Manage templates…", ManageTemplatesPrompt),
+            // Delete-current-desktop / remove-current-branch are intentionally not commands — do them from the
+            // map, where the target is visible (each tile / branch carries its own × control). Likewise
+            // move-windows is triggered from the map ("m") or Ctrl+Alt+M, not from here.
+            // Save / restore / reset the whole desktop+branch arrangement — one manager for all three.
+            new("Layouts…", LayoutsPrompt),
+            // Quit Hypertree — behind a confirm (see ExitHypertree), since it's easy to land on while
+            // typing/navigating the palette (unlike the deliberate tray menu item).
+            new("Exit Hypertree", ExitHypertree),
         };
     }
 
-    private void RemoveCurrentBranch()
-    {
-        if (_model is null) return;
-        int index = _model.CurrentBranchIndex;
-        if (index >= 0) RemoveBranch(index);
-    }
-
-    // ── Implode: hard reset to a single desktop ────────────────────────────────────
+    // ── Reset (implode): the Layouts manager's "restore the empty layout" ───────────
 
     // Remove every desktop but one and clear all branches — a clean slate. Guarded by a confirm.
     // Mirrors RestoreSnapshot's teardown: stand on the survivor first so the current view is never
     // yanked out from under us, then remove the rest (their windows fall back onto the survivor).
     private void Implode()
     {
-        if (_model is null || _desktops is null || _activator is null) return;
+        if (_model is null || _desktops is null) return;
 
-        var dlg = new ConfirmDialog(
+        _stage?.Present(new ConfirmContent(
             "Implode all desktops?\nEvery desktop and branch is removed and you’re reset to a single desktop. Windows from the others move onto it. This can’t be undone.",
-            _activator, _desktops, confirmLabel: "Implode");
-        dlg.Confirmed += DoImplode;
-        dlg.Show();
+            DoImplode, confirmLabel: "Implode"));
     }
 
     private void DoImplode()
@@ -605,30 +583,54 @@ public sealed class App : Application
         RefreshOrFlash();
     }
 
-    // Preview board that marks a whole branch as the target: its tiles get the green "here" outline and
-    // the box stays bright (un-rested), so a "current branch" command shows exactly which branch it hits —
-    // even from the main timeline, where the blue cursor is elsewhere.
-    private NavMap PreviewBranchTarget(int branchIndex)
+    // ── Layouts: save / restore / reset the whole desktop+branch arrangement ─────────
+
+    // One manager for whole-layout operations, mirroring the template manager: a palette of saved layouts
+    // (each previewing the arrangement it would restore) plus a "Save current layout…" row and a bottom
+    // "Reset to a single desktop" row. Enter restores a layout; Del deletes it. Save/delete return here;
+    // restore/reset apply and exit to the resulting layout.
+    private void LayoutsPrompt() => ShowLayoutManager(refresh: false);
+
+    // <param name="refresh">false: push the manager over the command palette (Esc pops back). true: rebuild
+    // it after a save/delete taken on a card pushed over it — the card and the stale list are replaced in
+    // place, keeping the command palette beneath (see ReplaceTop).</param>
+    private void ShowLayoutManager(bool refresh)
     {
-        NavMap b = _model!.BuildMap();
-        var branches = b.Branches.Select(g => g.Index == branchIndex
-            ? g with { Desktops = g.Desktops.Select(d => d with { IsHere = true }).ToList(), IsCurrentLevel = true }
-            : g).ToList();
-        return b with { Branches = branches };
+        if (_model is null || _snapshots is null) return;
+
+        var items = new List<PaletteItem>
+        {
+            new("Save current layout…", "capture these desktops & branches", "＋", () => OpenSaveLayoutCard()),
+        };
+        foreach (Snapshot snapshot in _snapshots.Load())
+        {
+            Snapshot s = snapshot; // capture per iteration
+            items.Add(new PaletteItem(s.Name, $"{s.DesktopCount} desktops · {s.Branches.Count} branches", "⟲",
+                () => ConfirmRestore(s),                 // Enter restores (pushes a confirm over this palette)…
+                Preview: () => SnapshotPreview(s),        // preview the layout you'd land in
+                OnDelete: () => ConfirmDeleteLayout(s))); // …Del deletes it (pushes a confirm)
+        }
+        // The reset ("restore the empty layout") sits at the bottom — greyed out when already a single desktop.
+        items.Add(new PaletteItem("Reset to a single desktop", "clear every desktop & branch", "⊘",
+            Implode, DisabledReason: _model.TotalDesktops <= 1 ? "already a single desktop" : null));
+
+        // Typing a name that matches no saved layout offers to save the current one under it.
+        PaletteItem? CreateRow(string q) =>
+            new($"Save “{q}”", "save current layout", "＋", () => OpenSaveLayoutCard(prefillName: q));
+
+        var palette = new PaletteContent("Layouts…",
+            "↑↓ move · ↵ restore / save · ⌦ delete · Esc back · preview = the saved layout", items, CreateRow);
+        if (refresh) _stage?.ReplaceTop(2, palette); else _stage?.Present(palette);
     }
 
-    // ── Snapshots: capture the whole layout under a name, restore it later ─────────
-
-    // Prompt for a name, then save the current layout (main timeline + branches) under it. A stage-content
-    // prompt (not a NameDialog window), so summoning it from the command palette is a swap in place — the
-    // palette becomes the prompt on the same host, no dim tear-down/rebuild flash.
-    private void PromptSnapshot()
+    // Prompt for a name, then save the current layout under it, and return to the (refreshed) manager.
+    private void OpenSaveLayoutCard(string? prefillName = null)
     {
-        if (_model is null || _snapshots is null || _stage is null) return;
-
-        _stage.Present(new PromptContent("Snapshot layout",
+        _stage?.Present(new PromptContent("Save layout",
             "Save the current desktops and branches under a name you can restore to later.",
-            "snapshot name (e.g. before-refactor)", SaveSnapshot));
+            "layout name (e.g. before-refactor)",
+            name => { SaveSnapshot(name); ShowLayoutManager(refresh: true); },
+            confirmLabel: "Save", prefill: prefillName, selectAll: prefillName is not null));
     }
 
     private void SaveSnapshot(string name)
@@ -640,25 +642,6 @@ public sealed class App : Application
         var list = _snapshots.Load().Where(s => !s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToList();
         list.Add(_model.CaptureSnapshot(name));
         _snapshots.Save(list);
-    }
-
-    // Show a palette of saved snapshots; choosing one confirms, then restores.
-    private void RestoreSnapshotPrompt()
-    {
-        if (_snapshots is null || _activator is null) return;
-
-        IReadOnlyList<Snapshot> snaps = _snapshots.Load();
-        var items = snaps.Select(s => new PaletteItem(
-            s.Name,
-            $"{s.DesktopCount} desktops · {s.Branches.Count} branches",
-            "⟲",
-            () => Dispatcher.UIThread.Post(() => ConfirmRestore(s)), // let the palette close first
-            Preview: () => SnapshotPreview(s)))                       // show the layout you'd restore to
-            .ToList();
-
-        OpenPalette(snaps.Count == 0 ? "No snapshots saved yet" : "Restore a snapshot…",
-                    "↑↓ move · ↵ restore · Esc close · preview = the saved layout", items,
-                    previewMode: true);
     }
 
     // Build a board from a saved snapshot (persisted labels only — no live windows), so the restore
@@ -680,12 +663,22 @@ public sealed class App : Application
 
     private void ConfirmRestore(Snapshot snap)
     {
-        if (_activator is null || _desktops is null) return;
-        var dlg = new ConfirmDialog(
-            $"Restore snapshot “{snap.Name}”?\nYour desktops are rebuilt to match it. Desktops that aren’t part of the snapshot are removed (any windows on them move to another desktop).",
-            _activator, _desktops, confirmLabel: "Restore");
-        dlg.Confirmed += () => RestoreSnapshot(snap);
-        dlg.Show();
+        if (_desktops is null) return;
+        _stage?.Present(new ConfirmContent(
+            $"Restore layout “{snap.Name}”?\nYour desktops are rebuilt to match it. Desktops that aren’t part of the layout are removed (any windows on them move to another desktop).",
+            () => RestoreSnapshot(snap), confirmLabel: "Restore"));
+    }
+
+    // Delete a saved layout (Del on its row), then return to the (refreshed) manager.
+    private void ConfirmDeleteLayout(Snapshot snap)
+    {
+        if (_snapshots is null) return;
+        _stage?.Present(new ConfirmContent($"Delete layout “{snap.Name}”?", () =>
+        {
+            var list = _snapshots.Load().Where(s => !s.Name.Equals(snap.Name, StringComparison.OrdinalIgnoreCase)).ToList();
+            _snapshots.Save(list);
+            ShowLayoutManager(refresh: true); // return to the manager, now without the deleted layout
+        }, confirmLabel: "Delete"));
     }
 
     // Rebuild the OS desktops + the model to match a snapshot. Re-attaches to a saved desktop by its GUID
@@ -754,24 +747,35 @@ public sealed class App : Application
         if (_activator is null || _startup is null) return;
         if (_settingsWindow is not null) { _settingsWindow.Activate(); return; }
 
+        // Suspend the global hotkeys while settings is open so the rebind capture reads keystrokes cleanly
+        // (an active chord like Ctrl+Alt+P mustn't fire its command while the user is pressing it to rebind).
+        // They're re-registered from the (possibly changed) bindings when the window closes.
+        SuspendHotkeys();
+
         _settingsWindow = new SettingsWindow(_settings, _startup.IsEnabled, SaveSettings, _activator);
         _settingsWindow.Topmost = true; // sit above the map/flash if one is showing
-        _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+        // Settings is the one surface that's still its own window; when it closes, re-register the hotkeys
+        // (picking up any rebind) and hand the stage its key focus back so an underlying map resumes.
+        _settingsWindow.Closed += (_, _) =>
+        {
+            _settingsWindow = null;
+            if (_shuttingDown) return; // teardown already unregistered; don't resurrect the hotkey threads
+            RegisterHotkeys();
+            _stage?.Reassert();
+        };
         _settingsWindow.Show();
         _settingsWindow.TakeFocus();
     }
 
+    // Save applies the settings but leaves re-registration to the window's Closed handler (which fires for
+    // both Save and Cancel), so the hotkeys are suspended for exactly as long as the window is open.
     private void SaveSettings(AppSettings settings, bool startOnLogin)
     {
         _settings = settings;
         _settingsStore?.Save(settings);
-        ApplyFlashSettings();
         ApplyTaskbarLabel();
         _startup?.SetEnabled(startOnLogin);
     }
-
-    private void ApplyFlashSettings()
-        => _hud?.Configure(_settings.FlashHoldToKeep, _settings.FlashGraceMs, _settings.FlashTimeoutMs);
 
     // Show or hide the persistent taskbar label to match the setting.
     private void ApplyTaskbarLabel()
@@ -790,24 +794,51 @@ public sealed class App : Application
         return (branch, label);
     }
 
+    // Show the result of an action that completed on a card: if the chain returns to the map (its durable
+    // base), prime the map so it redraws when the stage unwinds to it; otherwise the stage will dismiss, so
+    // flash the result over the bare desktop instead.
     private void RefreshOrFlash()
     {
         if (_model is null) return;
-        if (_overlay is { IsOpen: true }) _overlay.Refresh(_model.BuildMap());
-        else _hud?.Flash(_model.BuildMap());
+        NavMap map = _model.BuildMap();
+        if (_stage is not null && _stage.HasDurableBase) _overlay?.SetBoard(map);
+        else _hud?.Flash(map, HotkeyModifiers.None); // a result flash, not a gesture — just times out
+    }
+
+    // The product version for the tray header, read from the assembly (set by <Version> in the csproj) so
+    // it never drifts from the real build. Trims any "+commit" build metadata the SDK may append.
+    private static string AppVersion =>
+        (System.Reflection.Assembly.GetExecutingAssembly()
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            is [System.Reflection.AssemblyInformationalVersionAttribute attr, ..]
+            ? attr.InformationalVersion.Split('+')[0]
+            : "0.1.0");
+
+    // Exit from the command palette, behind a confirm. On confirm we dismiss the overlay FIRST so it
+    // vanishes immediately, then post the shutdown so it runs after the stage has painted itself away —
+    // otherwise the full-screen overlay lingers on screen through teardown and the close reads as sluggish
+    // next to the tray's Exit (which has nothing showing when it fires).
+    private void ExitHypertree()
+    {
+        _stage?.Present(new ConfirmContent(
+            "Exit Hypertree?\nYour desktops and branches are left exactly as they are — only Hypertree closes.",
+            () =>
+            {
+                _stage?.Dismiss();
+                Dispatcher.UIThread.Post(() =>
+                    (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown());
+            },
+            confirmLabel: "Exit"));
     }
 
     private void BuildTray()
     {
-        var header = new NativeMenuItem("Hypertree 0.1.0") { IsEnabled = false };
-        var map = new NativeMenuItem("Open map");
-        map.Click += (_, _) => ToggleMap();
-        var move = new NativeMenuItem("Move windows…");
-        move.Click += (_, _) => ToggleMoveWindows();
-        var newBranch = new NativeMenuItem("New branch…");
-        newBranch.Click += (_, _) => PromptNewBranch();
-        var settings = new NativeMenuItem("Settings…");
-        settings.Click += (_, _) => OpenSettings();
+        // Right-click menu: a disabled version header, the two entry points, then Exit (also in the palette).
+        var header = new NativeMenuItem($"Hypertree {AppVersion}") { IsEnabled = false };
+        var palette = new NativeMenuItem("Open command palette");
+        palette.Click += (_, _) => Dispatcher.UIThread.Post(OpenCommandPalette);
+        var settings = new NativeMenuItem("Open settings");
+        settings.Click += (_, _) => Dispatcher.UIThread.Post(OpenSettings);
         var exit = new NativeMenuItem("Exit");
         exit.Click += (_, _) => (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
 
@@ -816,47 +847,47 @@ public sealed class App : Application
             Icon = TrayIconFactory.Create(),
             ToolTipText = "Hypertree",
             IsVisible = true,
-            Menu = new NativeMenu { header, new NativeMenuItemSeparator(), map, move, newBranch, settings, new NativeMenuItemSeparator(), exit },
+            Menu = new NativeMenu { header, new NativeMenuItemSeparator(), palette, settings, new NativeMenuItemSeparator(), exit },
         };
+        // Left-click the tray icon → open the command palette (the app's main entry point).
+        _tray.Clicked += (_, _) => Dispatcher.UIThread.Post(ToggleCommandPalette);
         TrayIcon.SetIcons(this, new TrayIcons { _tray });
     }
 
     // ── Branch definition ─────────────────────────────────────────────────────────
 
-    // "New branch…" — template-first when any templates exist, else straight to the blank dialog.
+    // "New branch…" — always the branch card. The card itself carries a "Load from template" button (only
+    // when templates exist), so a template is an optional in-place fill, never a gate before the fields.
     private void PromptNewBranch()
     {
-        if (_desktops is null || _activator is null) return;
-
-        // No templates yet → the blank dialog, exactly as before (nothing regresses until you make one).
-        if (_settings.BranchTemplates.Count == 0) { OpenNewBranchDialog(null); return; }
-
-        // Otherwise pick a template first. "Blank branch" is row 0 (the default selection), so the
-        // no-template path stays a quick Enter-Enter; picking a template pre-fills the labels instead.
-        var items = new List<PaletteItem>
-        {
-            new("Blank branch", "type your own desktops", "+",
-                () => Dispatcher.UIThread.Post(() => OpenNewBranchDialog(null))),
-        };
-        foreach (BranchTemplate template in _settings.BranchTemplates)
-        {
-            BranchTemplate t = template; // capture per iteration
-            items.Add(new PaletteItem(t.Name, string.Join(" · ", t.Labels), "▸",
-                () => Dispatcher.UIThread.Post(() => OpenNewBranchDialog(t.Labels))));
-        }
-        OpenPalette("Pick a template…", "↑↓ move · ↵ use · Esc close", items);
+        if (_desktops is null) return;
+        OpenNewBranchDialog(null);
     }
 
-    // Open the branch dialog, optionally pre-filled with a template's desktop labels.
+    // Open the branch prompt as a card, optionally pre-filled with a template's desktop labels. The card's
+    // in-card "Load from template" button is wired only when there's at least one template to load.
     private void OpenNewBranchDialog(IReadOnlyList<string>? prefillLabels)
     {
-        if (_desktops is null || _activator is null) return;
-        if (_dialog is not null) { _dialog.Activate(); return; }
+        Action<Action<IReadOnlyList<string>>>? onLoadTemplate =
+            _settings.BranchTemplates.Count > 0 ? PickTemplateInto : null;
+        _stage?.Present(new BranchContent(CreateBranch, prefillLabels, onLoadTemplate));
+    }
 
-        _dialog = new BranchDialog(_activator, _desktops, prefillLabels); // pinned + top-most overlay, sits above the map
-        _dialog.Closed += (_, _) => { _dialog = null; ReassertMap(); };
-        _dialog.Confirmed += CreateBranch;
-        _dialog.Show();
+    // Open the template picker over the branch card. The chosen template's labels are handed to `fill`
+    // (which writes them into the card's still-editable Desktops box), then we pop back to the card — so
+    // you can tweak the loaded labels before creating, or Esc back with the card untouched.
+    private void PickTemplateInto(Action<IReadOnlyList<string>> fill)
+    {
+        var items = _settings.BranchTemplates.Select(template =>
+        {
+            BranchTemplate t = template; // capture per iteration
+            return new PaletteItem(t.Name, string.Join(" · ", t.Labels), "▸", () =>
+            {
+                fill(t.Labels);
+                _stage?.Back(); // return to the branch card, now pre-filled
+            });
+        }).ToList();
+        OpenPalette("Pick a template…", "↑↓ move · ↵ use · Esc back", items);
     }
 
     private void CreateBranch(BranchSpec spec)
@@ -872,9 +903,10 @@ public sealed class App : Application
         }
 
         var branch = new Branch(spec.Name, refs);
-        // Created from the map: attach the branch below the highlighted desktop's row, not below main.
-        // (Tray / command-palette creation has no map selection, so it falls back to below main.)
-        if (_overlay is { IsOpen: true })
+        // Created over the map (the branch prompt sits on top of it): attach the branch below the
+        // highlighted desktop's row, not below main. Tray / command-palette creation has no map in the
+        // chain, so it falls back to below main.
+        if (_stage is { HasDurableBase: true } && _overlay is not null)
         {
             DesktopSelection sel = _overlay.Selection;
             _model.AddBranchBelow(sel.OnMain, sel.BranchIndex, branch);
@@ -885,24 +917,52 @@ public sealed class App : Application
 
     // ── Branch templates (reusable desktop recipes for new branches) ─────────────────
 
-    // Promote the current branch's desktop set into a named, reusable template.
-    private void PromptSaveBranchAsTemplate()
+    // The single template manager: a palette listing every saved template (with a live preview of what it
+    // would create) plus a "Create new template" row. Choosing a template deletes it (behind a confirm);
+    // "Create new" (or typing a name that matches nothing) opens the definition card.
+    private void ManageTemplatesPrompt() => ShowTemplateManager(refresh: false);
+
+    // <param name="refresh">false: push the manager over the current surface (the command palette; Esc pops
+    // back to it). true: rebuild it after a create/delete taken on a card pushed over it — the card and the
+    // now-stale list are replaced in place, so the new list shows while the command palette beneath is kept
+    // (Esc still returns there).</param>
+    private void ShowTemplateManager(bool refresh)
     {
-        if (_model is null || _activator is null || _settingsStore is null || _desktops is null) return;
-        if (_model.OnTop) return; // greyed out in the palette; guard the direct path too
-        if (_nameDialog is not null) { _nameDialog.Activate(); return; }
+        if (_settingsStore is null) return;
 
-        int gi = _model.CurrentBranchIndex;
-        if (gi < 0) return;
-        NavMapBranch branch = _model.BuildMap().Branches[gi];
-        var labels = branch.Desktops.Select(d => d.Label).ToList();
+        var items = new List<PaletteItem>
+        {
+            new("Create new template", "name it and list its desktops", "＋", () => OpenCreateTemplateCard()),
+        };
+        foreach (BranchTemplate template in _settings.BranchTemplates)
+        {
+            BranchTemplate t = template; // capture per iteration
+            items.Add(new PaletteItem(t.Name, string.Join(" · ", t.Labels), "🗑",
+                () => ConfirmDeleteTemplate(t),          // Enter deletes (pushes a confirm card over this palette)…
+                Preview: () => TemplatePreview(t),        // show the branch this template would stand up
+                OnDelete: () => ConfirmDeleteTemplate(t))); // …and Del does the same on the highlighted row
+        }
 
-        _nameDialog = new NameDialog("Save as template",
-            "Save this branch’s desktops as a reusable template you can pick when creating new branches.",
-            $"template name (e.g. {branch.Name})", _activator, _desktops);
-        _nameDialog.Closed += (_, _) => _nameDialog = null;
-        _nameDialog.Confirmed += name => SaveTemplate(name, labels);
-        _nameDialog.Show();
+        // Typing a name that matches no existing template offers to create it with that name pre-filled.
+        PaletteItem? CreateRow(string q) =>
+            new($"Create “{q}”", "new template", "＋", () => OpenCreateTemplateCard(prefillName: q));
+
+        var palette = new PaletteContent("Manage templates…",
+            "↑↓ move · ↵ create/delete · ⌦ delete · Esc back · preview = what it creates", items, CreateRow);
+        // Refresh drops the card/confirm (top) + the stale manager beneath it (popCount 2), keeping the
+        // command palette under that; the initial open just pushes over the command palette.
+        if (refresh) _stage?.ReplaceTop(2, palette); else _stage?.Present(palette);
+    }
+
+    // Open the template-definition card, optionally pre-filled. On confirm the template is saved and we
+    // land back in the (refreshed) manager, so you can immediately create or delete another.
+    private void OpenCreateTemplateCard(string? prefillName = null, IReadOnlyList<string>? prefillLabels = null)
+    {
+        _stage?.Present(new TemplateContent((name, labels) =>
+        {
+            SaveTemplate(name, labels);
+            ShowTemplateManager(refresh: true); // return to the manager, now including the new template
+        }, prefillName, prefillLabels));
     }
 
     private void SaveTemplate(string name, IReadOnlyList<string> labels)
@@ -914,32 +974,27 @@ public sealed class App : Application
         _settingsStore.Save(_settings);
     }
 
-    // A palette of saved templates; choosing one confirms, then deletes it.
-    private void ManageTemplatesPrompt()
-    {
-        if (_activator is null || _settingsStore is null) return;
-
-        var items = _settings.BranchTemplates.Select(template =>
-        {
-            BranchTemplate t = template; // capture per iteration
-            return new PaletteItem(t.Name, string.Join(" · ", t.Labels), "🗑",
-                () => Dispatcher.UIThread.Post(() => ConfirmDeleteTemplate(t)));
-        }).ToList();
-
-        OpenPalette(items.Count == 0 ? "No templates saved yet" : "Delete a template…",
-                    "↑↓ move · ↵ delete · Esc close", items);
-    }
-
     private void ConfirmDeleteTemplate(BranchTemplate template)
     {
-        if (_activator is null || _desktops is null) return;
-        var dlg = new ConfirmDialog($"Delete template “{template.Name}”?", _activator, _desktops, confirmLabel: "Delete");
-        dlg.Confirmed += () =>
+        _stage?.Present(new ConfirmContent($"Delete template “{template.Name}”?", () =>
         {
             _settings.BranchTemplates.RemoveAll(t => t.Name.Equals(template.Name, StringComparison.OrdinalIgnoreCase));
             _settingsStore?.Save(_settings);
-        };
-        dlg.Show();
+            ShowTemplateManager(refresh: true); // return to the manager, now without the deleted template
+        }, confirmLabel: "Delete"));
+    }
+
+    // Preview board for a template: the single branch it would add (its desktops), sitting below a stub
+    // main timeline — so the manager shows, at a glance, exactly what picking this template stands up.
+    private static NavMap TemplatePreview(BranchTemplate t)
+    {
+        var tiles = t.Labels.Select(l => new NavMapTile(l, IsCurrent: false)).ToList();
+        var branch = new NavMapBranch(0, t.Name, tiles, IsCurrentLevel: true, Cursor: 0);
+        return new NavMap(
+            TopRow: new[] { new NavMapTile("main", IsCurrent: false) },
+            TopCursor: 0, OnTop: true,
+            Branches: new[] { branch },
+            TopPosition: 0);
     }
 
     private void RemoveBranch(int index)
@@ -950,14 +1005,6 @@ public sealed class App : Application
     }
 
     // ── Delete a single desktop (map × badge) with a confirm prompt ───────────────
-
-    // Delete whatever desktop is currently selected (footer button).
-    private void DeleteCurrentDesktop()
-    {
-        if (_model is null) return;
-        if (_model.OnTop) DeleteTopDesktop(_model.CurrentTopIndex);
-        else if (_model.CurrentBranchDesktop is { } sel) DeleteBranchDesktop(sel.branch, sel.desktop);
-    }
 
     private void DeleteTopDesktop(int index)
     {
@@ -1003,15 +1050,10 @@ public sealed class App : Application
         return avoid; // unreachable — guarded by TotalDesktops > 1
     }
 
+    // A confirm card pushed over the current surface (the map, when a Del/Shift+Del came from it). Esc pops
+    // back; confirming runs the action then unwinds to where the chain started.
     private void Confirm(string message, Action onConfirm)
-    {
-        if (_activator is null || _desktops is null) return;
-        // Always top-most and pinned across desktops now (OverlayPrompt), so it sits above the map on its own.
-        var dlg = new ConfirmDialog(message, _activator, _desktops);
-        dlg.Confirmed += onConfirm;
-        dlg.Closed += (_, _) => ReassertMap(); // hand the map its key focus back once the prompt is gone
-        dlg.Show();
-    }
+        => _stage?.Present(new ConfirmContent(message, onConfirm));
 
     // Remove a branch's desktops — but ONLY ones Hypertree created, never the user's own desktops.
     private void TearDown(Branch? branch)
@@ -1029,16 +1071,13 @@ public sealed class App : Application
 
     private void Teardown()
     {
+        _shuttingDown = true; // stop the settings window's Closed handler from re-registering hotkeys on exit
         _gesturePoll?.Stop();
-        foreach (var hk in _hotkeys) hk.Dispose();
-        _hotkeys.Clear();
+        SuspendHotkeys();
         if (_tray is not null) _tray.IsVisible = false;
-        _dialog?.Close();
-        _stage?.Close(); // closes the shared host + dims (map / palettes / move all live here)
+        _stage?.Close(); // closes the shared host + dims (map / palettes / prompts / move all live here)
         _hud?.Close();
         _taskbarLabel?.Close();
-        _nameDialog?.Close();
-        _renameDialog?.Close();
         _settingsWindow?.Close();
     }
 }

@@ -8,26 +8,26 @@ using Avalonia.Media;
 namespace Hypertree.App.Views;
 
 /// <summary>
-/// A single-field name prompt, hosted on the shared <see cref="OverlayStage"/> rather than as its own
-/// top-level window. Presenting it is a content swap on the already-visible host — so summoning it from
-/// the command palette (e.g. "Snapshot layout…") is flash-free, where the old <see cref="NameDialog"/>
-/// window tore the stage down and built a fresh window up. A title, a one-line explanation, and a text
-/// box; Enter (or the confirm button) raises <see cref="OverlayStage"/>-dismiss after handing the trimmed
-/// text (never empty) to <c>onConfirm</c>. The stage-content sibling of <see cref="PaletteContent"/>; the
-/// card mirrors <see cref="NameDialog"/> so the two read as the same surface family.
+/// A single-field text prompt (name a snapshot / template / new desktop, or rename a desktop), hosted as
+/// a <b>card</b> on the shared <see cref="OverlayStage"/> rather than as its own top-level window.
+/// Presenting it is a content swap on the already-visible host — flash-free — and it floats over the live
+/// map backdrop the stage draws. A title, a one-line explanation, and a text box; Enter (or the confirm
+/// button) hands the trimmed text (never empty) to <c>onConfirm</c>, then returns to where the chain
+/// started via <see cref="OverlayStage.CompleteToBase"/>. The stage-content sibling of
+/// <see cref="PaletteContent"/>; the card reads as the same surface family.
 ///
 /// Like the map and move — and unlike the palettes — it never dismisses on lost focus or a background
-/// click, so a half-typed name can't vanish out from under you. Esc cancels (or returns to <c>onBack</c>).
+/// click, so a half-typed name can't vanish out from under you. Esc steps back one level.
 /// </summary>
 internal sealed class PromptContent : IStageContent
 {
-    // Matches NameDialog / PaletteContent so prompts read as one surface family.
+    // Matches PaletteContent so prompts read as one surface family.
     private static readonly IBrush CardBg = new SolidColorBrush(Color.Parse("#12161F"));
     private static readonly IBrush CardStroke = new SolidColorBrush(Color.Parse("#2A3444"));
     private static readonly IBrush Muted = new SolidColorBrush(Color.Parse("#999"));
 
     private readonly Action<string> _onConfirm;
-    private readonly Action? _onBack; // Esc: return to the surface we opened over (else dismiss the stage)
+    private readonly bool _selectAll;
 
     private readonly TextBox _input;
     private readonly PromptButton _ok;
@@ -36,13 +36,16 @@ internal sealed class PromptContent : IStageContent
     private OverlayStage? _stage;
     private bool _submitted;
 
+    /// <param name="prefill">Seeds the field (the rename flow); null leaves it blank.</param>
+    /// <param name="selectAll">Select the prefilled text on open, so the first keystroke replaces it.</param>
     public PromptContent(string title, string explanation, string placeholder,
-                         Action<string> onConfirm, string confirmLabel = "Save", Action? onBack = null)
+                         Action<string> onConfirm, string confirmLabel = "Save",
+                         string? prefill = null, bool selectAll = false)
     {
         _onConfirm = onConfirm;
-        _onBack = onBack;
+        _selectAll = selectAll;
 
-        _input = new TextBox { PlaceholderText = placeholder };
+        _input = new TextBox { PlaceholderText = placeholder, Text = prefill ?? "" };
         _input.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Submit(); e.Handled = true; } };
 
         _ok = new PromptButton(confirmLabel);
@@ -85,11 +88,17 @@ internal sealed class PromptContent : IStageContent
     // ── IStageContent ────────────────────────────────────────────────────────────
 
     public Control View => _root;
-    public bool Dim => true; // dim backdrop + centred card, like the previewed palettes
+    public StageLayer Layer => StageLayer.Card; // centred card over the live map backdrop
     public bool DismissOnDeactivate => false; // survive a desktop switch / focus loss — never drop a half-typed name
     public bool DismissOnClickAway => false;  // a background click mustn't discard the prompt either
 
-    public void OnPresented(OverlayStage stage) { _stage = stage; _input.Focus(); }
+    public void OnPresented(OverlayStage stage)
+    {
+        _stage = stage;
+        _submitted = false; // re-armed each time we're (re)shown
+        _input.Focus();
+        if (_selectAll) _input.SelectAll(); // rename: first keystroke replaces the prefilled name
+    }
     public void OnRemoved() { }
     public void OnKey(KeyEventArgs e) { } // handled by the _root handlers
 
@@ -119,12 +128,9 @@ internal sealed class PromptContent : IStageContent
         if (n.Length == 0) return; // require a name
         _submitted = true;
         _onConfirm(n);
-        if (_stage?.Current == this) _stage.Dismiss(); // unless onConfirm already swapped in new content
+        // Unless onConfirm swapped in new content, the action is done — return to where the chain started.
+        if (_stage?.Current == this) _stage.CompleteToBase();
     }
 
-    private void Cancel()
-    {
-        if (_onBack is not null) _onBack(); // swaps this out for the surface we came from
-        else _stage?.Dismiss();
-    }
+    private void Cancel() => _stage?.Back(); // step back to the surface we opened over
 }
