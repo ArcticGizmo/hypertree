@@ -30,9 +30,11 @@ public enum HotkeyModifiers
 }
 
 /// <summary>
-/// The trigger key of a hotkey. The keys Hypertree binds today — the four arrows (the depth and
-/// within-level axes), Space (map toggle) and P (the spotlight / command palettes). Kept as an enum,
-/// not a raw VK, so Core stays OS-agnostic; the Windows layer maps these to virtual-key codes.
+/// The trigger key of a hotkey. Covers the rebinding surface Hypertree offers — the four arrows (the
+/// depth and within-level axes), Space, the letters, the top-row digits and the function keys. Kept as
+/// an enum, not a raw VK, so Core stays OS-agnostic; the Windows layer maps these to virtual-key codes.
+/// The member order matters: the letter / digit / function-key ranges are contiguous so the platform
+/// layer can map them arithmetically. Don't reorder without updating <c>GlobalHotkey.VirtualKey</c>.
 /// </summary>
 public enum HotkeyKey
 {
@@ -41,6 +43,13 @@ public enum HotkeyKey
     ArrowLeft,
     ArrowRight,
     Space,
-    P,
-    M,
+
+    // Letters A–Z (contiguous).
+    A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
+
+    // Top-row digits 0–9 (contiguous).
+    D0, D1, D2, D3, D4, D5, D6, D7, D8, D9,
+
+    // Function keys F1–F12 (contiguous).
+    F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
 }

@@ -86,6 +86,8 @@ public sealed class GlobalHotkey : IGlobalHotkey
         return registered;
     }
 
+    // Map the OS-agnostic key to a Win32 virtual-key code. The letter / digit / function-key ranges are
+    // contiguous in both HotkeyKey and the VK space, so they map by offset (see HotkeyKey's member order).
     private static uint VirtualKey(HotkeyKey key) => key switch
     {
         HotkeyKey.ArrowLeft  => 0x25,
@@ -93,8 +95,9 @@ public sealed class GlobalHotkey : IGlobalHotkey
         HotkeyKey.ArrowRight => 0x27,
         HotkeyKey.ArrowDown  => 0x28,
         HotkeyKey.Space      => 0x20,
-        HotkeyKey.P          => 0x50,
-        HotkeyKey.M          => 0x4D,
+        >= HotkeyKey.A  and <= HotkeyKey.Z   => (uint)(0x41 + (key - HotkeyKey.A)),   // VK_A..VK_Z
+        >= HotkeyKey.D0 and <= HotkeyKey.D9  => (uint)(0x30 + (key - HotkeyKey.D0)),  // VK_0..VK_9
+        >= HotkeyKey.F1 and <= HotkeyKey.F12 => (uint)(0x70 + (key - HotkeyKey.F1)),  // VK_F1..VK_F12
         _ => throw new ArgumentOutOfRangeException(nameof(key)),
     };
 

@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using Hypertree.Platform;
 
 namespace Hypertree.Settings;
 
@@ -6,19 +8,12 @@ namespace Hypertree.Settings;
 /// User-tunable settings, persisted to <c>%APPDATA%\hypertree\settings.json</c>. Kept behind
 /// <see cref="ISettingsStore"/> so tests / non-Windows heads can swap in a fake. (Start-on-login is
 /// NOT stored here — the OS registry is its source of truth; see <c>IStartupManager</c>.)
+///
+/// The navigation flash is no longer configurable — its hold-to-keep behaviour and timings are fixed
+/// constants in <c>HudWindow</c>.
 /// </summary>
 public sealed class AppSettings
 {
-    /// <summary>When true the navigation flash stays up while Ctrl+Alt is held and fades a short beat
-    /// after release; when false it shows for a fixed <see cref="FlashTimeoutMs"/> then hides.</summary>
-    public bool FlashHoldToKeep { get; set; } = true;
-
-    /// <summary>Grace after releasing Ctrl+Alt before the flash hides (hold-to-keep mode).</summary>
-    public int FlashGraceMs { get; set; } = 100;
-
-    /// <summary>Fixed on-screen time for the flash when hold-to-keep is off.</summary>
-    public int FlashTimeoutMs { get; set; } = 1500;
-
     /// <summary>When true a persistent pill sits over the bottom of the primary screen naming the
     /// desktop you're on (prefixed with the branch name, in the branch's colour, when inside a branch).
     /// It auto-hides while the cursor is near it so the taskbar underneath stays clickable.</summary>
@@ -28,6 +23,19 @@ public sealed class AppSettings
     /// don't retype the desktop set each time. Empty by default — you build and delete them in the
     /// "Manage templates…" command.</summary>
     public List<BranchTemplate> BranchTemplates { get; set; } = new();
+
+    /// <summary>User overrides for the global hotkeys. Only commands the user has rebound are stored;
+    /// everything else resolves to <see cref="Hotkeys.Defaults"/>. See <see cref="ResolveHotkeys"/>.</summary>
+    public List<HotkeyBinding> HotkeyBindings { get; set; } = new();
+
+    /// <summary>The effective chord for every command: the built-in defaults overlaid with the stored
+    /// overrides. This is what the composition root registers with the OS.</summary>
+    public IReadOnlyDictionary<HotkeyCommand, HotkeyChord> ResolveHotkeys()
+    {
+        var map = new Dictionary<HotkeyCommand, HotkeyChord>(Hotkeys.Defaults);
+        foreach (HotkeyBinding b in HotkeyBindings) map[b.Command] = new HotkeyChord(b.Modifiers, b.Key);
+        return map;
+    }
 }
 
 /// <summary>
@@ -51,7 +59,13 @@ public interface ISettingsStore
 /// </summary>
 public sealed class FileSettingsStore : ISettingsStore
 {
-    private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
+    // String-based enum serialization keeps hotkey bindings readable in settings.json (e.g.
+    // "Control, Alt" / "ArrowDown" rather than opaque integers).
+    private static readonly JsonSerializerOptions Options = new()
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter() },
+    };
 
     public string Path { get; }
 

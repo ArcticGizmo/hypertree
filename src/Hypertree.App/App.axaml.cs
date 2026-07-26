@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -21,18 +20,17 @@ namespace Hypertree.App;
 /// </summary>
 public sealed class App : Application
 {
-    // Ctrl+Alt+Arrow — the default layer from M0 (Win+Ctrl+Arrow is the native desktop switch).
-    // Down = dive, Up = surface, Left/Right = within the current level.
-    private const HotkeyModifiers Mods = HotkeyModifiers.Control | HotkeyModifiers.Alt;
-    private static readonly (HotkeyKey key, NavAction action)[] Bindings =
-    {
-        (HotkeyKey.ArrowDown,  NavAction.Dive),
-        (HotkeyKey.ArrowUp,    NavAction.Surface),
-        (HotkeyKey.ArrowLeft,  NavAction.MoveLeft),
-        (HotkeyKey.ArrowRight, NavAction.MoveRight),
-    };
-    private const HotkeyKey PaletteKey = HotkeyKey.P; // Ctrl+Alt+P — command palette (spotlight/jump lives inside it)
-    private const HotkeyKey MoveKey = HotkeyKey.M;    // Ctrl+Alt+M — the "move windows to another desktop" flow
+    // Which NavAction each navigation command drives. The chords themselves are resolved from settings
+    // (defaults: Ctrl+Alt+Arrow — the M0 layer, since Win+Ctrl+Arrow is the native desktop switch) and
+    // are rebindable in the settings window.
+    private static readonly IReadOnlyDictionary<HotkeyCommand, NavAction> NavCommands =
+        new Dictionary<HotkeyCommand, NavAction>
+        {
+            [HotkeyCommand.Dive]      = NavAction.Dive,
+            [HotkeyCommand.Surface]   = NavAction.Surface,
+            [HotkeyCommand.MoveLeft]  = NavAction.MoveLeft,
+            [HotkeyCommand.MoveRight] = NavAction.MoveRight,
+        };
 
     private readonly List<IGlobalHotkey> _hotkeys = new();
     // Desktops Hypertree created (for branches). Only these are ever torn down — the top row is the
@@ -52,11 +50,13 @@ public sealed class App : Application
     private ISettingsStore? _settingsStore;
     private ISnapshotStore? _snapshots;
     private AppSettings _settings = new();
+    private bool _shuttingDown; // set in Teardown so the settings-window Closed handler doesn't re-register hotkeys
 
     // "Last visited" = the desktop you came from, committed when a navigation completes (Ctrl+Alt
     // released) or on a discrete jump. Surfaced first in the jump palette so you can hop back.
     private DesktopId? _lastVisited;
     private DesktopId? _gestureFrom; // where the in-progress keyboard gesture started
+    private HotkeyModifiers _gestureMods; // the modifiers of the in-progress gesture's chord (watched for release)
     private DispatcherTimer? _gesturePoll;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
@@ -99,12 +99,20 @@ public sealed class App : Application
         // teardown guard still only ever destroys our own desktops.
         foreach (DesktopId id in _model.BranchDesktopIds()) _created.Add(id.Value);
 
-        _settingsStore = new FileSettingsStore();
+        var settingsStore = new FileSettingsStore();
+        // First run = no settings file yet. Hypertree defaults to launching at login; we enable it and
+        // write the settings file so this one-time default doesn't re-assert if the user later opts out.
+        bool firstRun = !System.IO.File.Exists(settingsStore.Path);
+        _settingsStore = settingsStore;
         _settings = _settingsStore.Load();
         _snapshots = new FileSnapshotStore();
+        if (firstRun)
+        {
+            _startup.SetEnabled(true);
+            _settingsStore.Save(_settings);
+        }
 
         _hud = new HudWindow();
-        ApplyFlashSettings();
 
         // Persistent desktop-name pill over the taskbar. It re-reads the current desktop itself, but we
         // also poke it on every navigation so it never lags a keystroke.
@@ -139,45 +147,56 @@ public sealed class App : Application
         BuildTray();
     }
 
+    // Register every command's current chord (defaults overlaid with the user's rebindings). Called at
+    // startup and again when the settings window closes (resuming after SuspendHotkeys), picking up rebinds.
     private void RegisterHotkeys()
     {
-        foreach (var (key, action) in Bindings)
+        foreach ((HotkeyCommand cmd, HotkeyChord chord) in _settings.ResolveHotkeys())
         {
             var hk = PlatformServices.CreateGlobalHotkey();
-            bool ok = hk.Register(Mods, key, () => Dispatcher.UIThread.Post(() => Navigate(action)));
-            if (ok) _hotkeys.Add(hk);
-            else { hk.Dispose(); Console.Error.WriteLine($"Hotkey Ctrl+Alt+{key} was refused by the OS."); }
+            Action onPressed = ActionFor(cmd, chord.Modifiers);
+            if (hk.Register(chord.Modifiers, chord.Key, () => Dispatcher.UIThread.Post(onPressed))) _hotkeys.Add(hk);
+            else { hk.Dispose(); Console.Error.WriteLine($"Hotkey {chord.Display()} ({cmd}) was refused by the OS."); }
         }
+    }
 
-        // Ctrl+Alt+P — command palette. (The spotlight/jump is still reachable from there via the
-        // "Jump to desktop…" command.)
-        var cmdHk = PlatformServices.CreateGlobalHotkey();
-        if (cmdHk.Register(Mods, PaletteKey, () => Dispatcher.UIThread.Post(ToggleCommandPalette))) _hotkeys.Add(cmdHk);
-        else { cmdHk.Dispose(); Console.Error.WriteLine("Hotkey Ctrl+Alt+P (command palette) was refused by the OS."); }
+    // What each command does when its chord fires. Navigation carries the chord's modifiers so the flash
+    // knows which keys to watch for the hold-to-keep release (they're rebindable, not always Ctrl+Alt).
+    private Action ActionFor(HotkeyCommand cmd, HotkeyModifiers mods) => cmd switch
+    {
+        HotkeyCommand.CommandPalette => ToggleCommandPalette,
+        HotkeyCommand.MoveWindows    => ToggleMoveWindows,
+        _ when NavCommands.TryGetValue(cmd, out NavAction action) => () => Navigate(action, mods),
+        _ => () => { },
+    };
 
-        // Ctrl+Alt+M — move the current desktop's windows to another desktop.
-        var moveHk = PlatformServices.CreateGlobalHotkey();
-        if (moveHk.Register(Mods, MoveKey, () => Dispatcher.UIThread.Post(ToggleMoveWindows))) _hotkeys.Add(moveHk);
-        else { moveHk.Dispose(); Console.Error.WriteLine("Hotkey Ctrl+Alt+M (move windows) was refused by the OS."); }
+    // Unregister every global hotkey (each IGlobalHotkey owns a message-loop thread; Dispose posts WM_QUIT
+    // to unwind it). Used to suspend hotkeys while the settings window is open; RegisterHotkeys resumes them.
+    private void SuspendHotkeys()
+    {
+        foreach (IGlobalHotkey hk in _hotkeys) hk.Dispose();
+        _hotkeys.Clear();
     }
 
     // Navigate. While the map overlay is open it stays open (its windows are pinned across the
     // desktop switch) and re-homes its selection onto the desktop we land on; otherwise the flash shows.
-    private void Navigate(NavAction action)
+    // <paramref name="mods"/> is the chord's modifier layer — the flash holds while these are down.
+    private void Navigate(NavAction action, HotkeyModifiers mods)
     {
         if (_model is null || _desktops is null) return;
         // The move flow owns the arrows while it's up (its own plain-arrow handlers drive it), so an
-        // out-of-habit Ctrl+Alt+Arrow mustn't also navigate underneath.
+        // out-of-habit nav chord mustn't also navigate underneath.
         if (_stage?.Current is MoveContent) return;
-        // Start of a gesture: remember where we came from, so releasing Ctrl+Alt can record it as
-        // "last visited". A poll watches for the release (works whether flashing or in the map).
+        // Start of a gesture: remember where we came from (and which modifiers to watch), so releasing
+        // them can record it as "last visited". A poll watches for the release (flashing or in the map).
         _gestureFrom ??= _desktops.Current;
+        _gestureMods = mods;
         _model.Apply(action);
-        // In the map, Ctrl+Alt+Arrow switches for real, so the selection follows onto the new desktop
+        // In the map, the nav chord switches for real, so the selection follows onto the new desktop
         // (green "here" and blue selection rejoin); in the transient flash, the green outline marks the
         // gesture's origin so the jump's direction/distance reads at a glance.
         if (_overlay is { IsOpen: true }) _overlay.SyncToCurrent(_model.BuildMap());
-        else _hud?.Flash(_model.BuildMap(_gestureFrom));
+        else _hud?.Flash(_model.BuildMap(_gestureFrom), mods);
         StartGesturePoll();
     }
 
@@ -197,7 +216,7 @@ public sealed class App : Application
         if (_gesturePoll is null)
         {
             _gesturePoll = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(80) };
-            _gesturePoll.Tick += (_, _) => { if (!CtrlAltHeld()) CompleteGesture(); };
+            _gesturePoll.Tick += (_, _) => { if (!ModifierKeys.ModifiersHeld(_gestureMods)) CompleteGesture(); };
         }
         if (!_gesturePoll.IsEnabled) _gesturePoll.Start();
     }
@@ -222,11 +241,6 @@ public sealed class App : Application
         if (_desktops.Current != from) _lastVisited = from;
         _stage?.Dismiss();
     }
-
-    private const int VK_CONTROL = 0x11, VK_MENU = 0x12;
-    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vKey);
-    private static bool CtrlAltHeld()
-        => (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
 
     private void ToggleMap()
     {
@@ -525,6 +539,9 @@ public sealed class App : Application
             // move-windows is triggered from the map ("m") or Ctrl+Alt+M, not from here.
             // Save / restore / reset the whole desktop+branch arrangement — one manager for all three.
             new("Layouts…", LayoutsPrompt),
+            // Quit Hypertree — behind a confirm (see ExitHypertree), since it's easy to land on while
+            // typing/navigating the palette (unlike the deliberate tray menu item).
+            new("Exit Hypertree", ExitHypertree),
         };
     }
 
@@ -730,26 +747,35 @@ public sealed class App : Application
         if (_activator is null || _startup is null) return;
         if (_settingsWindow is not null) { _settingsWindow.Activate(); return; }
 
+        // Suspend the global hotkeys while settings is open so the rebind capture reads keystrokes cleanly
+        // (an active chord like Ctrl+Alt+P mustn't fire its command while the user is pressing it to rebind).
+        // They're re-registered from the (possibly changed) bindings when the window closes.
+        SuspendHotkeys();
+
         _settingsWindow = new SettingsWindow(_settings, _startup.IsEnabled, SaveSettings, _activator);
         _settingsWindow.Topmost = true; // sit above the map/flash if one is showing
-        // Settings is the one surface that's still its own window; when it closes, hand the stage its key
-        // focus back so an underlying map's arrow selection resumes.
-        _settingsWindow.Closed += (_, _) => { _settingsWindow = null; _stage?.Reassert(); };
+        // Settings is the one surface that's still its own window; when it closes, re-register the hotkeys
+        // (picking up any rebind) and hand the stage its key focus back so an underlying map resumes.
+        _settingsWindow.Closed += (_, _) =>
+        {
+            _settingsWindow = null;
+            if (_shuttingDown) return; // teardown already unregistered; don't resurrect the hotkey threads
+            RegisterHotkeys();
+            _stage?.Reassert();
+        };
         _settingsWindow.Show();
         _settingsWindow.TakeFocus();
     }
 
+    // Save applies the settings but leaves re-registration to the window's Closed handler (which fires for
+    // both Save and Cancel), so the hotkeys are suspended for exactly as long as the window is open.
     private void SaveSettings(AppSettings settings, bool startOnLogin)
     {
         _settings = settings;
         _settingsStore?.Save(settings);
-        ApplyFlashSettings();
         ApplyTaskbarLabel();
         _startup?.SetEnabled(startOnLogin);
     }
-
-    private void ApplyFlashSettings()
-        => _hud?.Configure(_settings.FlashHoldToKeep, _settings.FlashGraceMs, _settings.FlashTimeoutMs);
 
     // Show or hide the persistent taskbar label to match the setting.
     private void ApplyTaskbarLabel()
@@ -776,20 +802,43 @@ public sealed class App : Application
         if (_model is null) return;
         NavMap map = _model.BuildMap();
         if (_stage is not null && _stage.HasDurableBase) _overlay?.SetBoard(map);
-        else _hud?.Flash(map);
+        else _hud?.Flash(map, HotkeyModifiers.None); // a result flash, not a gesture — just times out
+    }
+
+    // The product version for the tray header, read from the assembly (set by <Version> in the csproj) so
+    // it never drifts from the real build. Trims any "+commit" build metadata the SDK may append.
+    private static string AppVersion =>
+        (System.Reflection.Assembly.GetExecutingAssembly()
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            is [System.Reflection.AssemblyInformationalVersionAttribute attr, ..]
+            ? attr.InformationalVersion.Split('+')[0]
+            : "0.1.0");
+
+    // Exit from the command palette, behind a confirm. On confirm we dismiss the overlay FIRST so it
+    // vanishes immediately, then post the shutdown so it runs after the stage has painted itself away —
+    // otherwise the full-screen overlay lingers on screen through teardown and the close reads as sluggish
+    // next to the tray's Exit (which has nothing showing when it fires).
+    private void ExitHypertree()
+    {
+        _stage?.Present(new ConfirmContent(
+            "Exit Hypertree?\nYour desktops and branches are left exactly as they are — only Hypertree closes.",
+            () =>
+            {
+                _stage?.Dismiss();
+                Dispatcher.UIThread.Post(() =>
+                    (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown());
+            },
+            confirmLabel: "Exit"));
     }
 
     private void BuildTray()
     {
-        var header = new NativeMenuItem("Hypertree 0.1.0") { IsEnabled = false };
-        var map = new NativeMenuItem("Open map");
-        map.Click += (_, _) => ToggleMap();
-        var move = new NativeMenuItem("Move windows…");
-        move.Click += (_, _) => ToggleMoveWindows();
-        var newBranch = new NativeMenuItem("New branch…");
-        newBranch.Click += (_, _) => PromptNewBranch();
-        var settings = new NativeMenuItem("Settings…");
-        settings.Click += (_, _) => OpenSettings();
+        // Right-click menu: a disabled version header, the two entry points, then Exit (also in the palette).
+        var header = new NativeMenuItem($"Hypertree {AppVersion}") { IsEnabled = false };
+        var palette = new NativeMenuItem("Open command palette");
+        palette.Click += (_, _) => Dispatcher.UIThread.Post(OpenCommandPalette);
+        var settings = new NativeMenuItem("Open settings");
+        settings.Click += (_, _) => Dispatcher.UIThread.Post(OpenSettings);
         var exit = new NativeMenuItem("Exit");
         exit.Click += (_, _) => (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
 
@@ -798,8 +847,10 @@ public sealed class App : Application
             Icon = TrayIconFactory.Create(),
             ToolTipText = "Hypertree",
             IsVisible = true,
-            Menu = new NativeMenu { header, new NativeMenuItemSeparator(), map, move, newBranch, settings, new NativeMenuItemSeparator(), exit },
+            Menu = new NativeMenu { header, new NativeMenuItemSeparator(), palette, settings, new NativeMenuItemSeparator(), exit },
         };
+        // Left-click the tray icon → open the command palette (the app's main entry point).
+        _tray.Clicked += (_, _) => Dispatcher.UIThread.Post(ToggleCommandPalette);
         TrayIcon.SetIcons(this, new TrayIcons { _tray });
     }
 
@@ -1020,9 +1071,9 @@ public sealed class App : Application
 
     private void Teardown()
     {
+        _shuttingDown = true; // stop the settings window's Closed handler from re-registering hotkeys on exit
         _gesturePoll?.Stop();
-        foreach (var hk in _hotkeys) hk.Dispose();
-        _hotkeys.Clear();
+        SuspendHotkeys();
         if (_tray is not null) _tray.IsVisible = false;
         _stage?.Close(); // closes the shared host + dims (map / palettes / prompts / move all live here)
         _hud?.Close();
