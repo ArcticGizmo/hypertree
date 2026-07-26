@@ -165,6 +165,11 @@ public sealed class App : Application
         RegisterHotkeys();
         BuildTray();
 
+        // Launching Hypertree again (a re-clicked shortcut, the start-menu entry, a second login task) doesn't
+        // start a rival copy — that launch signals us and exits. Answer the way a tray click does: open the
+        // command palette, which both serves the intent and makes it obvious we were here all along.
+        Program.Instance?.OnActivated(() => Dispatcher.UIThread.Post(OpenCommandPalette));
+
         // Pop the "what's new" window once everything else is up, so it lands over a fully-drawn tray rather
         // than racing startup. Background priority keeps it from delaying the first paint.
         if (_pendingChangelog is { Count: > 0 } changelog)

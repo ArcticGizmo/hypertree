@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.1.1] - 2026-07-26
+
+### Changed
+
+- One Hypertree per session — a second launch opens the running copy's command palette instead of starting a rival.
+
+---
+
 ## [v0.1.0] - 2026-07-26
 
 The first cut of Hypertree — virtual desktops you can dive into and surface out of.

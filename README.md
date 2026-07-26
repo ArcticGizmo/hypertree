@@ -84,6 +84,7 @@ reserves for its own desktop switch.)
 
 - Lives in the system tray: **left-click** for the command palette, **right-click** for the menu, with the running version in the header.
 - Settings covers **start-on-login**, the **desktop-name pill**, **rebinding every hotkey** (click a shortcut, press the new combination), and the changelog options.
+- **One copy at a time** — launching Hypertree again while it's already in the tray opens the running one's command palette instead of starting a rival that would fight it for the hotkeys.
 - Branches, layouts, and settings persist under `%APPDATA%\hypertree`; a missing or corrupt file falls back to defaults rather than blocking startup.
 
 ## Running it
