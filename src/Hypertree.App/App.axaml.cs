@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
+using Hypertree.App.Updates;
 using Hypertree.App.Views;
 using Hypertree.Changelog;
 using Hypertree.Desktops;
@@ -56,6 +57,9 @@ public sealed class App : Application
     // tray/HUD are up. Null when there's nothing to show (fresh install, same version, or feature off).
     private IReadOnlyList<ChangelogSection>? _pendingChangelog;
     private bool _shuttingDown; // set in Teardown so the settings-window Closed handler doesn't re-register hotkeys
+    // The most recent update check, remembered so the command palette can offer "Update now" directly
+    // (skipping a re-check) once a newer release has been found.
+    private UpdateCheckResult? _lastUpdate;
 
     // "Last visited" = the desktop you came from, committed when a navigation completes (Ctrl+Alt
     // released) or on a discrete jump. Surfaced first in the jump palette so you can hop back.
@@ -579,11 +583,19 @@ public sealed class App : Application
         // the move flow) become the current surface, so PaletteContent.Choose sees the palette is no longer
         // current and leaves the chain in place (Esc pops back through it). Terminal commands leave the
         // palette current, so Choose unwinds to the start. Either way, no flash — one surface throughout.
+        // When the last check found a newer release, the palette offers to apply it directly ("Update
+        // now — vX") instead of re-checking; otherwise it's a plain "Check for updates".
+        bool updateReady = _lastUpdate is { Availability: UpdateAvailability.Available };
+        var update = updateReady
+            ? new Command($"Update now — v{_lastUpdate!.AvailableVersion}", ApplyLastUpdate)
+            : new Command("Check for updates", CheckForUpdates);
+
         return new List<Command>
         {
             new("Jump to desktop…", OpenSpotlight), // pushed over the command palette; Esc pops back to it
             new("Open map", ToggleMap),
             new("Settings", OpenSettings),
+            update,
             new("New branch…", PromptNewBranch),
             // Create, preview and delete branch templates — always available (you can create the first one from here).
             new("Manage templates…", ManageTemplatesPrompt),
@@ -847,6 +859,78 @@ public sealed class App : Application
         return (branch, label);
     }
 
+    // ── Software updates (tray · command palette · settings) ─────────────────────────
+
+    // Entry point for the tray item and the command palette's "Check for updates". Pops a "Checking…"
+    // card on the stage, runs the check, then swaps in the result — an "Update now" confirm when a newer
+    // release exists, or an informational notice otherwise.
+    private void CheckForUpdates()
+    {
+        var progress = new NoticeContent("Checking for updates…", dismissLabel: null);
+        _stage?.Summon(progress);
+        _ = ResolveUpdateAsync(progress);
+    }
+
+    private async Task ResolveUpdateAsync(NoticeContent progress)
+    {
+        UpdateCheckResult result;
+        try { result = await UpdateChecker.CheckDetailedAsync().ConfigureAwait(false); }
+        catch { result = new UpdateCheckResult { Availability = UpdateAvailability.Failed }; }
+
+        OnUi(() =>
+        {
+            _lastUpdate = result;
+            // If the user dismissed the progress card (Esc / click-away) while we were checking, leave the
+            // stage alone — _lastUpdate is still recorded, so the palette can offer "Update now" later.
+            if (_stage?.Current != progress) return;
+            _stage.ReplaceTop(1, UpdateResultCard(result));
+        });
+    }
+
+    // The stage card for a finished check: an actionable confirm when an update is available, else a
+    // single-button notice explaining the state.
+    private IStageContent UpdateResultCard(UpdateCheckResult result) => result.Availability switch
+    {
+        UpdateAvailability.Available => new ConfirmContent(
+            $"Update available: v{result.AvailableVersion}\nYou’re on v{result.CurrentVersion}. Download it and restart Hypertree now?",
+            ApplyLastUpdate, confirmLabel: "Update now"),
+        UpdateAvailability.UpToDate => new NoticeContent(
+            $"You’re up to date.\nHypertree v{result.CurrentVersion} is the latest release."),
+        UpdateAvailability.NotApplicable => new NoticeContent(
+            "Update checks only run in an installed build.\nThis looks like a dev build — install Hypertree from a GitHub release and it’ll check for updates automatically."),
+        _ => new NoticeContent(
+            "Couldn’t check for updates.\nThe update feed was unreachable — check your connection and try again."),
+    };
+
+    // The command palette's "Update now" and the "Update available" confirm both land here: dismiss the
+    // overlay, then download + install (which restarts the app on success).
+    private void ApplyLastUpdate()
+    {
+        if (_lastUpdate is not { Availability: UpdateAvailability.Available } pending) return;
+        _stage?.Dismiss();
+        _ = ApplyUpdateAsync(pending);
+    }
+
+    private async Task ApplyUpdateAsync(UpdateCheckResult pending)
+    {
+        try { await UpdateChecker.ApplyAsync(pending).ConfigureAwait(false); }
+        catch
+        {
+            // Download/apply failed (network, locked files). The check handles are now spent, so drop the
+            // remembered result and surface the failure rather than leaving a stale "Update now" around.
+            OnUi(() => { _lastUpdate = null; _stage?.Summon(UpdateResultCard(new UpdateCheckResult { Availability = UpdateAvailability.Failed })); });
+        }
+        // On success the process restarts and never returns here.
+    }
+
+    // Run <paramref name="action"/> on the UI thread. The update continuations resume off a background
+    // thread (ConfigureAwait(false)), so every stage/field touch is marshalled back through here.
+    private static void OnUi(Action action)
+    {
+        if (Dispatcher.UIThread.CheckAccess()) action();
+        else Dispatcher.UIThread.Post(action);
+    }
+
     // Show the result of an action that completed on a card: if the chain returns to the map (its durable
     // base), prime the map so it redraws when the stage unwinds to it; otherwise the stage will dismiss, so
     // flash the result over the bare desktop instead.
@@ -892,6 +976,8 @@ public sealed class App : Application
         palette.Click += (_, _) => Dispatcher.UIThread.Post(OpenCommandPalette);
         var settings = new NativeMenuItem("Open settings");
         settings.Click += (_, _) => Dispatcher.UIThread.Post(OpenSettings);
+        var update = new NativeMenuItem("Check for updates");
+        update.Click += (_, _) => Dispatcher.UIThread.Post(CheckForUpdates);
         var exit = new NativeMenuItem("Exit");
         exit.Click += (_, _) => (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
 
@@ -900,7 +986,7 @@ public sealed class App : Application
             Icon = TrayIconFactory.Create(),
             ToolTipText = "Hypertree",
             IsVisible = true,
-            Menu = new NativeMenu { header, new NativeMenuItemSeparator(), palette, settings, new NativeMenuItemSeparator(), exit },
+            Menu = new NativeMenu { header, new NativeMenuItemSeparator(), palette, settings, update, new NativeMenuItemSeparator(), exit },
         };
         // Left-click the tray icon → open the command palette (the app's main entry point).
         _tray.Clicked += (_, _) => Dispatcher.UIThread.Post(ToggleCommandPalette);

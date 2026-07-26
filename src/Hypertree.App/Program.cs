@@ -1,4 +1,5 @@
 using Avalonia;
+using Velopack;
 
 namespace Hypertree.App;
 
@@ -8,7 +9,13 @@ internal static class Program
     // interop) on this thread, and the tray/windows need it.
     [STAThread]
     public static void Main(string[] args)
-        => BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    {
+        // Velopack install/update lifecycle hook — must run before anything else. No-op unless
+        // launched with the special --veloapp-* hook args (i.e. during install/update).
+        VelopackApp.Build().Run();
+
+        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    }
 
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()

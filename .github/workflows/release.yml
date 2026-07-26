@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+# Tag-triggered Velopack release. hypertree is Windows-only, so one job builds, packs, and
+# publishes the GitHub Release. Mirrors ../sprig's release pipeline.
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Install vpk CLI
+        run: dotnet tool install -g vpk
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=$($env:GITHUB_REF_NAME -replace '^v','')" >> $env:GITHUB_OUTPUT
+
+      - name: Publish
+        run: |
+          dotnet publish src/Hypertree.App/Hypertree.App.csproj -c Release -r win-x64 --self-contained true `
+            -p:Version=${{ steps.version.outputs.VERSION }} `
+            -o publish/
+
+      - name: Pack with Velopack
+        run: >
+          vpk pack
+          --packId Hypertree
+          --packTitle "Hypertree"
+          --packVersion ${{ steps.version.outputs.VERSION }}
+          --packDir publish/
+          --mainExe hypertree.exe
+          --icon src/Hypertree.App/Assets/icon.ico
+          --outputDir releases/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: releases/*
+          generate_release_notes: true

@@ -36,6 +36,9 @@
     <PackageReference Include="Avalonia.Desktop" Version="12.0.5" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.5" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.5" />
+    <!-- Velopack packs the tag-triggered release installer (see .github/workflows/release.yml) and
+         runs the install/update lifecycle hooks via VelopackApp.Build().Run() at startup. -->
+    <PackageReference Include="Velopack" Version="1.2.0" />
   </ItemGroup>
 
   <ItemGroup>

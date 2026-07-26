@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -7,6 +8,7 @@ using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using Hypertree.App.Updates;
 using Hypertree.Changelog;
 using Hypertree.Platform;
 using Hypertree.Settings;
@@ -45,6 +47,14 @@ internal sealed class SettingsWindow : Window
     private readonly TextBlock _hotkeyHint;
     private HotkeyCommand? _capturing; // the command awaiting a new chord, or null when not capturing
 
+    // Updates section: a status line, the check button, and an install button revealed only once a newer
+    // release has been found (holding the Velopack handles needed to apply it).
+    private readonly TextBlock _updateStatus;
+    private readonly Button _checkUpdate;
+    private readonly Button _installUpdate;
+    private UpdateCheckResult? _pendingUpdate;
+    private bool _updateBusy; // guards against a second check/install while one is in flight
+
     public SettingsWindow(AppSettings settings, bool startOnLogin,
                           Action<AppSettings, bool> onSave, IForegroundActivator activator)
     {
@@ -70,6 +80,20 @@ internal sealed class SettingsWindow : Window
             Foreground = Muted, FontSize = 11, Margin = new Thickness(0, 6, 0, 0),
             Text = "Click a shortcut, then press the new combination (needs a modifier). Esc cancels.",
         };
+
+        _updateStatus = new TextBlock
+        {
+            Foreground = Muted, FontSize = 11, TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(24, 2, 0, 0),
+            Text = "Check whether a newer release of Hypertree is available.",
+        };
+        _checkUpdate = new Button { Content = "Check for updates", HorizontalAlignment = HorizontalAlignment.Right };
+        _checkUpdate.Click += (_, _) => _ = CheckForUpdatesAsync();
+        _installUpdate = new Button
+        {
+            Content = "Download & install", HorizontalAlignment = HorizontalAlignment.Right, IsVisible = false,
+        };
+        _installUpdate.Click += (_, _) => _ = InstallUpdateAsync();
 
         var save = new Button { Content = "Save", IsDefault = true, HorizontalAlignment = HorizontalAlignment.Right };
         save.Click += (_, _) => Commit();
@@ -100,6 +124,10 @@ internal sealed class SettingsWindow : Window
                     Title2("Changelog"),
                     ToggleRow("Show what's new after an update", _showChangelog),
                     ChangelogRow(),
+
+                    Divider(),
+                    Title2("Updates"),
+                    UpdatesRow(),
 
                     new StackPanel
                     {
@@ -318,6 +346,83 @@ internal sealed class SettingsWindow : Window
         };
         window.Show(this);
         window.TakeFocus();
+    }
+
+    // ── Updates ────────────────────────────────────────────────────────────────────
+
+    // A status caption plus the check button, with a "Download & install" button that appears only once a
+    // newer release has been found. Mirrors the tray / command-palette check, kept inline here (like the
+    // changelog row) so Settings is a self-contained place to check.
+    private Control UpdatesRow()
+    {
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children = { _installUpdate, _checkUpdate },
+        };
+        return new StackPanel { Spacing = 6, Children = { _updateStatus, buttons } };
+    }
+
+    private async Task CheckForUpdatesAsync()
+    {
+        if (_updateBusy) return;
+        _updateBusy = true;
+        _checkUpdate.IsEnabled = false;
+        _installUpdate.IsVisible = false;
+        _pendingUpdate = null;
+        SetUpdateStatus("Checking for updates…", Muted);
+
+        UpdateCheckResult result;
+        try { result = await UpdateChecker.CheckDetailedAsync(); }
+        catch { result = new UpdateCheckResult { Availability = UpdateAvailability.Failed }; }
+
+        switch (result.Availability)
+        {
+            case UpdateAvailability.Available:
+                _pendingUpdate = result;
+                _installUpdate.IsVisible = true;
+                SetUpdateStatus($"Update available: v{result.AvailableVersion} (you have v{result.CurrentVersion}).", Accent);
+                break;
+            case UpdateAvailability.UpToDate:
+                SetUpdateStatus($"You’re up to date — v{result.CurrentVersion} is the latest release.", Muted);
+                break;
+            case UpdateAvailability.NotApplicable:
+                SetUpdateStatus("Update checks only run in an installed build — this looks like a dev build. Install Hypertree from a GitHub release and it’ll check automatically.", Muted);
+                break;
+            default:
+                SetUpdateStatus("Couldn’t check for updates — the feed was unreachable. Check your connection and try again.", Warn);
+                break;
+        }
+
+        _checkUpdate.IsEnabled = true;
+        _updateBusy = false;
+    }
+
+    private async Task InstallUpdateAsync()
+    {
+        if (_updateBusy || _pendingUpdate is not { Availability: UpdateAvailability.Available }) return;
+        _updateBusy = true;
+        _installUpdate.IsEnabled = false;
+        _checkUpdate.IsEnabled = false;
+        SetUpdateStatus("Downloading and installing… Hypertree will restart.", Accent);
+
+        try { await UpdateChecker.ApplyAsync(_pendingUpdate); } // restarts the app on success — doesn't return
+        catch
+        {
+            SetUpdateStatus("Update failed — the download or install didn’t complete. Try again.", Warn);
+            _pendingUpdate = null;
+            _installUpdate.IsVisible = false;
+            _installUpdate.IsEnabled = true;
+            _checkUpdate.IsEnabled = true;
+            _updateBusy = false;
+        }
+    }
+
+    private void SetUpdateStatus(string text, IBrush colour)
+    {
+        _updateStatus.Text = text;
+        _updateStatus.Foreground = colour;
     }
 
     // ── Layout helpers ───────────────────────────────────────────────────────────────
