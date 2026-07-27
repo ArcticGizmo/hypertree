@@ -19,6 +19,13 @@ public sealed class AppSettings
     /// It auto-hides while the cursor is near it so the taskbar underneath stays clickable.</summary>
     public bool ShowTaskbarLabel { get; set; } = true;
 
+    /// <summary>When true, a navigation chord pressed while the flash is <i>not</i> on screen only raises
+    /// the flash — it shows you where you are without moving. The next press (still holding the modifiers,
+    /// so the flash is still up) navigates for real. Off means every press moves immediately. On by
+    /// default: landing somewhere first and reading the board afterwards makes it harder to tell where you
+    /// went. See <c>App.Navigate</c>.</summary>
+    public bool DisplayBeforeMoving { get; set; } = true;
+
     /// <summary>Reusable branch recipes, offered via the branch card's "Load from template" button so you
     /// don't retype the desktop set each time. Empty by default — you build and delete them in the
     /// "Manage templates…" command.</summary>

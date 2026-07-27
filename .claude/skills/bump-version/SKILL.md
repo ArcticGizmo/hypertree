@@ -1,6 +1,6 @@
 ---
 name: bump-version
-description: Bump the Hypertree version and refresh the changelog. Determines the next version from the LAST GIT TAG (not the csproj value, which can drift), bumps src/Hypertree.App/Hypertree.App.csproj, backfills changelog sections for any tagged versions that were never documented, summarises every change since the last tag into a new CHANGELOG.md section, clears the Unreleased section, and prints the new version plus its changelog entries. Use when the user says "bump version", "bump the version", "/bump-version", or wants to cut a new release entry.
+description: Bump the Hypertree version and refresh the changelog. Determines the next version from the LAST GIT TAG (not the csproj values, which can drift), bumps both src/Hypertree.App/Hypertree.App.csproj and src/Hypertree.Cli/Hypertree.Cli.csproj, backfills changelog sections for any tagged versions that were never documented, summarises every change since the last tag into a new CHANGELOG.md section, clears the Unreleased section, and prints the new version plus its changelog entries. Use when the user says "bump version", "bump the version", "/bump-version", or wants to cut a new release entry.
 ---
 
 # Bump Version
@@ -9,9 +9,10 @@ Bumps Hypertree to the next patch version and brings `CHANGELOG.md` up to date.
 
 ## Why the tag, not the csproj
 
-The version in `src/Hypertree.App/Hypertree.App.csproj` and the `[Unreleased]` changelog section
-both drift — sometimes a version gets tagged without the csproj or changelog catching up. The
-**last git tag is the source of truth**. Always derive the next version from it.
+The `<Version>` in the csprojs and the `[Unreleased]` changelog section all drift — sometimes a
+version gets tagged without the csprojs or changelog catching up, and the two csprojs can even
+disagree with each other. The **last git tag is the source of truth**. Always derive the next
+version from it, and set both csprojs to it outright rather than incrementing what's there.
 
 ## Steps
 
@@ -26,11 +27,13 @@ echo "LAST_TAG=$LAST_TAG"
 echo "=== all tags (oldest→newest) ==="; git tag --sort=v:refname
 echo "=== new commits on HEAD since $LAST_TAG ==="
 git log $LAST_TAG..HEAD --no-merges --date=short --pretty=format:'%h %ad %s'
+echo; echo "=== current csproj versions (both get bumped) ==="
+grep -H '<Version>' src/Hypertree.App/Hypertree.App.csproj src/Hypertree.Cli/Hypertree.Cli.csproj
 ```
 
 Parse `LAST_TAG` as `vMAJOR.MINOR.PATCH`. The next version is the same with **PATCH + 1**
-(e.g. `v0.1.0` → `v0.1.1`). Call it `$NEXT` (csproj wants it without the `v`, e.g. `0.1.1`).
-If there are no tags at all, fall back to the csproj `<Version>` and bump that, and say so.
+(e.g. `v0.1.0` → `v0.1.1`). Call it `$NEXT` (the csprojs want it without the `v`, e.g. `0.1.1`).
+If there are no tags at all, fall back to the app csproj `<Version>` and bump that, and say so.
 
 **Scope is `HEAD`, deliberately.** Only commits reachable from `HEAD` are releasing. Do **not**
 use `--all` — it drags in unmerged worktree/branch WIP that isn't shipping, which is both
@@ -43,14 +46,20 @@ Skip noise entirely: stash entries (`WIP on…`, `index on…`), pure-WIP commit
 user would never notice. Collapse related commits into the single *net* change they add up to
 (see "What to write" in step 4).
 
-### 2. Bump the csproj
+### 2. Bump both csprojs
 
-Edit the `<Version>` element in `src/Hypertree.App/Hypertree.App.csproj` to `$NEXT` (no `v`
-prefix). Leave everything else untouched — set it to `$NEXT` regardless of its current value.
+Hypertree ships **two** binaries, each carrying its own `<Version>`. Set both to `$NEXT` (no `v`
+prefix), regardless of what they currently say, and leave everything else in the files untouched:
 
-That one element is the whole version story: the tray header, the settings page, and the
-post-update "what's new" check all read it back off the assembly at runtime (`App.AppVersion`),
-so there is no second place to update.
+- `src/Hypertree.App/Hypertree.App.csproj` — the tray app (`hypertree.exe`). The tray header, the
+  settings page, and the post-update "what's new" check all read it back off the assembly at
+  runtime (`App.AppVersion`).
+- `src/Hypertree.Cli/Hypertree.Cli.csproj` — the command line (`htree.exe`). `htree --version` and
+  the help header read it off the assembly the same way (`Program.Version`).
+
+They ship together and install together, so **the two must never disagree** — a user running
+`htree --version` against a tray on a different number has no way to tell which is right. Check
+both files even when one already looks correct; they drift independently.
 
 ### 3. Backfill any missing tagged versions
 
@@ -134,16 +143,17 @@ section.
 Print, plainly:
 
 - The next version number (e.g. `v0.1.1`).
+- That both csprojs were set to it (naming them), and what each was on before.
 - The exact changelog entries you wrote for that version.
 - If you backfilled any missing tagged versions, list which ones and show their entries too.
 
 ## Notes
 
-- This skill does **not** commit, tag, or push — it only edits the two files and reports.
+- This skill does **not** commit, tag, or push — it only edits the three files and reports.
 - Releases are cut by **pushing a `v*` tag**, which triggers `.github/workflows/release.yml`
-  (Velopack build → GitHub Release). So the flow is: run this skill, commit the two files, then
+  (Velopack build → GitHub Release). So the flow is: run this skill, commit the three files, then
   tag `v$NEXT` and push the tag when you're ready to release.
-- The tag must match the csproj version. Installed copies compare their assembly version against
+- The tag must match the csproj versions. Installed copies compare their assembly version against
   the release feed, so a tag that disagrees with `<Version>` makes the update check misreport.
 - Only the patch component is bumped. If the user wants a minor/major bump, they'll say so —
   follow their instruction instead of auto-incrementing patch.

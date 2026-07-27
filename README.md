@@ -37,6 +37,7 @@ them structure and a fast way to move between them.
 - **`Ctrl+Alt+↓` / `Ctrl+Alt+↑`** dive into and surface out of the branch below where you are.
 - **`Ctrl+Alt+←` / `Ctrl+Alt+→`** move along the current row.
 - Each jump **flashes the map** and holds it while you keep the chord down, so you see the move before it fades. Hypertree remembers where you came from and floats it to the top of the jump list, so hopping back is one keystroke.
+- By default the **first press just brings the board up** — you look before you leap. Keep the modifiers held and press again to move. Turn it off in **Settings → Navigation**.
 
 (Every shortcut is rebindable — the defaults avoid `Win+Ctrl+Arrow`, which Windows
 reserves for its own desktop switch.)
@@ -47,6 +48,7 @@ reserves for its own desktop switch.)
 
 - Dive / surface / move-left / move-right on `Ctrl+Alt+Arrow`, driving the whole desktop tree from the keyboard.
 - The board flashes on every jump and stays up while the chord is held — a hold-to-keep preview, not a blink.
+- **Show before moving** (on by default): the press that raises the board doesn't also move you, so you get your bearings first; every press after it, while the board is still up, navigates as usual.
 - The desktop you came from is remembered and offered first, so returning is instant.
 
 ### The map
@@ -110,7 +112,7 @@ htree watch             # stream your position as it changes
 ### Settings & tray
 
 - Lives in the system tray: **left-click** for the command palette, **right-click** for the menu, with the running version in the header.
-- Settings covers **start-on-login**, the **desktop-name pill**, **rebinding every hotkey** (click a shortcut, press the new combination), and the changelog options.
+- Settings covers **start-on-login**, the **desktop-name pill**, **show-before-moving**, **rebinding every hotkey** (click a shortcut, press the new combination), and the changelog options.
 - **One copy at a time** — launching Hypertree again while it's already in the tray opens the running one's command palette instead of starting a rival that would fight it for the hotkeys.
 - Branches, layouts, and settings persist under `%APPDATA%\hypertree`; a missing or corrupt file falls back to defaults rather than blocking startup.
 

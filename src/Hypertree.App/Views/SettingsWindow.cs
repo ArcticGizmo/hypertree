@@ -21,9 +21,10 @@ namespace Hypertree.App.Views;
 /// Because a tray/hotkey process is a background process, it force-foregrounds on open via
 /// <see cref="IForegroundActivator"/> so it takes input immediately. Edits apply on Save.
 ///
-/// Startup is the first option (a right-aligned toggle), the desktop label is a matching toggle, and every
-/// global hotkey can be rebound: click a chord and press the new combination. The navigation-flash timings
-/// are no longer configurable (fixed constants in <c>HudWindow</c>).
+/// Startup is the first option (a right-aligned toggle), the desktop label and "show the board before
+/// moving" are matching toggles, and every global hotkey can be rebound: click a chord and press the new
+/// combination. The navigation-flash timings are no longer configurable (fixed constants in
+/// <c>HudWindow</c>).
 /// </summary>
 internal sealed class SettingsWindow : Window
 {
@@ -39,6 +40,7 @@ internal sealed class SettingsWindow : Window
 
     private readonly ToggleSwitch _startOnLogin;
     private readonly ToggleSwitch _showTaskbarLabel;
+    private readonly ToggleSwitch _displayBeforeMoving;
     private readonly ToggleSwitch _showChangelog;
 
     // The working set of chords, edited in place by the rebind capture; committed to overrides on Save.
@@ -77,6 +79,7 @@ internal sealed class SettingsWindow : Window
 
         _startOnLogin = Toggle(startOnLogin);
         _showTaskbarLabel = Toggle(settings.ShowTaskbarLabel);
+        _displayBeforeMoving = Toggle(settings.DisplayBeforeMoving);
         _showChangelog = Toggle(settings.ShowChangelogOnUpdate);
         _hotkeyHint = new TextBlock
         {
@@ -117,6 +120,12 @@ internal sealed class SettingsWindow : Window
                     Divider(),
                     Title2("Desktop label"),
                     ToggleRow("Show the current desktop name over the taskbar", _showTaskbarLabel),
+
+                    Divider(),
+                    Title2("Navigation"),
+                    ToggleRow("Show the board before moving", _displayBeforeMoving),
+                    Hint("The first navigation chord only brings the board up so you can see where you are. "
+                         + "Keep the modifiers held and press again to move."),
 
                     Divider(),
                     Title2("Hotkeys"),
@@ -161,6 +170,7 @@ internal sealed class SettingsWindow : Window
         var settings = new AppSettings
         {
             ShowTaskbarLabel = _showTaskbarLabel.IsChecked ?? true,
+            DisplayBeforeMoving = _displayBeforeMoving.IsChecked ?? true,
             ShowChangelogOnUpdate = _showChangelog.IsChecked ?? true,
             LastSeenVersion = _initial.LastSeenVersion, // stamped at startup, not edited here — carry through
             BranchTemplates = _initial.BranchTemplates, // not edited here — carry through untouched
@@ -449,6 +459,13 @@ internal sealed class SettingsWindow : Window
         grid.Children.Add(toggle);
         return grid;
     }
+
+    // The explanatory line under a toggle, indented to sit with the option it belongs to.
+    private static Control Hint(string text) => new TextBlock
+    {
+        Text = text, Foreground = Muted, FontSize = 11, TextWrapping = TextWrapping.Wrap,
+        Margin = new Thickness(24, -4, 90, 0),
+    };
 
     private static Control Title2(string text) => new TextBlock
     {

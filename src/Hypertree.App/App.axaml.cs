@@ -362,6 +362,8 @@ public sealed class App : Application
     // Navigate. While the map overlay is open it stays open (its windows are pinned across the
     // desktop switch) and re-homes its selection onto the desktop we land on; otherwise the flash shows.
     // <paramref name="mods"/> is the chord's modifier layer — the flash holds while these are down.
+    // With "show before moving" on (the default), the press that raises the flash doesn't also move —
+    // see <see cref="RevealOnly"/>.
     private void Navigate(NavAction action, HotkeyModifiers mods)
     {
         if (_model is null || _desktops is null) return;
@@ -377,7 +379,7 @@ public sealed class App : Application
         // them can record it as "last visited". A poll watches for the release (flashing or in the map).
         _gestureFrom ??= _desktops.Current;
         _gestureMods = mods;
-        _model.Apply(action);
+        if (!RevealOnly()) _model.Apply(action);
         // In the map, the nav chord switches for real, so the selection follows onto the new desktop
         // (green "here" and blue selection rejoin); in the transient flash, the green outline marks the
         // gesture's origin so the jump's direction/distance reads at a glance.
@@ -385,6 +387,14 @@ public sealed class App : Application
         else _hud?.Flash(_model.BuildMap(_gestureFrom), mods);
         StartGesturePoll();
     }
+
+    // "Show before moving": with the setting on, a nav chord that arrives while the flash is off screen
+    // spends itself raising the flash — you read where you are, then keep holding the modifiers and press
+    // again to actually move. Only the cold press is swallowed; once the board is up (which it stays for
+    // as long as the modifiers are held) every press navigates, so a held run of arrows is uninterrupted.
+    // The map is an always-visible surface of its own, so it never needs the reveal press.
+    private bool RevealOnly() =>
+        _settings.DisplayBeforeMoving && _overlay is not { IsOpen: true } && _hud is { IsVisible: false };
 
     // A double-click / arrow-driven jump from the map: switch to the chosen desktop, record where we
     // came from, then re-home the selection onto it (green + blue rejoin), keeping the map open.

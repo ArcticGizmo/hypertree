@@ -9,6 +9,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.2.1] - 2026-07-27
+
+### Added
+
+- **Show the board before moving**, on by default: the first `Ctrl+Alt+Arrow` raises the board instead of moving — keep the modifiers held and press again to jump.
+- Turn it off in **Settings → Navigation** to move on every press, as before.
+
+---
+
 ## [v0.2.0] - 2026-07-27
 
 ### The command line
