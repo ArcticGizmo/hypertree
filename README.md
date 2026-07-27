@@ -57,6 +57,7 @@ reserves for its own desktop switch.)
 - On the map: **`r`** renames a desktop, **`n`** adds one, **`Del`** removes a desktop and **`Shift+Del`** removes a whole branch — each behind a confirm.
 - The map is also where you **rearrange**: **`Ctrl+Arrow`** moves the selected desktop along its row or into the branch above/below, and **`Shift+↑↓`** re-slots the selected branch in the stack. Both work by mouse too — drag a desktop between branches, or drag a branch box to move it.
 - Every card previews its result before you commit — a jump highlights where you'd land; a template shows the branch it would build.
+- **`v`** flips the map into a **metro-map view** — the whole tree drawn as a transit diagram, each timeline a coloured line, each desktop a station, and a green "you are here" train marking where you stand. Same selection and navigation as the board; press `v` again to flip back. (Design notes: [docs/design/metro-map.md](docs/design/metro-map.md).)
 
 ### Finder & command palette
 

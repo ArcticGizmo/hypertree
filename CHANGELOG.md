@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Metro-map view** on the map: press **`v`** to redraw the whole desktop tree as a transit diagram — each timeline a coloured line, each desktop a station, a green "you are here" train marking where you stand — and `v` again to flip back to the board. Same selection and navigation either way. (Prototype; see `docs/design/metro-map.md`.)
+
 ---
 
 ## [v0.2.2] - 2026-07-27

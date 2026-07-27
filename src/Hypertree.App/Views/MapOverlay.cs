@@ -531,7 +531,8 @@ internal sealed class MapOverlay : IStageContent
         Control board;
         if (_style == MapStyle.Metro)
         {
-            board = MetroView.Render(BuildDisplayMap(), width, height, 1.0, animate: true);
+            // The train's pulse honours the OS reduce-motion preference — same signal the nav wipe checks.
+            board = MetroView.Render(BuildDisplayMap(), width, height, 1.0, animate: WindowFx.SystemAnimationsEnabled());
             _layout = new BoardLayout();
         }
         else
