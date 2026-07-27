@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Threading;
@@ -32,19 +33,27 @@ internal sealed class HudWindow : Window
     private HotkeyModifiers _holdMods = HotkeyModifiers.Control | HotkeyModifiers.Alt;
     private int _remaining;
 
-    // The board's slide-in tween (the optional directional animation). At most one runs at a time: each
-    // flash rebuilds the board control, so a press landing mid-slide stops the previous tween before
-    // animating the new board. A hand-rolled DispatcherTimer tween (matching the app's timer style) keeps
-    // the effect off the render thread's transition machinery, which the overlays force-disable elsewhere.
+    // The transition tween (the optional directional animation). At most one runs at a time: each flash
+    // rebuilds the board control, so a press landing mid-wipe stops the previous tween before animating the
+    // new board. A hand-rolled DispatcherTimer tween (matching the app's timer style) keeps the effect off
+    // the render thread's transition machinery, which the overlays force-disable elsewhere.
     private DispatcherTimer? _slide;
-    private const int SlideMs = 170;     // total slide-in duration
+    private const int SlideMs = 260;     // total wipe duration
     private const int SlideTickMs = 15;  // ~66fps tween step
+
+    // The dim backdrop, held as a field so the transition can fade it in (0→full) rather than snap it on —
+    // the snap was the most visible part of the motion. Kept a touch lighter than the old flat backdrop so
+    // the gradient wipe reads as a reveal rather than a second slab of dark.
+    private readonly SolidColorBrush _dim = new(Color.FromArgb(0x59, 0x10, 0x10, 0x10));
+
+    // Peak darkness of the sweeping wipe band, over #101010. Tunable: this is the "how strong is the wipe".
+    private const byte BandAlpha = 0x6E;
 
     public HudWindow()
     {
         WindowDecorations = WindowDecorations.None;
         WindowStartupLocation = WindowStartupLocation.Manual;
-        Background = new SolidColorBrush(Color.FromArgb(0x66, 0x10, 0x10, 0x10)); // dim backdrop
+        Background = _dim; // dim backdrop
         TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
         CanResize = false;
         ShowInTaskbar = false;
@@ -74,20 +83,33 @@ internal sealed class HudWindow : Window
 
     /// <summary>Show the board centred on the primary screen; it stays up while <paramref name="holdMods"/>
     /// are held (pass <see cref="HotkeyModifiers.None"/> for a non-gesture flash that just times out).
-    /// When <paramref name="animate"/> is set the board slides in from the direction of <paramref name="move"/>
-    /// (a directional echo of the traditional desktop-switch slide); a null <paramref name="move"/> just fades.
-    /// The caller gates <paramref name="animate"/> on the user setting and the OS "show animations" preference.</summary>
+    /// When <paramref name="animate"/> is set, a directional move plays a soft gradient wipe in the direction
+    /// of <paramref name="move"/> — dark on the edge opposite the arrow, sweeping across to reveal toward the
+    /// way you pressed; a null <paramref name="move"/> just fades the board in. The caller gates
+    /// <paramref name="animate"/> on the user setting and the OS "show animations" preference.</summary>
     public void Flash(NavMap map, HotkeyModifiers holdMods, NavAction? move = null, bool animate = false)
     {
         _holdMods = holdMods;
         if (!IsVisible) Show();   // realizes the handle so Screens is available
         CoverPrimary();           // sets Width/Height to the primary screen (DIPs)
+
         Control board = BoardView.Render(map, Width, Height); // board centres itself within the full screen
-        Content = board;
-        // A press landing mid-slide replaces the board, so retire the previous tween before it writes stale
-        // transform values onto the now-orphaned control.
+
+        // A directional move gets a soft gradient wipe: a dark band that begins on the edge opposite the
+        // arrow and sweeps across toward the way you pressed, uncovering the (already-switched) desktop as
+        // it passes. A reveal press / result flash has no direction, so there's no wipe — just the board.
+        Border? veil = animate && move is not null ? BuildSweepVeil(move.Value) : null;
+
+        var root = new Panel();
+        if (veil is not null) root.Children.Add(veil);
+        root.Children.Add(board);
+        Content = root;
+
+        // A press landing mid-wipe replaces the content, so retire the previous tween before it writes
+        // stale values onto the now-orphaned controls.
         _slide?.Stop();
-        if (animate) AnimateIn(board, move);
+        if (animate) AnimateIn(board, veil, move);
+        else _dim.Opacity = 1; // snap: full dim, matching the pre-animation look
         Topmost = true;
         BringToTop();             // the desktop switch can briefly surface the target window over us
 
@@ -95,51 +117,97 @@ internal sealed class HudWindow : Window
         if (!_poll.IsEnabled) _poll.Start();
     }
 
-    // Slide the freshly-rendered board in from the direction of travel while fading it up. Content-enters-
-    // from-the-direction-you-moved: press right and the board arrives from the right, matching the OS slide.
-    // A null move (a bare "show before moving" reveal, or a result flash) just fades — there's no direction.
-    private void AnimateIn(Control board, NavAction? move)
+    // Drive the whole transition off one tween: the board and dim fade in (no snap), and the wipe band —
+    // when the move has a direction — sweeps from the edge opposite the arrow off the pressed edge, so the
+    // desktop is uncovered in the direction you moved. A null move (reveal / result flash) just fades.
+    private void AnimateIn(Control board, Border? veil, NavAction? move)
     {
-        (double startX, double startY) = SlideOffset(move);
-        var slide = new TranslateTransform(startX, startY);
-        board.RenderTransform = slide;
         board.Opacity = 0;
+        _dim.Opacity = 0;
+
+        TranslateTransform? veilT = null;
+        bool horizontal = true;
+        double start = 0, end = 0;
+        if (veil is not null && move is not null)
+        {
+            (horizontal, start, end) = SweepTravel(move.Value);
+            veilT = new TranslateTransform(horizontal ? start : 0, horizontal ? 0 : start);
+            veil.RenderTransform = veilT;
+            veil.Opacity = 1;
+        }
 
         int total = Math.Max(1, SlideMs / SlideTickMs);
         int tick = 0;
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(SlideTickMs) };
         timer.Tick += (_, _) =>
         {
-            double e = EaseOutCubic(Math.Min(1.0, (double)++tick / total));
-            slide.X = startX * (1 - e);
-            slide.Y = startY * (1 - e);
+            double e = EaseInOutCubic(Math.Min(1.0, (double)++tick / total));
             board.Opacity = e;
+            _dim.Opacity = e;
+            if (veilT is not null)
+            {
+                double p = start + (end - start) * e;
+                veilT.X = horizontal ? p : 0;
+                veilT.Y = horizontal ? 0 : p;
+                veil!.Opacity = 1 - e; // dissolve the band as it travels, so it thins out toward the pressed edge
+            }
             if (tick < total) return;
             timer.Stop();
-            slide.X = 0; slide.Y = 0; board.Opacity = 1;
+            board.Opacity = 1; _dim.Opacity = 1; // the veil has swept off-screen; next flash rebuilds content
             if (ReferenceEquals(_slide, timer)) _slide = null;
         };
         _slide = timer;
         timer.Start();
     }
 
-    // The board's starting offset for a slide, as a fraction of the screen so it scales with resolution.
-    // A subtle nudge, not a full-screen sweep: this overlay is a cue over the (already-switched) desktop,
-    // so a small directional slide reads without feeling like a second, competing transition.
-    private (double X, double Y) SlideOffset(NavAction? move)
+    // A full-screen band whose darkness follows a raised-cosine (Hann) curve along the move axis: zero at
+    // both edges, peaking in the centre, with no apex kink — so the stripe eases in and out rather than
+    // ramping to a point. Sampled at enough stops that the falloff reads as a smooth gradient, not facets.
+    private Border BuildSweepVeil(NavAction move)
     {
-        double dx = Width * 0.05, dy = Height * 0.05;
-        return move switch
+        bool horizontal = move is NavAction.MoveLeft or NavAction.MoveRight;
+        var brush = new LinearGradientBrush
         {
-            NavAction.MoveRight => (dx, 0),
-            NavAction.MoveLeft => (-dx, 0),
-            NavAction.Dive => (0, dy),
-            NavAction.Surface => (0, -dy),
-            _ => (0, 0), // no direction — fade only
+            StartPoint = new RelativePoint(0, horizontal ? 0.5 : 0, RelativeUnit.Relative),
+            EndPoint = new RelativePoint(horizontal ? 1 : 0, horizontal ? 0.5 : 1, RelativeUnit.Relative),
+        };
+        const int steps = 16;
+        for (int i = 0; i <= steps; i++)
+        {
+            double x = (double)i / steps;
+            double bell = 0.5 * (1 - Math.Cos(2 * Math.PI * x)); // 0 at the edges, 1 at the centre
+            brush.GradientStops.Add(new GradientStop(Color.FromArgb((byte)(BandAlpha * bell), 0x10, 0x10, 0x10), x));
+        }
+        return new Border
+        {
+            Width = Width,
+            Height = Height,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Background = brush,
+            IsHitTestVisible = false,
         };
     }
 
-    private static double EaseOutCubic(double t) { double u = 1 - t; return 1 - u * u * u; }
+    // Where the wipe band's centre travels, as a translate along the move axis. It starts on the edge
+    // opposite the arrow and runs off the pressed edge (the band is one screen wide, so its centre offset
+    // is the edge position minus half a screen). Press right ⇒ the band leaves the left edge and exits right.
+    private (bool Horizontal, double Start, double End) SweepTravel(NavAction move)
+    {
+        double w = Width, h = Height;
+        return move switch
+        {
+            NavAction.MoveRight => (true, -0.5 * w, w),   // centre: left edge → off the right
+            NavAction.MoveLeft => (true, 0.5 * w, -w),    // right edge → off the left
+            NavAction.Dive => (false, -0.5 * h, h),       // top edge → off the bottom
+            NavAction.Surface => (false, 0.5 * h, -h),    // bottom edge → off the top
+            _ => (true, 0, 0),
+        };
+    }
+
+    // Ease in and out: slow at both ends, quickest in the middle, so the wipe doesn't lurch off the mark.
+    private static double EaseInOutCubic(double t)
+        => t < 0.5 ? 4 * t * t * t : 1 - Math.Pow(-2 * t + 2, 3) / 2;
 
     // Re-lift to the top of the always-on-top band. Non-activating, so the flash keeps its
     // no-focus-steal contract even while re-asserting z-order after a desktop switch.

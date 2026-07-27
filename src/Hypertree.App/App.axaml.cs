@@ -380,19 +380,24 @@ public sealed class App : Application
         _gestureFrom ??= _desktops.Current;
         _gestureMods = mods;
         // A cold press with "show before moving" on only raises the board — it doesn't move, so it gets a
-        // plain fade rather than a directional slide (null move below).
+        // plain fade rather than a directional wipe (null move below).
         bool revealOnly = RevealOnly();
-        if (!revealOnly) _model.Apply(action);
+        // The wipe plays only when the user has it on AND Windows' "show animations" is on — the OS
+        // reduce-motion preference wins.
+        bool animate = _settings.AnimateNavigation && WindowFx.SystemAnimationsEnabled();
+        bool inMap = _overlay is { IsOpen: true };
+        // Apply reports whether the desktop actually changed: false at a row's edge or when already there.
+        // A move that goes nowhere must not animate — no wipe, just leave the board as is.
+        bool moved = !revealOnly && _model.Apply(action);
         // In the map, the nav chord switches for real, so the selection follows onto the new desktop
         // (green "here" and blue selection rejoin); in the transient flash, the green outline marks the
         // gesture's origin so the jump's direction/distance reads at a glance.
-        if (_overlay is { IsOpen: true }) _overlay.SyncToCurrent(_model.BuildMap());
+        if (inMap) _overlay!.SyncToCurrent(_model.BuildMap());
         else
         {
-            // The slide plays only when the user has it on AND Windows' "show animations" is on — the OS
-            // reduce-motion preference wins. A reveal press has no direction, so it fades in place.
-            bool animate = _settings.AnimateNavigation && WindowFx.SystemAnimationsEnabled();
-            _hud?.Flash(_model.BuildMap(_gestureFrom), mods, revealOnly ? null : action, animate);
+            // Reveal fades the board in; a real move wipes; a blocked move does neither.
+            bool doAnimate = animate && (revealOnly || moved);
+            _hud?.Flash(_model.BuildMap(_gestureFrom), mods, moved ? action : null, doAnimate);
         }
         StartGesturePoll();
     }

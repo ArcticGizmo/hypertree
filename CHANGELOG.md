@@ -9,8 +9,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **Animated navigation moves**, on by default: the board now slides in from the direction you moved — left/right along a row, up/down to dive or surface — echoing the traditional desktop-switch feel.
-- Turn it off in **Settings → Navigation**. It also follows the Windows *Show animations* setting: with that off, no slide plays.
+- **Animated navigation moves**, on by default: a soft gradient wipe passes in the direction you moved — left/right along a row, up/down to dive or surface — so a switch reads as a direction rather than a sudden cut.
+- Turn it off in **Settings → Navigation**. It also follows the Windows *Show animations* setting: with that off, no wipe plays.
 
 ---
 
