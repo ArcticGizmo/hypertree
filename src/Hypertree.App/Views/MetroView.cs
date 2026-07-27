@@ -144,6 +144,9 @@ internal static class MetroView
             Width = routeRight - routeLeft, Height = lineW, RadiusX = lineW / 2, RadiusY = lineW / 2,
             Fill = routeBrush,
         };
+        // The line you're on gets a soft coloured glow, so it reads as lit while the resting lines lie flat.
+        if (op >= 1.0)
+            route.Effect = new DropShadowEffect { OffsetX = 0, OffsetY = 0, BlurRadius = 16, Color = line.Colour, Opacity = 0.5 };
         Canvas.SetLeft(route, routeLeft);
         Canvas.SetTop(route, y - lineW / 2);
         canvas.Children.Add(route);
@@ -214,6 +217,7 @@ internal static class MetroView
             var core = new Ellipse
             {
                 Width = rOut * 0.9, Height = rOut * 0.9, Fill = new SolidColorBrush(Here),
+                Effect = new DropShadowEffect { OffsetX = 0, OffsetY = 0, BlurRadius = 14, Color = Here, Opacity = 0.85 },
             };
             Canvas.SetLeft(core, x - rOut * 0.45);
             Canvas.SetTop(core, y - rOut * 0.45);
