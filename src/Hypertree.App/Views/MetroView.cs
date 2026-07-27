@@ -14,11 +14,12 @@ namespace Hypertree.App.Views;
 /// each desktop is a <b>station</b> on it; a neutral vertical <b>interchange trunk</b> at screen-centre ties
 /// the lines together along the dive/surface axis, exactly where <see cref="BoardView"/> draws its spine.
 ///
-/// The spatial model is identical to the board so the two are interchangeable: rows stack in the same order
-/// (branches before <see cref="NavMap.TopPosition"/> above main, the rest below), each line is centred on its
-/// own cursor so the current station sits on the centre column, and the whole stack scrolls vertically so the
-/// current line lands on the screen's middle. Blue marks the selection/target, a green "you are here" marker
-/// (the train) marks the desktop you're actually on.
+/// The spatial model matches the board so the two are interchangeable: lines stack in the same order
+/// (branches before <see cref="NavMap.TopPosition"/> above main, the rest below) and each line is centred on
+/// its own cursor so the current station sits on the centre column (which keeps the trunk straight). It
+/// differs in one deliberate way — the board pins the <em>current</em> row to the screen centre, whereas the
+/// metro view centres the whole stack, reading as an overview you locate yourself within. Blue marks the
+/// selection/target; a green "you are here" marker (the train) marks the desktop you're actually on.
 /// </summary>
 internal static class MetroView
 {
