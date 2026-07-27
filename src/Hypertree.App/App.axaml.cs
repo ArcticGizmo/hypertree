@@ -397,7 +397,8 @@ public sealed class App : Application
         {
             // Reveal fades the board in; a real move wipes; a blocked move does neither.
             bool doAnimate = animate && (revealOnly || moved);
-            _hud?.Flash(_model.BuildMap(_gestureFrom), mods, moved ? action : null, doAnimate);
+            _hud?.Flash(_model.BuildMap(_gestureFrom), mods, moved ? action : null, doAnimate,
+                        _settings.SweepFromLeadingEdge);
         }
         StartGesturePoll();
     }

@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - **Animated navigation moves**, on by default: a soft gradient wipe passes in the direction you moved — left/right along a row, up/down to dive or surface — so a switch reads as a direction rather than a sudden cut.
+- Choose which edge the wipe starts on in **Settings → Navigation** ("Sweep from the leading edge").
 - Turn it off in **Settings → Navigation**. It also follows the Windows *Show animations* setting: with that off, no wipe plays.
 
 ---

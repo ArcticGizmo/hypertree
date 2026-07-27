@@ -42,6 +42,7 @@ internal sealed class SettingsWindow : Window
     private readonly ToggleSwitch _showTaskbarLabel;
     private readonly ToggleSwitch _displayBeforeMoving;
     private readonly ToggleSwitch _animateNavigation;
+    private readonly ToggleSwitch _sweepFromLeadingEdge;
     private readonly ToggleSwitch _showChangelog;
 
     // The working set of chords, edited in place by the rebind capture; committed to overrides on Save.
@@ -82,6 +83,7 @@ internal sealed class SettingsWindow : Window
         _showTaskbarLabel = Toggle(settings.ShowTaskbarLabel);
         _displayBeforeMoving = Toggle(settings.DisplayBeforeMoving);
         _animateNavigation = Toggle(settings.AnimateNavigation);
+        _sweepFromLeadingEdge = Toggle(settings.SweepFromLeadingEdge);
         _showChangelog = Toggle(settings.ShowChangelogOnUpdate);
         _hotkeyHint = new TextBlock
         {
@@ -129,9 +131,12 @@ internal sealed class SettingsWindow : Window
                     Hint("The first navigation chord only brings the board up so you can see where you are. "
                          + "Keep the modifiers held and press again to move."),
                     ToggleRow("Animate navigation moves", _animateNavigation),
-                    Hint("Slides the board in from the direction you moved, echoing the traditional "
+                    Hint("Sweeps a soft gradient across in the direction you moved, echoing the traditional "
                          + "desktop-switch animation. Follows the Windows “Show animations” setting — "
-                         + "with that off, no slide plays."),
+                         + "with that off, no animation plays."),
+                    ToggleRow("Sweep from the leading edge", _sweepFromLeadingEdge),
+                    Hint("The wipe begins on the side you move toward and sweeps away across the screen. "
+                         + "Turn off to have it begin on the opposite side and sweep toward where you're heading."),
 
                     Divider(),
                     Title2("Hotkeys"),
@@ -178,6 +183,7 @@ internal sealed class SettingsWindow : Window
             ShowTaskbarLabel = _showTaskbarLabel.IsChecked ?? true,
             DisplayBeforeMoving = _displayBeforeMoving.IsChecked ?? true,
             AnimateNavigation = _animateNavigation.IsChecked ?? true,
+            SweepFromLeadingEdge = _sweepFromLeadingEdge.IsChecked ?? true,
             ShowChangelogOnUpdate = _showChangelog.IsChecked ?? true,
             LastSeenVersion = _initial.LastSeenVersion, // stamped at startup, not edited here — carry through
             BranchTemplates = _initial.BranchTemplates, // not edited here — carry through untouched

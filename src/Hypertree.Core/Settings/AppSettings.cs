@@ -34,6 +34,12 @@ public sealed class AppSettings
     /// slide plays regardless of this flag. See <c>App.Navigate</c> and <c>HudWindow.Flash</c>.</summary>
     public bool AnimateNavigation { get; set; } = true;
 
+    /// <summary>Which edge the navigation wipe starts on. True (default) begins the dark band on the edge you
+    /// moved <i>toward</i> — the leading edge — and sweeps it away across the screen; false begins it on the
+    /// opposite edge and sweeps toward where you're heading. Purely a taste knob; only has an effect while
+    /// <see cref="AnimateNavigation"/> is on. See <c>HudWindow.SweepTravel</c>.</summary>
+    public bool SweepFromLeadingEdge { get; set; } = true;
+
     /// <summary>Reusable branch recipes, offered via the branch card's "Load from template" button so you
     /// don't retype the desktop set each time. Empty by default — you build and delete them in the
     /// "Manage templates…" command.</summary>
