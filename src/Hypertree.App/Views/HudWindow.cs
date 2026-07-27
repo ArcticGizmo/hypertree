@@ -85,8 +85,9 @@ internal sealed class HudWindow : Window
     /// are held (pass <see cref="HotkeyModifiers.None"/> for a non-gesture flash that just times out).
     /// When <paramref name="animate"/> is set, a directional move plays a soft gradient wipe for
     /// <paramref name="move"/>; <paramref name="fromLeadingEdge"/> picks which edge it starts on (the edge you
-    /// moved toward, or the opposite one). A null <paramref name="move"/> just fades the board in. The caller
-    /// gates <paramref name="animate"/> on the user setting and the OS "show animations" preference.</summary>
+    /// moved toward, or the opposite one). The board itself is shown at once — only the background (dim + wipe)
+    /// animates. The caller gates <paramref name="animate"/> on the user setting and the OS "show animations"
+    /// preference.</summary>
     public void Flash(NavMap map, HotkeyModifiers holdMods, NavAction? move = null, bool animate = false,
                       bool fromLeadingEdge = true)
     {
@@ -118,12 +119,13 @@ internal sealed class HudWindow : Window
         if (!_poll.IsEnabled) _poll.Start();
     }
 
-    // Drive the whole transition off one tween: the board and dim fade in (no snap), and the wipe band —
-    // when the move has a direction — sweeps from the edge opposite the arrow off the pressed edge, so the
-    // desktop is uncovered in the direction you moved. A null move (reveal / result flash) just fades.
+    // Drive the transition off one tween: the board is shown at once (no fade), the dim fades in behind it,
+    // and the wipe band — when the move has a direction — sweeps from the edge opposite the arrow off the
+    // pressed edge, so the desktop is uncovered in the direction you moved. The background carries the motion;
+    // the map/board does not. A null move (reveal / result flash) just fades the dim up.
     private void AnimateIn(Control board, Border? veil, NavAction? move, bool fromLeadingEdge)
     {
-        board.Opacity = 0;
+        board.Opacity = 1; // the board itself no longer animates — it's shown at once; only the background moves
         _dim.Opacity = 0;
 
         TranslateTransform? veilT = null;
@@ -143,7 +145,6 @@ internal sealed class HudWindow : Window
         timer.Tick += (_, _) =>
         {
             double e = EaseInOutCubic(Math.Min(1.0, (double)++tick / total));
-            board.Opacity = e;
             _dim.Opacity = e;
             if (veilT is not null)
             {
@@ -154,7 +155,7 @@ internal sealed class HudWindow : Window
             }
             if (tick < total) return;
             timer.Stop();
-            board.Opacity = 1; _dim.Opacity = 1; // the veil has swept off-screen; next flash rebuilds content
+            _dim.Opacity = 1; // the veil has swept off-screen; next flash rebuilds content
             if (ReferenceEquals(_slide, timer)) _slide = null;
         };
         _slide = timer;

@@ -7,11 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [v0.2.2] - 2026-07-27
+
 ### Added
 
-- **Animated navigation moves**, on by default: a soft gradient wipe passes in the direction you moved — left/right along a row, up/down to dive or surface — so a switch reads as a direction rather than a sudden cut.
-- Choose which edge the wipe starts on in **Settings → Navigation** ("Sweep from the leading edge").
-- Turn it off in **Settings → Navigation**. It also follows the Windows *Show animations* setting: with that off, no wipe plays.
+- **Animated navigation moves**, on by default: a soft gradient wipe passes in the direction you moved — left/right along a row, up/down to dive or surface.
+- **Peek at the board** with `Ctrl+Alt+Space` (rebindable): raises the flash where you are and holds it while the modifiers stay down, without moving.
+- Pick which edge the wipe starts from in **Settings → Navigation** ("Sweep from the leading edge").
+- Turn the wipe off in **Settings → Navigation**; it also follows the Windows *Show animations* setting.
 
 ---
 

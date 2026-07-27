@@ -12,6 +12,7 @@ public enum HotkeyCommand
     Surface,
     MoveLeft,
     MoveRight,
+    Peek,
     CommandPalette,
     MoveWindows,
 }
@@ -45,7 +46,7 @@ public static class Hotkeys
     public static readonly IReadOnlyList<HotkeyCommand> Order = new[]
     {
         HotkeyCommand.Dive, HotkeyCommand.Surface, HotkeyCommand.MoveLeft, HotkeyCommand.MoveRight,
-        HotkeyCommand.CommandPalette, HotkeyCommand.MoveWindows,
+        HotkeyCommand.Peek, HotkeyCommand.CommandPalette, HotkeyCommand.MoveWindows,
     };
 
     /// <summary>The out-of-the-box chords. Ctrl+Alt+Arrow is the nav layer (M0: Win+Ctrl+Arrow is the
@@ -57,6 +58,7 @@ public static class Hotkeys
             [HotkeyCommand.Surface]        = new(NavMods, HotkeyKey.ArrowUp),
             [HotkeyCommand.MoveLeft]       = new(NavMods, HotkeyKey.ArrowLeft),
             [HotkeyCommand.MoveRight]      = new(NavMods, HotkeyKey.ArrowRight),
+            [HotkeyCommand.Peek]           = new(NavMods, HotkeyKey.Space),
             [HotkeyCommand.CommandPalette] = new(NavMods, HotkeyKey.P),
             [HotkeyCommand.MoveWindows]    = new(NavMods, HotkeyKey.M),
         };
@@ -69,6 +71,7 @@ public static class Hotkeys
         HotkeyCommand.Surface        => "Surface (up)",
         HotkeyCommand.MoveLeft       => "Move left",
         HotkeyCommand.MoveRight      => "Move right",
+        HotkeyCommand.Peek           => "Peek at the board",
         HotkeyCommand.CommandPalette => "Command palette",
         HotkeyCommand.MoveWindows    => "Move windows",
         _ => command.ToString(),

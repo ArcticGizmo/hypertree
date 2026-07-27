@@ -347,6 +347,7 @@ public sealed class App : Application
     {
         HotkeyCommand.CommandPalette => ToggleCommandPalette,
         HotkeyCommand.MoveWindows    => ToggleMoveWindows,
+        HotkeyCommand.Peek           => () => Peek(mods),
         _ when NavCommands.TryGetValue(cmd, out NavAction action) => () => Navigate(action, mods),
         _ => () => { },
     };
@@ -401,6 +402,22 @@ public sealed class App : Application
                         _settings.SweepFromLeadingEdge);
         }
         StartGesturePoll();
+    }
+
+    // Peek: raise the flash on where we actually are and hold it while <paramref name="mods"/> stay down,
+    // without moving. A preview on demand — and, since the board is up afterwards, a following nav chord
+    // moves for real (the same hand-off as "show before moving", but triggered explicitly and regardless of
+    // that setting). No gesture is recorded: nothing moved, so there's no "last visited" to remember.
+    private void Peek(HotkeyModifiers mods)
+    {
+        if (_model is null || _desktops is null) return;
+        // The move flow owns the arrows while it's up; the map is already a persistent board — neither wants
+        // a transient peek over it.
+        if (_stage?.Current is MoveContent) return;
+        if (_overlay is { IsOpen: true }) return;
+        _model.AnchorToCurrent(); // show where we stand now, not our stale cursor
+        bool animate = _settings.AnimateNavigation && WindowFx.SystemAnimationsEnabled();
+        _hud?.Flash(_model.BuildMap(), mods, move: null, animate: animate);
     }
 
     // "Show before moving": with the setting on, a nav chord that arrives while the flash is off screen
