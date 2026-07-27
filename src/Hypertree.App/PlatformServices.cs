@@ -18,6 +18,7 @@ internal static class PlatformServices
     public static IGlobalHotkey CreateGlobalHotkey() => new Impl.GlobalHotkey();
     public static IForegroundActivator CreateForegroundActivator() => new Impl.ForegroundActivator();
     public static IStartupManager CreateStartupManager() => new Impl.StartupManager();
+    public static IPathInstaller CreatePathInstaller() => new Impl.PathInstaller();
 #else
     public static IDesktopController CreateDesktopController()
         => throw new PlatformNotSupportedException("No desktop controller for this platform yet.");
@@ -27,5 +28,7 @@ internal static class PlatformServices
         => throw new PlatformNotSupportedException("No foreground activator for this platform yet.");
     public static IStartupManager CreateStartupManager()
         => throw new PlatformNotSupportedException("No startup manager for this platform yet.");
+    public static IPathInstaller CreatePathInstaller()
+        => throw new PlatformNotSupportedException("No path installer for this platform yet.");
 #endif
 }

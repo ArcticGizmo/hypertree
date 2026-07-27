@@ -39,7 +39,9 @@ internal sealed class ChangelogWindow : Window
         RequestedThemeVariant = ThemeVariant.Dark;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         CanResize = false;
-        Width = 480;
+        // Wide enough that a changelog bullet reads as one line rather than wrapping two or three times.
+        // The window can't be resized, so the width has to be right here — there's no dragging it out.
+        Width = 720;
         Height = 600;
         Background = new SolidColorBrush(Color.Parse("#12161F"));
 

@@ -1,7 +1,19 @@
 using Hypertree.Desktops;
+using Hypertree.Status;
 using Hypertree.Store;
 
 namespace Hypertree.Scopes;
+
+/// <summary>Outcome of <see cref="NavigationModel.GoTo"/>. Distinguishes the two ways a target can fail
+/// to resolve, so a caller can say which one went wrong.</summary>
+public enum GoToResult
+{
+    Ok,
+    /// <summary>No branch carries that id — it was removed, or dissolved when it lost its last desktop.</summary>
+    NoSuchBranch,
+    /// <summary>The row exists but has no desktop at that index.</summary>
+    NoSuchDesktop,
+}
 
 /// <summary>
 /// Model P as pure state, vertical model (F2 — "stable pivot"). The <b>main timeline</b>
@@ -28,6 +40,7 @@ public sealed class NavigationModel
     private int _currentBranch;      // the branch the cursor is in (valid only when !_onMain, else the resume branch)
     private int _topIndex;          // cursor within the main timeline
     private DesktopId _target;      // desktop the model last switched to
+    private bool _backfilledIds;    // a restored branch predated ids, so the minted ones need writing back
 
     public event Action? Changed;
 
@@ -41,6 +54,12 @@ public sealed class NavigationModel
         int idx = _topRow.FindIndex(d => d.Id == desktops.Current);
         if (idx >= 0) _topIndex = idx;
         _target = CurrentDesktop().Id;
+
+        // Persist ids minted for branches that predate them, now rather than whenever the user next
+        // happens to navigate. Otherwise an id we've already published — to the status file, and through
+        // it to the CLI and Perch — would be re-minted on the next start, breaking the promise that it's
+        // stable enough to store and come back to.
+        if (_backfilledIds) Save();
     }
 
     // ── Queries ──────────────────────────────────────────────────────────────────
@@ -116,6 +135,60 @@ public sealed class NavigationModel
         return new NavMap(top, _topRow.Count == 0 ? 0 : _topIndex, _onMain, branches, Math.Clamp(_mainSlot, 0, _branches.Count));
     }
 
+    /// <summary>
+    /// The stack as published to the outside world (the CLI, and anything else watching the status file):
+    /// rows top-to-bottom with main in its slot, plus where the cursor actually is.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not built on <see cref="BuildMap"/>. That call walks every top-level window through the
+    /// documented desktop API to produce per-tile window counts — fine once, when a human summons the map,
+    /// but this runs on every navigation, and nothing downstream of the status file wants the counts. So
+    /// this reads only what it publishes.
+    /// </remarks>
+    public StatusSnapshot BuildStatus()
+    {
+        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
+
+        StatusRow MainRow() => new()
+        {
+            Kind = RowKind.Main,
+            Name = RowKind.Main,
+            Cursor = _topRow.Count == 0 ? 0 : Math.Clamp(_topIndex, 0, _topRow.Count - 1),
+            Desktops = _topRow.Select(d => new StatusDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
+        };
+
+        StatusRow BranchRow(Branch g) => new()
+        {
+            Kind = RowKind.Branch,
+            Id = g.Id,
+            Name = g.Name,
+            Cursor = g.LastUsedIndex,
+            Desktops = g.Desktops.Select(d => new StatusDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
+        };
+
+        var rows = new List<StatusRow>(_branches.Count + 1);
+        for (int i = 0; i < slot; i++) rows.Add(BranchRow(_branches[i]));
+        int mainRow = rows.Count;
+        rows.Add(MainRow());
+        for (int i = slot; i < _branches.Count; i++) rows.Add(BranchRow(_branches[i]));
+
+        // The cursor's row in the same flattened order. On a branch, its index shifts by one once we're
+        // past main's slot, because main occupies a row of its own in this list.
+        int currentRow = _onMain || _branches.Count == 0
+            ? mainRow
+            : (_currentBranch < slot ? _currentBranch : _currentBranch + 1);
+
+        return new StatusSnapshot
+        {
+            Rows = rows,
+            Current = new StatusPosition
+            {
+                Row = currentRow,
+                Desktop = rows.Count > currentRow ? rows[currentRow].Cursor : 0,
+            },
+        };
+    }
+
     // ── Navigation (stable pivot ladder) ───────────────────────────────────────────
 
     public bool Apply(NavAction action) => action switch
@@ -179,6 +252,47 @@ public sealed class NavigationModel
         _currentBranch = branchIndex;
         g.LastUsedIndex = desktopIndex;
         return Commit();
+    }
+
+    /// <summary>The list index of the branch with this stable id, or -1 if no branch has it.</summary>
+    public int IndexOfBranch(Guid id)
+    {
+        for (int i = 0; i < _branches.Count; i++) if (_branches[i].Id == id) return i;
+        return -1;
+    }
+
+    /// <summary>
+    /// Jump to a row addressed the way the outside world addresses it: a branch by stable id, or main when
+    /// <paramref name="branchId"/> is null, landing on <paramref name="desktop"/> or — when that is null —
+    /// the row's remembered cursor, which is what a bare "go to this branch" means.
+    /// </summary>
+    /// <remarks>
+    /// Resolution lives here rather than in the caller because an id has to be turned into a list index at
+    /// the moment of the jump: a caller that read the layout and then acted on a position could land on a
+    /// branch the user reordered in between. <paramref name="landed"/> reports where we ended up, for the
+    /// caller to echo.
+    /// </remarks>
+    public GoToResult GoTo(Guid? branchId, int? desktop, out string landed)
+    {
+        landed = "";
+        if (branchId is not { } id)
+        {
+            if (_topRow.Count == 0) return GoToResult.NoSuchDesktop;
+            int mi = desktop ?? Math.Clamp(_topIndex, 0, _topRow.Count - 1);
+            if (mi < 0 || mi >= _topRow.Count) return GoToResult.NoSuchDesktop;
+            landed = $"main/{_topRow[mi].Label}";
+            GoToTop(mi); // false only means "already there", which is a successful jump
+            return GoToResult.Ok;
+        }
+
+        int bi = IndexOfBranch(id);
+        if (bi < 0) return GoToResult.NoSuchBranch;
+        Branch g = _branches[bi];
+        int di = desktop ?? g.LastUsedIndex;
+        if (di < 0 || di >= g.Count) return GoToResult.NoSuchDesktop;
+        landed = $"{g.Name}/{g.Desktops[di].Label}";
+        GoToBranchDesktop(bi, di);
+        return GoToResult.Ok;
     }
 
     private bool Commit()
@@ -611,7 +725,11 @@ public sealed class NavigationModel
                 .Where(d => live.Contains(d.Id))
                 .Select(d => new DesktopRef(new DesktopId(d.Id), d.Label))
                 .ToList();
-            if (desks.Count > 0) _branches.Add(new Branch(pg.Name, desks, pg.LastUsedIndex));
+            // pg.Id is empty for state written before branch ids existed; Branch mints one, and the
+            // constructor saves it back — so an upgrade backfills ids without a migration step.
+            if (desks.Count == 0) continue;
+            if (pg.Id == Guid.Empty) _backfilledIds = true;
+            _branches.Add(new Branch(pg.Name, desks, pg.LastUsedIndex, pg.Id));
         }
         // Migrate: prefer the persisted MainSlot; fall back to the pre-pivot ActiveBranch split.
         int slot = state.MainSlot != 0 ? state.MainSlot : state.ActiveBranch;
@@ -627,6 +745,7 @@ public sealed class NavigationModel
             MainSlot = _mainSlot,
             Branches = _branches.Select(g => new PersistedBranch
             {
+                Id = g.Id,
                 Name = g.Name,
                 LastUsedIndex = g.LastUsedIndex,
                 Desktops = g.Desktops.Select(d => new PersistedDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),

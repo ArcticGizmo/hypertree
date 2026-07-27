@@ -34,6 +34,20 @@ jobs:
             -p:Version=${{ steps.version.outputs.VERSION }} `
             -o publish/
 
+      # htree ships INTO the same folder, so it lands beside hypertree.exe in the installed
+      # `current\` directory — which is what lets the tray advertise its absolute path in status.json
+      # and saves every reader from guessing at the install layout.
+      #
+      # Native AOT needs the MSVC linker; windows-latest carries the Desktop C++ workload, so this
+      # works in CI. Publishing it locally needs that workload installed too (a plain `dotnet build`
+      # does not). AOT is worth the constraint: `htree status` is meant to sit in a shell prompt, and
+      # a JIT build measures ~87ms per invocation against single digits AOT-compiled.
+      - name: Publish htree CLI
+        run: |
+          dotnet publish src/Hypertree.Cli/Hypertree.Cli.csproj -c Release -r win-x64 `
+            -p:Version=${{ steps.version.outputs.VERSION }} `
+            -o publish/
+
       - name: Pack with Velopack
         run: >
           vpk pack

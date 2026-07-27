@@ -13,7 +13,7 @@
     <RootNamespace>Hypertree.App</RootNamespace>
     <AssemblyName>hypertree</AssemblyName>
     <Product>Hypertree</Product>
-    <Version>0.1.5</Version>
+    <Version>0.2.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- The .exe icon Explorer/taskbar shows. Generated from hypertree.svg by tools/IconGen. -->
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>

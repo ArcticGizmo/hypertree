@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    htree — the command-line face of Hypertree.
+
+    A SEPARATE console exe rather than a flag on hypertree.exe, which is a WinExe with no console
+    attached: piping and exit codes from a windowed binary mean console-attach games, and a GUI
+    process can't start fast enough for a tool meant to run on every shell prompt.
+
+    Published ahead-of-time compiled. `htree status` is designed to sit in a prompt, so it runs on
+    every command the user types and startup time is the whole cost of the tool; AOT takes that from
+    tens of milliseconds to low single digits. It also means one self-contained file with no runtime
+    to locate, which is what makes dropping it on PATH painless.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Hypertree.Cli</RootNamespace>
+    <AssemblyName>htree</AssemblyName>
+    <!-- Kept in step with Hypertree.App: the two ship together, so the version htree reports should
+         never disagree with the tray's. -->
+    <Version>0.2.0</Version>
+
+    <PublishAot>true</PublishAot>
+    <!-- Nothing here formats dates or sorts by culture; skipping ICU trims both size and startup. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Fail the build on a trim/AOT hazard rather than shipping something that breaks at runtime. -->
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Hypertree.Core/Hypertree.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Everything here is internal (nothing links against a CLI), so the suite is let in explicitly
+         rather than widening the surface just to make it testable. -->
+    <InternalsVisibleTo Include="Hypertree.Tests" />
+  </ItemGroup>
+</Project>

@@ -9,6 +9,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.2.0] - 2026-07-27
+
+### The command line
+
+- `htree` drives Hypertree from any terminal, installed alongside the tray and on your PATH.
+- `htree status` prints where you are, as `branch/desktop` — cheap enough to sit in a shell prompt.
+- `htree list` shows the stack top to bottom, main in its slot, each row at its resume desktop; `--all` expands every desktop.
+- `htree goto my-branch` jumps to a branch, `htree goto my-branch/docs` to a desktop on it. Names match by unique prefix; an ambiguous one is refused, not guessed.
+- `htree watch` streams your position as it changes, one line per move.
+- `--json` on any command, and exit codes on all of them: 0 done, 1 no tray, 2 unknown target, 3 bad usage, 4 tray refused.
+
+### Changed
+
+- Branches carry a stable id, so a jump can't be misdirected by the stack being reordered underneath it. Existing branches are given one on first launch.
+- Hypertree publishes its layout and position to `%APPDATA%\hypertree\status.json` for other tools to read.
+- Uninstalling removes the PATH entry it added.
+- `HYPERTREE_STATE_DIR` relocates the state directory, for a portable install.
+
+### Fixed
+
+- The taskbar pill follows desktop switches made outside Hypertree — `Win+Ctrl+←→`, Task View — instead of showing where Hypertree last left you.
+- Starting up inside a branch shows that branch, not the first desktop on main.
+
+---
+
 ## [v0.1.5] - 2026-07-27
 
 ### Fixed

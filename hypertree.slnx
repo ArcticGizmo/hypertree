@@ -3,6 +3,7 @@
     <Project Path="src/Hypertree.Core/Hypertree.Core.csproj" />
     <Project Path="src/Hypertree.Platform.Windows/Hypertree.Platform.Windows.csproj" />
     <Project Path="src/Hypertree.App/Hypertree.App.csproj" />
+    <Project Path="src/Hypertree.Cli/Hypertree.Cli.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Hypertree.Tests/Hypertree.Tests.csproj" />

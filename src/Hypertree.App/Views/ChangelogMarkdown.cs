@@ -71,15 +71,41 @@ internal static class ChangelogMarkdown
         Text = text, TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = Ink, Margin = margin,
     };
 
+    // Placeholder delimiters for parked code spans: control characters carry no markdown meaning and
+    // cannot occur in changelog prose, so restoring them can't collide with real text the way a printable
+    // marker could.
+    private const string CodeOpen = "\u0001";
+    private const string CodeClose = "\u0002";
+    private static readonly Regex CodeSpan = new(@"`([^`]+)`", RegexOptions.Compiled);
+    private static readonly Regex CodeMark = new(CodeOpen + @"(\d+)" + CodeClose, RegexOptions.Compiled);
+
     /// <summary>Strips inline markdown (bold/italic/code/links) down to its display text.</summary>
+    /// <remarks>
+    /// Code spans are lifted out before the emphasis passes and put back afterwards. Without that, the
+    /// emphasis rules chew through the middle of whatever is inside the backticks — a changelog line
+    /// mentioning <c>HYPERTREE_STATE_DIR</c> rendered as "HYPERTREESTATEDIR", because its two underscores
+    /// looked like a pair of italic markers.
+    /// <para>
+    /// Underscore emphasis must also sit on a word boundary, as CommonMark requires. That is the rule that
+    /// keeps any <c>snake_case</c> identifier intact even outside backticks. Asterisks keep the looser
+    /// treatment: intra-word <c>*</c> is legal emphasis and doesn't turn up inside identifiers.
+    /// </para>
+    /// </remarks>
     public static string StripInline(string text)
     {
+        var code = new List<string>();
+        text = CodeSpan.Replace(text, m =>
+        {
+            code.Add(m.Groups[1].Value);
+            return CodeOpen + (code.Count - 1) + CodeClose;
+        });
+
         text = Regex.Replace(text, @"\*\*(.*?)\*\*", "$1");
-        text = Regex.Replace(text, @"__(.*?)__", "$1");
+        text = Regex.Replace(text, @"(?<![A-Za-z0-9])__(.+?)__(?![A-Za-z0-9])", "$1");
         text = Regex.Replace(text, @"\*(.*?)\*", "$1");
-        text = Regex.Replace(text, @"_(.*?)_", "$1");
-        text = Regex.Replace(text, @"`([^`]+)`", "$1");
+        text = Regex.Replace(text, @"(?<![A-Za-z0-9])_(.+?)_(?![A-Za-z0-9])", "$1");
         text = Regex.Replace(text, @"\[([^\]]+)\]\([^)]+\)", "$1");
-        return text;
+
+        return CodeMark.Replace(text, m => code[int.Parse(m.Groups[1].Value)]);
     }
 }

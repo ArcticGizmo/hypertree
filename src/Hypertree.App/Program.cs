@@ -17,9 +17,19 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        // Velopack install/update lifecycle hook — must run before anything else. No-op unless
-        // launched with the special --veloapp-* hook args (i.e. during install/update).
-        VelopackApp.Build().Run();
+        // Velopack install/update lifecycle hook — must run before anything else. No-op unless launched
+        // with the special --veloapp-* hook args (i.e. during install/update/uninstall).
+        //
+        // The fast callbacks keep the per-user PATH entry in sync, so `htree` and `hypertree` resolve from
+        // any terminal. Both binaries ship into the same install folder, so one entry covers the pair.
+        // Update re-registers as well as install: Velopack's install directory is stable across updates,
+        // but re-asserting it is what repairs an entry a user (or another installer) removed in between.
+        // Uninstall takes it back off — an install that litters PATH with a dead directory is a bad guest.
+        VelopackApp.Build()
+            .OnAfterInstallFastCallback(_ => PlatformServices.CreatePathInstaller().Register())
+            .OnAfterUpdateFastCallback(_ => PlatformServices.CreatePathInstaller().Register())
+            .OnBeforeUninstallFastCallback(_ => PlatformServices.CreatePathInstaller().Unregister())
+            .Run();
 
         // The design-shot harness (tools/, --shot) spins up a throwaway copy purely to render captures and
         // shuts itself down again. It's not a second Hypertree in any meaningful sense, so it neither claims

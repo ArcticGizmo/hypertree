@@ -6,6 +6,8 @@ obj/
 *.user
 artifacts/
 publish/
+# Velopack packages built by publish.bat. Real releases are built by CI from a tag.
+releases/
 
 # Rider / VS
 .idea/

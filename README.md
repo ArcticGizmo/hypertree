@@ -76,6 +76,32 @@ reserves for its own desktop switch.)
 - A persistent pill over the taskbar names the desktop you're on — prefixed with the branch name, in the branch's colour, when you're inside one.
 - It auto-hides while the cursor is near it, so the taskbar underneath stays clickable.
 
+### The command line — `htree`
+
+A small console companion that ships beside the tray, for driving Hypertree from a shell or wiring it
+into other tools.
+
+```
+htree status            # where you are now      ->  perch/docs
+htree list              # the stack, top to bottom, main in its slot
+htree list --all        # …expanded to every desktop
+htree goto perch        # jump to a branch, at its resume desktop
+htree goto perch/docs   # …or to a named desktop on it
+htree watch             # stream your position as it changes
+```
+
+- `status` is cheap enough to sit in a **shell prompt** — it reads one small file and exits, with no
+  round trip to the tray. `htree help` has ready-made PowerShell and bash snippets.
+- `--json` on any command, and **exit codes** on all of them (`0` done, `1` no tray, `2` unknown target,
+  `3` bad usage, `4` the tray refused), so scripts can branch on what happened.
+- Branch names match exactly, then case-insensitively, then by unique prefix — so `htree goto pe` works.
+  An **ambiguous** name is refused rather than guessed at, and lists the ids to pick from.
+- Reads come from `%APPDATA%\hypertree\status.json`, which the tray keeps current — **including switches
+  made outside Hypertree**. Only `goto` talks to the tray, over a per-session named pipe.
+- Installing adds the install directory to your **per-user PATH**, so `htree` and `hypertree` both resolve
+  anywhere; uninstalling removes it again. No elevation needed, and terminals already open need
+  restarting to see it.
+
 ### Changelog
 
 - After the version changes, a **"what's new"** window lists just the releases since the one you were last on.
@@ -108,13 +134,14 @@ to have it come back with Windows.
 
 ## Development
 
-The solution splits into three projects so the navigation logic stays OS-free and testable:
+The solution splits into four projects so the navigation logic stays OS-free and testable:
 
 | Project | What it is |
 |---|---|
-| `Hypertree.Core` | The UI-free, OS-free navigation model (Model P — dive / surface) and the platform-service _interfaces_. Plain `net10.0`, so it's fully unit-testable against a fake desktop controller. |
+| `Hypertree.Core` | The UI-free, OS-free navigation model (Model P — dive / surface) and the platform-service _interfaces_. Plain `net10.0`, so it's fully unit-testable against a fake desktop controller. Also owns the two outward-facing contracts: the status file and the control protocol. |
 | `Hypertree.Platform.Windows` | The Win32 implementations — virtual-desktop control, global hotkeys, window moving, start-on-login. |
 | `Hypertree.App` | The Avalonia tray app: the HUD flash, the map overlay, palettes, prompts, and settings. Composition root is `PlatformServices`. |
+| `Hypertree.Cli` | `htree.exe` — a separate console binary, because the tray is a `WinExe` with no console attached. Published ahead-of-time compiled so it starts fast enough to live in a shell prompt. |
 
 Build and test:
 
@@ -122,6 +149,28 @@ Build and test:
 dotnet build hypertree.slnx
 dotnet test  hypertree.slnx
 ```
+
+To build a real Velopack package locally — the only way to exercise what only exists inside an
+installer, namely the PATH entry going on at install and coming back off at uninstall:
+
+```
+publish.bat              # pack to releases\
+publish.bat --install    # pack, then run the installer
+publish.bat 0.2.0        # pack a specific version
+```
+
+> **`publish.bat --install` installs over any existing Hypertree** — same `packId`, same
+> `%LocalAppData%\Hypertree`. Uninstalling afterwards removes it; reinstall from the GitHub releases
+> page when you're done. PATH changes don't reach terminals that are already open.
+
+> **Publishing `htree`** needs the **Desktop development with C++** workload (native AOT uses the MSVC
+> linker). A plain `dotnet build` doesn't — only `dotnet publish -r win-x64`. CI's `windows-latest`
+> carries it, so the release workflow is unaffected. `publish.bat` falls back to an ordinary
+> self-contained build when the linker is missing, so local packaging still works — that `htree` starts
+> in ~127 ms rather than single digits, which only matters if you've put it in a shell prompt.
+
+`HYPERTREE_STATE_DIR` relocates `%APPDATA%\hypertree` for both binaries — used by the end-to-end CLI
+tests to run against a scratch directory rather than a live tray's state.
 
 The UI is [Avalonia](https://avaloniaui.net/). To render a design surface to PNG without
 launching the tray:

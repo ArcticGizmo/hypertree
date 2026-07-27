@@ -3,10 +3,13 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
+using Hypertree.App.Ipc;
+using Hypertree.App.Status;
 using Hypertree.App.Updates;
 using Hypertree.App.Views;
 using Hypertree.Changelog;
 using Hypertree.Desktops;
+using Hypertree.Ipc;
 using Hypertree.Platform;
 using Hypertree.Scopes;
 using Hypertree.Settings;
@@ -67,6 +70,12 @@ public sealed class App : Application
     private DesktopId? _gestureFrom; // where the in-progress keyboard gesture started
     private HotkeyModifiers _gestureMods; // the modifiers of the in-progress gesture's chord (watched for release)
     private DispatcherTimer? _gesturePoll;
+
+    // Ambient notice that something outside Hypertree changed desktop, the published status file that
+    // depends on it being true, and the pipe the CLI reaches us on. See Startup for how they connect.
+    private PollingDesktopWatcher? _watcher;
+    private StatusPublisher? _status;
+    private ControlServer? _control;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -139,6 +148,10 @@ public sealed class App : Application
         _model.Changed += () => _taskbarLabel?.Sync();
         ApplyTaskbarLabel();
 
+        StartWatchingDesktops();
+        StartPublishingStatus();
+        StartControlServer();
+
         // One shared, persistent presentation surface for every overlay (map, palettes, prompts, move).
         // Swapping between them is an in-place content change, not a window teardown — no flash. Card
         // content floats over the live map, which the stage pulls from here.
@@ -176,6 +189,110 @@ public sealed class App : Application
         // than racing startup. Background priority keeps it from delaying the first paint.
         if (_pendingChangelog is { Count: > 0 } changelog)
             Dispatcher.UIThread.Post(() => ShowChangelog(changelog), DispatcherPriority.Background);
+    }
+
+    // ── Outside-world surface: watcher → status file → control pipe ──────────────────────────────
+
+    /// <summary>
+    /// Start noticing desktop switches Hypertree didn't make (Win+Ctrl+Arrow, Task View, another launcher
+    /// jumping to one of its windows).
+    /// </summary>
+    /// <remarks>
+    /// Hypertree tracks a cursor, not the OS, and until now only re-anchored at the top of a navigation
+    /// keystroke or when the map opened — so after an external switch the model, and the taskbar pill it
+    /// feeds, stayed stale until Hypertree was next used. Publishing "where am I" to the CLI and to Perch
+    /// makes that staleness visible to other apps, so it has to be fixed at the source rather than papered
+    /// over per reader.
+    /// </remarks>
+    private void StartWatchingDesktops()
+    {
+        if (_desktops is null || _model is null) return;
+
+        // Start from where we actually are. The model's constructor only looks for the current desktop on
+        // the main timeline, so launching while inside a branch — the normal case after a restart, since
+        // that's where you left off — leaves the cursor claiming main[0]. That was invisible while nothing
+        // published it; the status file makes it wrong out loud, and the taskbar pill was wrong all along.
+        _model.AnchorToCurrent();
+
+        _watcher = new PollingDesktopWatcher(_desktops);
+        // Re-anchor the cursor onto wherever we actually are. That raises Changed, which syncs the pill and
+        // schedules a status write — so every reader converges on the truth from this one hook.
+        _watcher.CurrentChanged += _ => _model!.AnchorToCurrent();
+        // Our own navigation must not come back round as an "external" change on the next tick.
+        _model.Changed += () =>
+        {
+            if (_desktops is not null) _watcher?.Acknowledge(_desktops.Current);
+        };
+        _watcher.Start();
+    }
+
+    private void StartPublishingStatus()
+    {
+        if (_model is null) return;
+        _status = new StatusPublisher(_model, AppVersion, ResolveCliPath());
+        _model.Changed += () => _status?.Schedule();
+        _status.PublishNow(); // be readable the instant the tray is up, not one navigation later
+    }
+
+    private void StartControlServer()
+    {
+        _control = new ControlServer(HandleControlRequest);
+        _control.Start();
+    }
+
+    /// <summary>
+    /// Where <c>htree.exe</c> sits, if it shipped alongside us. Published in the status file so a reader
+    /// never has to guess at an install layout to find the CLI — and so a dev build running from source
+    /// advertises the CLI from that same build rather than an installed one.
+    /// </summary>
+    private static string? ResolveCliPath()
+    {
+        try
+        {
+            string? dir = System.IO.Path.GetDirectoryName(Environment.ProcessPath);
+            if (string.IsNullOrEmpty(dir)) return null;
+            string cli = System.IO.Path.Combine(dir, "htree.exe");
+            return System.IO.File.Exists(cli) ? cli : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Carry out a request that arrived on the control pipe. Always runs on the UI thread (the server
+    /// marshals it there), because everything it touches — the desktop COM, the navigation model — belongs
+    /// to that thread.
+    /// </summary>
+    private ControlResponse HandleControlRequest(ControlRequest request) => request.Command switch
+    {
+        ControlRequest.CommandPing => ControlResponse.Success(),
+        ControlRequest.CommandGoto => HandleGoto(request.Goto),
+        _ => ControlResponse.Failure(ExitCode.BadUsage, $"Unknown command '{request.Command}'."),
+    };
+
+    private ControlResponse HandleGoto(GotoRequest? go)
+    {
+        if (_model is null || _desktops is null)
+            return ControlResponse.Failure(ExitCode.Failed, "Hypertree is still starting up.");
+        if (go is null)
+            return ControlResponse.Failure(ExitCode.BadUsage, "goto needs a target.");
+
+        // The client resolved its target against a status file that may be a moment old, and desktops can
+        // disappear from Task View at any time. Reconcile so we act on the live layout, exactly as the map
+        // and the jump palette do before offering a jump.
+        _model.Reconcile();
+
+        DesktopId from = _desktops.Current;
+        GoToResult result = _model.GoTo(go.BranchId, go.Desktop, out string landed);
+        if (result == GoToResult.NoSuchBranch)
+            return ControlResponse.Failure(ExitCode.UnknownTarget, "That branch no longer exists.");
+        if (result == GoToResult.NoSuchDesktop)
+            return ControlResponse.Failure(ExitCode.UnknownTarget, "That desktop no longer exists.");
+
+        // Same bookkeeping a jump from the map does, so "last visited" and the pill stay honest about a
+        // move that came from outside.
+        if (_desktops.Current != from) _lastVisited = from;
+        _status?.PublishNow(); // the caller may read the file immediately; don't make it wait out the debounce
+        return ControlResponse.Success(landed);
     }
 
     // Picks the changelog sections to surface on this launch: nothing unless the feature is on, we have a
@@ -1268,6 +1385,9 @@ public sealed class App : Application
     {
         _shuttingDown = true; // stop the settings window's Closed handler from re-registering hotkeys on exit
         _gesturePoll?.Stop();
+        _watcher?.Dispose();
+        _control?.Dispose();  // stop accepting before the status file says we've gone
+        _status?.Dispose();   // deletes status.json, so nothing reports a tray that isn't here
         SuspendHotkeys();
         if (_tray is not null) _tray.IsVisible = false;
         _stage?.Close(); // closes the shared host + dims (map / palettes / prompts / move all live here)

@@ -67,9 +67,12 @@ internal sealed class SettingsWindow : Window
         try { Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://hypertree/Assets/icon.ico"))); } catch { }
         RequestedThemeVariant = ThemeVariant.Dark;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        SizeToContent = SizeToContent.WidthAndHeight;
+        // Height follows the content; width is fixed. Sizing to content in BOTH directions fights the
+        // explicit Width below — the window would collapse back to whatever the widest row happens to
+        // measure, which is how it stayed narrow regardless of what Width said.
+        SizeToContent = SizeToContent.Height;
         CanResize = false;
-        Width = 480;
+        Width = 720;
         Background = new SolidColorBrush(Color.Parse("#12161F"));
 
         _startOnLogin = Toggle(startOnLogin);

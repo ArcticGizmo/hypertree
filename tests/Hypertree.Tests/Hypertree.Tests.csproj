@@ -18,5 +18,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Hypertree.Core\Hypertree.Core.csproj" />
+    <!-- htree's target resolution (name → stable id, ambiguity, 1-based positions) is the fiddliest
+         logic in the CLI and the part a user meets first, so it's tested here rather than by hand.
+         Referencing an Exe project is fine: only its types are used, it is never launched. -->
+    <ProjectReference Include="..\..\src\Hypertree.Cli\Hypertree.Cli.csproj" />
   </ItemGroup>
 </Project>

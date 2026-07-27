@@ -18,6 +18,11 @@ public sealed class PersistedState
 
 public sealed class PersistedBranch
 {
+    /// <summary>The branch's stable identity (<see cref="Scopes.Branch.Id"/>). Empty in two cases, both
+    /// handled by minting a fresh one on load: state written by a build before ids existed, and snapshots,
+    /// which are templates rather than references to a particular branch.</summary>
+    public Guid Id { get; set; }
+
     public string Name { get; set; } = "";
     public int LastUsedIndex { get; set; }
     public List<PersistedDesktop> Desktops { get; set; } = new();

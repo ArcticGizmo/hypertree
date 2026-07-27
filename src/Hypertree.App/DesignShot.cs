@@ -53,6 +53,76 @@ internal static class DesignShot
         // middle of the gap it inserts at.
         SaveLayoutCheck(new NavMap(Top(2), 2, true, new List<NavMapBranch> { Feat(false, 1), Hotfix() }, 1),
                         Path.Combine(outDir, "board-drag-layout.png"));
+
+        SaveCards(outDir);
+    }
+
+    /// <summary>
+    /// The two card windows, rendered at the exact size they open at.
+    /// </summary>
+    /// <remarks>
+    /// Neither can be reached from here by any other means: both are opened from the tray menu or by a
+    /// version change, so checking a layout tweak otherwise means installing a build and clicking through
+    /// to it. They are also both <c>CanResize = false</c>, which makes their width a design decision
+    /// rather than something the user can fix — worth being able to look at on demand.
+    /// </remarks>
+    private static void SaveCards(string outDir)
+    {
+        var activator = PlatformServices.CreateForegroundActivator();
+
+        // Read the real embedded CHANGELOG so the shot shows genuine content at genuine lengths — made-up
+        // bullets would not tell us whether real ones wrap.
+        var markdown = ChangelogMarkdown.LoadEmbedded() ?? "";
+        var sections = Changelog.ChangelogParser.Parse(markdown)
+            .Where(s => s.Version is not null)
+            .Take(2)
+            .ToList();
+
+        var changelog = new ChangelogWindow(
+            "What's new in Hypertree", "Here's what changed across the last 2 releases.",
+            sections, activator, onSuppress: () => { });
+        SaveCard(changelog, Path.Combine(outDir, "card-changelog.png"));
+
+        var settings = new SettingsWindow(new Settings.AppSettings(), startOnLogin: true,
+                                          onSave: (_, _) => { }, activator);
+        SaveCard(settings, Path.Combine(outDir, "card-settings.png"));
+    }
+
+    /// <summary>
+    /// Render a card window at the size it actually opens at.
+    /// </summary>
+    /// <remarks>
+    /// The window is shown, off the side of the screen, rather than having its content re-hosted in a
+    /// detached container. Templated controls — every <c>Button</c> on these cards — only acquire a
+    /// template once they are inside a styled window root, so a detached render silently drops them and
+    /// produces a screenshot missing exactly the parts most worth looking at. Showing it for real also
+    /// means the measured size is the true one, including whatever <c>SizeToContent</c> settles on.
+    /// </remarks>
+    private static void SaveCard(Window window, string path)
+    {
+        window.WindowStartupLocation = WindowStartupLocation.Manual;
+        window.Position = new PixelPoint(-32000, -32000); // offscreen: no flash on the real desktop
+        window.ShowInTaskbar = false;
+        window.Show();
+
+        // Let styles apply and layout settle before measuring or rendering. One pass isn't always enough:
+        // applying a template can dirty layout again.
+        for (int i = 0; i < 4; i++)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+        }
+
+        int w = (int)Math.Ceiling(window.Bounds.Width);
+        int h = (int)Math.Ceiling(window.Bounds.Height);
+        if (w <= 0 || h <= 0) { window.Close(); return; }
+
+        var rtb = new RenderTargetBitmap(new PixelSize(w, h), new Vector(96, 96));
+        rtb.Render(window);
+        using (var fs = File.Create(path)) rtb.Save(fs);
+        Console.WriteLine($"wrote {path} ({w}x{h})");
+
+        window.Close();
     }
 
     // A representative primary-monitor size, so the shot shows the real full-screen, centred layout

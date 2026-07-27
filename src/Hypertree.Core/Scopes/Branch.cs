@@ -18,15 +18,28 @@ public sealed class Branch
 {
     private readonly List<DesktopRef> _desktops;
 
+    /// <summary>
+    /// Stable identity, minted at creation and persisted. Nothing else about a branch is safe to address
+    /// it by from outside: <see cref="Name"/> isn't unique or enforced, and the list index shifts under
+    /// <see cref="NavigationModel.AddBranchBelow"/> / <see cref="NavigationModel.MoveBranchToRow"/> — so a
+    /// caller that read the list, then acted on an index, could land on a branch the user has since moved.
+    /// This is what the status file publishes and what <c>htree goto --id</c> resolves.
+    /// </summary>
+    public Guid Id { get; }
+
     public string Name { get; }
     public IReadOnlyList<DesktopRef> Desktops => _desktops;
 
     /// <summary>Index within <see cref="Desktops"/> last occupied — the resume point. Always valid.</summary>
     public int LastUsedIndex { get; set; }
 
-    public Branch(string name, IReadOnlyList<DesktopRef> desktops, int lastUsedIndex = 0)
+    /// <param name="id">Restores a persisted identity. Omit (or pass <see cref="Guid.Empty"/>) for a branch
+    /// being created now, or one restored from a snapshot — a snapshot is a template, so each restore is a
+    /// genuinely new branch and mints a new id.</param>
+    public Branch(string name, IReadOnlyList<DesktopRef> desktops, int lastUsedIndex = 0, Guid id = default)
     {
         if (desktops.Count == 0) throw new ArgumentException("A branch needs at least one desktop.", nameof(desktops));
+        Id = id == Guid.Empty ? Guid.NewGuid() : id;
         Name = name;
         _desktops = desktops.ToList();
         LastUsedIndex = Math.Clamp(lastUsedIndex, 0, _desktops.Count - 1);
