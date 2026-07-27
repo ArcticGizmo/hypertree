@@ -9,6 +9,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.1.4] - 2026-07-27
+
+### Fixed
+
+- `Ctrl+Alt+Arrow` steps from the desktop you're actually on, even when another app switched you there.
+- The flash board centres on that desktop too, instead of on where Hypertree last left you.
+
+---
+
 ## [v0.1.3] - 2026-07-26
 
 ### Added

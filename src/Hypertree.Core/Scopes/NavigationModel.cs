@@ -508,6 +508,40 @@ public sealed class NavigationModel
         Resync(); // rebuilds the top row from the live list, re-anchors to the OS current, saves
     }
 
+    /// <summary>
+    /// Re-point the cursor at the desktop the OS is <em>actually</em> on, for when something outside
+    /// Hypertree moved us there — another launcher jumping to a window, Task View, Win+Ctrl+Arrow. The
+    /// layout is untouched (unlike <see cref="Resync"/>, which re-derives the top row), so this is cheap
+    /// enough to run before every navigation keystroke; mid-gesture it's a no-op, since we're already
+    /// standing on the desktop our own last switch put us on. Falls back to a full <see cref="Resync"/>
+    /// when the OS is on a desktop we don't track yet (created behind our back). Returns true when the
+    /// cursor actually moved.
+    /// </summary>
+    public bool AnchorToCurrent()
+    {
+        DesktopId cur = _desktops.Current;
+        if (Locate(cur) is not { } at) { Resync(); return true; }
+
+        bool alreadyThere = at.onMain
+            ? _onMain && _topIndex == at.desktopIndex
+            : !_onMain && _currentBranch == at.branchIndex
+                       && _branches[at.branchIndex].LastUsedIndex == at.desktopIndex;
+        _target = cur; // either way, this is the desktop the next Commit measures a move from
+        if (alreadyThere) return false;
+
+        if (at.onMain) { _onMain = true; _topIndex = at.desktopIndex; }
+        else
+        {
+            _onMain = false;
+            _currentBranch = at.branchIndex;
+            _branches[at.branchIndex].LastUsedIndex = at.desktopIndex;
+        }
+        ClampState();
+        Save();
+        Changed?.Invoke();
+        return true;
+    }
+
     /// <summary>Re-anchor to whatever desktop the OS is now showing (after a create/destroy). Main keeps
     /// its slot; only the cursor moves.</summary>
     public void Resync()

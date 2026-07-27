@@ -345,6 +345,56 @@ public class NavigationModelTests
         Assert.Equal(new[] { "feat-2" }, map.Branches.Select(g => g.Name));
     }
 
+    // ── Re-anchoring after a switch made outside Hypertree ───────────────────────
+
+    [Fact]
+    public void AnchorToCurrent_homes_the_cursor_onto_an_externally_switched_desktop()
+    {
+        var (m, c) = New();          // three main desktops, cursor on T0
+        c.JumpExternally(T2);        // another app jumped us to T2 behind our back
+        Assert.True(m.AnchorToCurrent());
+        Assert.True(m.OnTop);
+        Assert.Equal(2, m.CurrentTopIndex);
+        Assert.Empty(c.Switches);    // re-anchoring never moves the user
+    }
+
+    [Fact]
+    public void Navigating_after_an_external_jump_moves_from_where_you_actually_are()
+    {
+        var (m, c) = New(current: 0);
+        c.JumpExternally(T1);        // externally moved to the middle desktop
+        m.AnchorToCurrent();
+        m.Apply(NavAction.MoveRight);
+        Assert.Equal(new[] { T2 }, c.Switches); // one step right of T1, not of the stale T0
+    }
+
+    [Fact]
+    public void AnchorToCurrent_homes_onto_a_branch_desktop_and_remembers_it_as_last_used()
+    {
+        var (m, c) = Pivot();        // feat-1: a,b,c (10,11,12) above main; feat-2 below
+        c.JumpExternally(D(12));     // externally jumped to feat-1's "c"
+        Assert.True(m.AnchorToCurrent());
+        Assert.False(m.OnTop);
+        Assert.Equal((0, 2), m.CurrentBranchDesktop);
+    }
+
+    [Fact]
+    public void AnchorToCurrent_is_a_no_op_when_the_cursor_is_already_there()
+    {
+        var (m, _) = New();
+        Assert.False(m.AnchorToCurrent());
+        Assert.Equal(0, m.CurrentTopIndex);
+    }
+
+    [Fact]
+    public void Reconcile_re_anchors_onto_an_externally_switched_desktop()
+    {
+        var (m, c) = New();          // the map/palette path — Reconcile precedes every surface
+        c.JumpExternally(T2);
+        m.Reconcile();
+        Assert.True(m.BuildMap().TopRow[2].IsCurrent);
+    }
+
     // ── Reconcile against externally-deleted desktops ───────────────────────────
 
     [Fact]

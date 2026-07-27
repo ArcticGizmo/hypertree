@@ -43,6 +43,11 @@ internal sealed class FakeDesktopController : IDesktopController
         Current = id;
     }
 
+    /// <summary>Simulate a desktop switch made outside Hypertree (another launcher jumping to one of its
+    /// windows, Task View, Win+Ctrl+Arrow): <see cref="Current"/> moves without the model ever asking, so
+    /// nothing lands in <see cref="Switches"/> and the model's cursor is left behind.</summary>
+    public void JumpExternally(DesktopId id) => Current = id;
+
     /// <summary>Simulate an external desktop deletion (e.g. the user removing it from Task View), so
     /// reconciliation can be tested. Removes it from the list; if it was current, falls back.</summary>
     public void Remove(DesktopId id, DesktopId fallback)

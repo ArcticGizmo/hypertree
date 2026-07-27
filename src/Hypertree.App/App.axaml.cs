@@ -251,6 +251,11 @@ public sealed class App : Application
         // The move flow owns the arrows while it's up (its own plain-arrow handlers drive it), so an
         // out-of-habit nav chord mustn't also navigate underneath.
         if (_stage?.Current is MoveContent) return;
+        // Something outside Hypertree may have moved us since our last navigation (another launcher
+        // jumping to a window, Task View, Win+Ctrl+Arrow). Start this move from where we actually are,
+        // not from where our own cursor was left. Mid-gesture it's a no-op — we're already standing on
+        // the desktop the previous keystroke switched to.
+        _model.AnchorToCurrent();
         // Start of a gesture: remember where we came from (and which modifiers to watch), so releasing
         // them can record it as "last visited". A poll watches for the release (flashing or in the map).
         _gestureFrom ??= _desktops.Current;
