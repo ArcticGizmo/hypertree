@@ -54,6 +54,12 @@ internal static class DesignShot
         SaveLayoutCheck(new NavMap(Top(2), 2, true, new List<NavMapBranch> { Feat(false, 1), Hotfix() }, 1),
                         Path.Combine(outDir, "board-drag-layout.png"));
 
+        // The metro-map view of the same two states, so it can be compared tile-for-station against the board.
+        SaveMetro(new NavMap(Top(2), 2, true, new List<NavMapBranch> { Feat(false, 1), Hotfix() }, 1),
+                  Path.Combine(outDir, "metro-top-row.png"));
+        SaveMetro(new NavMap(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1),
+                  Path.Combine(outDir, "metro-dived.png"));
+
         SaveCards(outDir);
     }
 
@@ -184,6 +190,10 @@ internal static class DesignShot
 
         Save(new Panel { Children = { board, marks } }, path);
     }
+
+    // Render the metro-map view of a board to PNG, over the same dark ground the real overlay uses.
+    private static void SaveMetro(NavMap map, string path)
+        => Save(MetroView.Render(map, ScreenW, ScreenH, 1.0), path);
 
     private static void Save(NavMap map, string path)
         // Pass delete callbacks so the × badges render in the verification shot.
