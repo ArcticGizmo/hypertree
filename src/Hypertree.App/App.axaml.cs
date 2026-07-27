@@ -347,6 +347,7 @@ public sealed class App : Application
     {
         HotkeyCommand.CommandPalette => ToggleCommandPalette,
         HotkeyCommand.MoveWindows    => ToggleMoveWindows,
+        HotkeyCommand.Peek           => () => Peek(mods),
         _ when NavCommands.TryGetValue(cmd, out NavAction action) => () => Navigate(action, mods),
         _ => () => { },
     };
@@ -379,13 +380,44 @@ public sealed class App : Application
         // them can record it as "last visited". A poll watches for the release (flashing or in the map).
         _gestureFrom ??= _desktops.Current;
         _gestureMods = mods;
-        if (!RevealOnly()) _model.Apply(action);
+        // A cold press with "show before moving" on only raises the board — it doesn't move, so it gets a
+        // plain fade rather than a directional wipe (null move below).
+        bool revealOnly = RevealOnly();
+        // The wipe plays only when the user has it on AND Windows' "show animations" is on — the OS
+        // reduce-motion preference wins.
+        bool animate = _settings.AnimateNavigation && WindowFx.SystemAnimationsEnabled();
+        bool inMap = _overlay is { IsOpen: true };
+        // Apply reports whether the desktop actually changed: false at a row's edge or when already there.
+        // A move that goes nowhere must not animate — no wipe, just leave the board as is.
+        bool moved = !revealOnly && _model.Apply(action);
         // In the map, the nav chord switches for real, so the selection follows onto the new desktop
         // (green "here" and blue selection rejoin); in the transient flash, the green outline marks the
         // gesture's origin so the jump's direction/distance reads at a glance.
-        if (_overlay is { IsOpen: true }) _overlay.SyncToCurrent(_model.BuildMap());
-        else _hud?.Flash(_model.BuildMap(_gestureFrom), mods);
+        if (inMap) _overlay!.SyncToCurrent(_model.BuildMap());
+        else
+        {
+            // Reveal fades the board in; a real move wipes; a blocked move does neither.
+            bool doAnimate = animate && (revealOnly || moved);
+            _hud?.Flash(_model.BuildMap(_gestureFrom), mods, moved ? action : null, doAnimate,
+                        _settings.SweepFromLeadingEdge);
+        }
         StartGesturePoll();
+    }
+
+    // Peek: raise the flash on where we actually are and hold it while <paramref name="mods"/> stay down,
+    // without moving. A preview on demand — and, since the board is up afterwards, a following nav chord
+    // moves for real (the same hand-off as "show before moving", but triggered explicitly and regardless of
+    // that setting). No gesture is recorded: nothing moved, so there's no "last visited" to remember.
+    private void Peek(HotkeyModifiers mods)
+    {
+        if (_model is null || _desktops is null) return;
+        // The move flow owns the arrows while it's up; the map is already a persistent board — neither wants
+        // a transient peek over it.
+        if (_stage?.Current is MoveContent) return;
+        if (_overlay is { IsOpen: true }) return;
+        _model.AnchorToCurrent(); // show where we stand now, not our stale cursor
+        bool animate = _settings.AnimateNavigation && WindowFx.SystemAnimationsEnabled();
+        _hud?.Flash(_model.BuildMap(), mods, move: null, animate: animate);
     }
 
     // "Show before moving": with the setting on, a nav chord that arrives while the flash is off screen

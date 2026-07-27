@@ -9,6 +9,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.2.2] - 2026-07-27
+
+### Added
+
+- **Animated navigation moves**, on by default: a soft gradient wipe passes in the direction you moved — left/right along a row, up/down to dive or surface.
+- **Peek at the board** with `Ctrl+Alt+Space` (rebindable): raises the flash where you are and holds it while the modifiers stay down, without moving.
+- Pick which edge the wipe starts from in **Settings → Navigation** ("Sweep from the leading edge").
+- Turn the wipe off in **Settings → Navigation**; it also follows the Windows *Show animations* setting.
+
+---
+
 ## [v0.2.1] - 2026-07-27
 
 ### Added
