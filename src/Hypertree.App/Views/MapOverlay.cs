@@ -13,8 +13,10 @@ namespace Hypertree.App.Views;
 /// <see cref="OverlayStage"/>. Renders the full board on the primary monitor over the stage's dim
 /// backdrop and drives a <b>selection cursor</b> that moves purely visually: the arrow keys (or a single
 /// click) point at any desktop <b>without switching to it</b>, so you can inspect and manage the whole
-/// layout from wherever you are. The selected tile carries the blue focus outline; the desktop you're
-/// actually on keeps the green "here" marker (so the two never blur). Ctrl+Alt+Arrow still switches
+/// layout from wherever you are. <b>↑/↓</b> step between rows and land on each row's <em>own</em> desktop —
+/// where the selection last sat in it, or its resume point — the same re-entry a real switch does, rather
+/// than dragging a column across rows of different lengths. The selected tile carries the blue focus
+/// outline; the desktop you're actually on keeps the green "here" marker (so the two never blur). Ctrl+Alt+Arrow still switches
 /// desktops (handled by <c>App</c>) and re-homes the selection onto the desktop you land on; a
 /// double-click does the same for a specific tile.
 ///
@@ -50,6 +52,10 @@ internal sealed class MapOverlay : IStageContent
     private bool _initialised;
     private int _row; // index into the combined row sequence (branches split around main)
     private int _col; // index within the current row
+    // Where the selection last sat in each row, so stepping up/down back into a row returns to that desktop
+    // rather than carrying the column across. Keyed by branch index (-1 = main); seeded from the model's own
+    // resume points, then kept current as the selection browses. See MoveRow.
+    private readonly Dictionary<int, int> _colOfRow = new();
 
     /// <summary>Double-click / activate a desktop — jump there. Top-row index, or branch index + desktop.</summary>
     public event Action<int>? JumpTopRequested;
@@ -99,6 +105,7 @@ internal sealed class MapOverlay : IStageContent
     {
         _base = map;
         _initialised = false;
+        _colOfRow.Clear(); // a fresh map session re-seeds each row from the model's resume points
         _stage.Summon(this);
     }
 
@@ -164,10 +171,10 @@ internal sealed class MapOverlay : IStageContent
 
             case Key.Escape: e.Handled = true; Close(); break;
             case Key.Enter: JumpToSelection(); e.Handled = true; break;
-            case Key.Left: Move(0, -1); e.Handled = true; break;
-            case Key.Right: Move(0, +1); e.Handled = true; break;
-            case Key.Up: Move(-1, 0); e.Handled = true; break;
-            case Key.Down: Move(+1, 0); e.Handled = true; break;
+            case Key.Left: MoveCol(-1); e.Handled = true; break;
+            case Key.Right: MoveCol(+1); e.Handled = true; break;
+            case Key.Up: MoveRow(-1); e.Handled = true; break;
+            case Key.Down: MoveRow(+1); e.Handled = true; break;
             case Key.F when e.KeyModifiers.HasFlag(KeyModifiers.Control): FinderRequested?.Invoke(); e.Handled = true; break;
             case Key.R: RenameRequested?.Invoke(CurrentSelection()); e.Handled = true; break;
             case Key.N: NewDesktopRequested?.Invoke(); e.Handled = true; break;
@@ -196,10 +203,35 @@ internal sealed class MapOverlay : IStageContent
     private int TilesInRow(int row)
         => RowIsMain(row) ? _base.TopRow.Count : _base.Branches[BranchOfRow(row)].Desktops.Count;
 
-    private void Move(int dRow, int dCol)
+    // Key a row for the remembered-column table by the thing that identifies it in the model (a branch, or
+    // main), not by its row number — main's slot and a branch's row both move as the stack is rearranged.
+    private int KeyOfRow(int row) => RowIsMain(row) ? -1 : BranchOfRow(row);
+
+    // The column to land on when the selection steps into `row`: where it last sat in that row this session,
+    // else the row's own resume point from the model (a branch's last-used desktop, or main's cursor) — the
+    // same column the row is already drawn centred on, so stepping into it doesn't move the board.
+    private int RememberedCol(int row)
+        => RowIsMain(row)
+            ? ColumnIn(-1, _base.TopCursor, _base.TopRow.Count)
+            : ColumnIn(BranchOfRow(row), _base.Branches[BranchOfRow(row)].Cursor, TilesInRow(row));
+
+    // ↑/↓ — step to the row above/below, landing on that row's own desktop rather than keeping the column.
+    // Rows are different lengths, so carrying the column would collapse it to 0 the moment it crossed a
+    // shorter row (a one-desktop branch) and every row below would then read as "first desktop"; resuming
+    // per row is also what a real switch does (NavigationModel enters a branch at its LastUsedIndex).
+    private void MoveRow(int delta)
     {
-        if (dRow != 0) _row = Math.Clamp(_row + dRow, 0, RowCount - 1);
-        _col = Math.Clamp(_col + dCol, 0, Math.Max(0, TilesInRow(_row) - 1));
+        int row = Math.Clamp(_row + delta, 0, RowCount - 1);
+        if (row == _row) return;
+        _row = row;
+        _col = RememberedCol(row);
+        Render(); // clamps, then records this row's column
+    }
+
+    // ←/→ — move along the current row.
+    private void MoveCol(int delta)
+    {
+        _col = Math.Clamp(_col + delta, 0, Math.Max(0, TilesInRow(_row) - 1));
         Render();
     }
 
@@ -486,6 +518,7 @@ internal sealed class MapOverlay : IStageContent
     {
         if (!_initialised) { InitSelection(); _initialised = true; }
         ClampSelection();
+        _colOfRow[KeyOfRow(_row)] = _col; // this row's resume column, for a later step back into it
 
         double width = _stage.HostWidth > 0 ? _stage.HostWidth : 1280;
         double height = _stage.HostHeight > 0 ? _stage.HostHeight : 800;
@@ -536,6 +569,12 @@ internal sealed class MapOverlay : IStageContent
     // Recolour the base map so the *selection* is the blue focus tile and the desktop you're actually on
     // keeps the green "here" marker. BoardView centres on the IsCurrent row, so the selection stays
     // centred as it moves. (Mirrors the former RenameContent.)
+    //
+    // Every row's cursor is also re-pointed at the column the selection has in it — the live one for the row
+    // the selection is in, the remembered one for the rest — because BoardView centres each row on its own
+    // cursor. Left on the model's cursors, a row the selection had just walked along would snap back to the
+    // desktop you're actually on the instant the selection stepped off it: step from main's 4th desktop into
+    // a branch and main would slide sideways, leaving the branch apparently hung under main's 1st desktop.
     private NavMap BuildDisplayMap()
     {
         bool selMain = RowIsMain(_row);
@@ -555,16 +594,23 @@ internal sealed class MapOverlay : IStageContent
             {
                 Desktops = desks,
                 IsCurrentLevel = g.IsCurrentLevel || selHere, // keep the branch you're selecting into bright
-                Cursor = selHere ? _col : g.Cursor,           // centre the selected branch on its cursor
+                Cursor = selHere ? _col : ColumnIn(gi, g.Cursor, g.Desktops.Count),
             };
         }).ToList();
 
         return _base with
         {
             TopRow = top, Branches = branches,
-            OnTop = selMain, TopCursor = selMain ? _col : _base.TopCursor,
+            OnTop = selMain,
+            TopCursor = selMain ? _col : ColumnIn(-1, _base.TopCursor, _base.TopRow.Count),
         };
     }
+
+    // The column a row that doesn't hold the selection is drawn centred on: where the selection last sat in
+    // it, else the model's own cursor. Clamped, since a remembered column can outlive a row that has since
+    // lost desktops.
+    private int ColumnIn(int key, int modelCursor, int count)
+        => Math.Clamp(_colOfRow.TryGetValue(key, out int col) ? col : modelCursor, 0, Math.Max(0, count - 1));
 
     // ── Shortcut legend (top-left) ─────────────────────────────────────────────────
 

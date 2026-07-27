@@ -9,6 +9,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.1.5] - 2026-07-27
+
+### Fixed
+
+- In the map, `↑`/`↓` land on each row's own desktop — the one you last selected there, or the branch's resume point.
+- A row the selection steps off keeps its place instead of sliding back to the desktop you're on.
+
+---
+
 ## [v0.1.4] - 2026-07-27
 
 ### Fixed
