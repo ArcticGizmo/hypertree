@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Threading;
 using Hypertree.Scopes;
 
 namespace Hypertree.App.Views;
@@ -46,7 +47,9 @@ internal static class MetroView
 
     private static Color BranchColour(int branchIndex) => LinePalette[((branchIndex % LinePalette.Length) + LinePalette.Length) % LinePalette.Length];
 
-    public static Control Render(NavMap map, double screenW, double screenH, double s = 1.0)
+    /// <param name="animate">When true (the live overlay), the "you are here" train gently pulses. The
+    /// offscreen shot path leaves it false so a capture is a single settled frame.</param>
+    public static Control Render(NavMap map, double screenW, double screenH, double s = 1.0, bool animate = false)
     {
         double stride = 156 * s;   // spacing between stations along a line
         double lineW = 8 * s;      // route stroke width
@@ -104,7 +107,7 @@ internal static class MetroView
         for (int i = 0; i < lines.Count; i++)
         {
             double op = lines[i].Active ? 1.0 : lines[i].IsMain ? 0.82 : 0.5;
-            DrawLine(canvas, lines[i], bx, y[i], stride, lineW, rOut, s, op);
+            DrawLine(canvas, lines[i], bx, y[i], stride, lineW, rOut, s, op, animate);
         }
 
         return canvas;
@@ -114,6 +117,30 @@ internal static class MetroView
     // are near-fixed-width, so char-count × advance + padding is close enough to centre by.
     private static double EstimateBadgeWidth(string name, double s)
         => name.Length * 7.4 * s + 22 * s;
+
+    // The train "breathes": a slow opacity pulse on the here-halo, so your position is alive on the map. Built
+    // as a DispatcherTimer tween to match the app's hand-rolled animation style (HudWindow), and tied to the
+    // halo's visual-tree lifetime so it starts when the map shows and stops the instant a re-render or close
+    // detaches it — no leaked timers ticking on orphaned controls. Best-effort: if anything throws, the halo
+    // just sits static rather than taking the map down with it.
+    private static void Pulse(Control halo)
+    {
+        try
+        {
+            const double lo = 0.5, hi = 1.0, periodS = 1.6, tickS = 0.033;
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(tickS) };
+            double t = 0;
+            timer.Tick += (_, _) =>
+            {
+                t += tickS;
+                double phase = (Math.Sin(t / periodS * 2 * Math.PI - Math.PI / 2) + 1) / 2; // 0→1→0, eased
+                halo.Opacity = lo + (hi - lo) * phase;
+            };
+            halo.AttachedToVisualTree += (_, _) => timer.Start();
+            halo.DetachedFromVisualTree += (_, _) => timer.Stop();
+        }
+        catch { /* a flourish, never load-bearing */ }
+    }
 
     private sealed record Station(string Label, bool Focused, bool Here, int WindowCount);
     private sealed record Line(string Name, Color Colour, bool IsMain, bool Active, int Cursor, IReadOnlyList<Station> Stations);
@@ -127,7 +154,7 @@ internal static class MetroView
                g.Desktops.Select(d => new Station(d.Label, d.IsCurrent, d.IsHere, d.WindowCount)).ToList());
 
     private static void DrawLine(Canvas canvas, Line line, double cx, double y, double stride,
-                                 double lineW, double rOut, double s, double op)
+                                 double lineW, double rOut, double s, double op, bool animate)
     {
         int n = line.Stations.Count;
         double originX = cx - line.Cursor * stride; // the cursor station lands on cx
@@ -158,7 +185,7 @@ internal static class MetroView
         for (int i = 0; i < n; i++)
         {
             double sx = originX + i * stride;
-            AddStation(canvas, line.Stations[i], line.Colour, sx, y, rOut, s, op);
+            AddStation(canvas, line.Stations[i], line.Colour, sx, y, rOut, s, op, animate);
             AddStationLabel(canvas, line.Stations[i], sx, y, rOut, s, op);
         }
     }
@@ -167,7 +194,7 @@ internal static class MetroView
     // classic transit tick. Focus (blue) and here (green) get their own treatment so target vs. actual-position
     // read at a glance. Empty desktops (no windows) read as a smaller, hollow "minor" station.
     private static void AddStation(Canvas canvas, Station st, Color lineColour, double x, double y,
-                                   double rOut, double s, double op)
+                                   double rOut, double s, double op, bool animate)
     {
         bool empty = st.WindowCount == 0;
         bool marked = st.Focused || st.Here;
@@ -213,6 +240,7 @@ internal static class MetroView
             Canvas.SetLeft(halo, x - rOut * 1.7);
             Canvas.SetTop(halo, y - rOut * 1.7);
             canvas.Children.Add(halo);
+            if (animate) Pulse(halo);
 
             var core = new Ellipse
             {

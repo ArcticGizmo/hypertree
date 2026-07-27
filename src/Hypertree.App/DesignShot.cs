@@ -60,6 +60,17 @@ internal static class DesignShot
         SaveMetro(new NavMap(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1),
                   Path.Combine(outDir, "metro-dived.png"));
 
+        // A busier board: four branches (two above main, two below) exercise the line-colour cycle and the
+        // vertical stack, and a one-desktop branch checks the single-station stub route.
+        var busy = new List<NavMapBranch>
+        {
+            new(0, "FEAT-123", new List<NavMapTile> { new("SPA", false, WindowCount: 3), new("API", false, WindowCount: 1), new("Mobile", false, WindowCount: 0) }, false, 1),
+            new(1, "release-4.2", new List<NavMapTile> { new("build", false, WindowCount: 2), new("test", false, WindowCount: 5), new("docs", false, WindowCount: 1), new("ship", false, WindowCount: 0) }, false, 0),
+            new(2, "hotfix", new List<NavMapTile> { new("db", false, WindowCount: 1), new("api", false, WindowCount: 0) }, false, 0),
+            new(3, "spike", new List<NavMapTile> { new("scratch", false, WindowCount: 2) }, false, 0),
+        };
+        SaveMetro(new NavMap(Top(2), 2, true, busy, 2), Path.Combine(outDir, "metro-busy.png"));
+
         SaveCards(outDir);
     }
 
