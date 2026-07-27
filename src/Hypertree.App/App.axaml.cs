@@ -379,12 +379,21 @@ public sealed class App : Application
         // them can record it as "last visited". A poll watches for the release (flashing or in the map).
         _gestureFrom ??= _desktops.Current;
         _gestureMods = mods;
-        if (!RevealOnly()) _model.Apply(action);
+        // A cold press with "show before moving" on only raises the board — it doesn't move, so it gets a
+        // plain fade rather than a directional slide (null move below).
+        bool revealOnly = RevealOnly();
+        if (!revealOnly) _model.Apply(action);
         // In the map, the nav chord switches for real, so the selection follows onto the new desktop
         // (green "here" and blue selection rejoin); in the transient flash, the green outline marks the
         // gesture's origin so the jump's direction/distance reads at a glance.
         if (_overlay is { IsOpen: true }) _overlay.SyncToCurrent(_model.BuildMap());
-        else _hud?.Flash(_model.BuildMap(_gestureFrom), mods);
+        else
+        {
+            // The slide plays only when the user has it on AND Windows' "show animations" is on — the OS
+            // reduce-motion preference wins. A reveal press has no direction, so it fades in place.
+            bool animate = _settings.AnimateNavigation && WindowFx.SystemAnimationsEnabled();
+            _hud?.Flash(_model.BuildMap(_gestureFrom), mods, revealOnly ? null : action, animate);
+        }
         StartGesturePoll();
     }
 

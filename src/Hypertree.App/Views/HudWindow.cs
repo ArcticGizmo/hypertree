@@ -32,6 +32,14 @@ internal sealed class HudWindow : Window
     private HotkeyModifiers _holdMods = HotkeyModifiers.Control | HotkeyModifiers.Alt;
     private int _remaining;
 
+    // The board's slide-in tween (the optional directional animation). At most one runs at a time: each
+    // flash rebuilds the board control, so a press landing mid-slide stops the previous tween before
+    // animating the new board. A hand-rolled DispatcherTimer tween (matching the app's timer style) keeps
+    // the effect off the render thread's transition machinery, which the overlays force-disable elsewhere.
+    private DispatcherTimer? _slide;
+    private const int SlideMs = 170;     // total slide-in duration
+    private const int SlideTickMs = 15;  // ~66fps tween step
+
     public HudWindow()
     {
         WindowDecorations = WindowDecorations.None;
@@ -65,19 +73,73 @@ internal sealed class HudWindow : Window
     }
 
     /// <summary>Show the board centred on the primary screen; it stays up while <paramref name="holdMods"/>
-    /// are held (pass <see cref="HotkeyModifiers.None"/> for a non-gesture flash that just times out).</summary>
-    public void Flash(NavMap map, HotkeyModifiers holdMods)
+    /// are held (pass <see cref="HotkeyModifiers.None"/> for a non-gesture flash that just times out).
+    /// When <paramref name="animate"/> is set the board slides in from the direction of <paramref name="move"/>
+    /// (a directional echo of the traditional desktop-switch slide); a null <paramref name="move"/> just fades.
+    /// The caller gates <paramref name="animate"/> on the user setting and the OS "show animations" preference.</summary>
+    public void Flash(NavMap map, HotkeyModifiers holdMods, NavAction? move = null, bool animate = false)
     {
         _holdMods = holdMods;
         if (!IsVisible) Show();   // realizes the handle so Screens is available
         CoverPrimary();           // sets Width/Height to the primary screen (DIPs)
-        Content = BoardView.Render(map, Width, Height); // board centres itself within the full screen
+        Control board = BoardView.Render(map, Width, Height); // board centres itself within the full screen
+        Content = board;
+        // A press landing mid-slide replaces the board, so retire the previous tween before it writes stale
+        // transform values onto the now-orphaned control.
+        _slide?.Stop();
+        if (animate) AnimateIn(board, move);
         Topmost = true;
         BringToTop();             // the desktop switch can briefly surface the target window over us
 
         _remaining = holdMods != HotkeyModifiers.None ? GraceTicks : TimeoutTicks;
         if (!_poll.IsEnabled) _poll.Start();
     }
+
+    // Slide the freshly-rendered board in from the direction of travel while fading it up. Content-enters-
+    // from-the-direction-you-moved: press right and the board arrives from the right, matching the OS slide.
+    // A null move (a bare "show before moving" reveal, or a result flash) just fades — there's no direction.
+    private void AnimateIn(Control board, NavAction? move)
+    {
+        (double startX, double startY) = SlideOffset(move);
+        var slide = new TranslateTransform(startX, startY);
+        board.RenderTransform = slide;
+        board.Opacity = 0;
+
+        int total = Math.Max(1, SlideMs / SlideTickMs);
+        int tick = 0;
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(SlideTickMs) };
+        timer.Tick += (_, _) =>
+        {
+            double e = EaseOutCubic(Math.Min(1.0, (double)++tick / total));
+            slide.X = startX * (1 - e);
+            slide.Y = startY * (1 - e);
+            board.Opacity = e;
+            if (tick < total) return;
+            timer.Stop();
+            slide.X = 0; slide.Y = 0; board.Opacity = 1;
+            if (ReferenceEquals(_slide, timer)) _slide = null;
+        };
+        _slide = timer;
+        timer.Start();
+    }
+
+    // The board's starting offset for a slide, as a fraction of the screen so it scales with resolution.
+    // A subtle nudge, not a full-screen sweep: this overlay is a cue over the (already-switched) desktop,
+    // so a small directional slide reads without feeling like a second, competing transition.
+    private (double X, double Y) SlideOffset(NavAction? move)
+    {
+        double dx = Width * 0.05, dy = Height * 0.05;
+        return move switch
+        {
+            NavAction.MoveRight => (dx, 0),
+            NavAction.MoveLeft => (-dx, 0),
+            NavAction.Dive => (0, dy),
+            NavAction.Surface => (0, -dy),
+            _ => (0, 0), // no direction — fade only
+        };
+    }
+
+    private static double EaseOutCubic(double t) { double u = 1 - t; return 1 - u * u * u; }
 
     // Re-lift to the top of the always-on-top band. Non-activating, so the flash keeps its
     // no-focus-steal contract even while re-asserting z-order after a desktop switch.

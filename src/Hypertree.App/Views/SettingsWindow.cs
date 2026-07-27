@@ -41,6 +41,7 @@ internal sealed class SettingsWindow : Window
     private readonly ToggleSwitch _startOnLogin;
     private readonly ToggleSwitch _showTaskbarLabel;
     private readonly ToggleSwitch _displayBeforeMoving;
+    private readonly ToggleSwitch _animateNavigation;
     private readonly ToggleSwitch _showChangelog;
 
     // The working set of chords, edited in place by the rebind capture; committed to overrides on Save.
@@ -80,6 +81,7 @@ internal sealed class SettingsWindow : Window
         _startOnLogin = Toggle(startOnLogin);
         _showTaskbarLabel = Toggle(settings.ShowTaskbarLabel);
         _displayBeforeMoving = Toggle(settings.DisplayBeforeMoving);
+        _animateNavigation = Toggle(settings.AnimateNavigation);
         _showChangelog = Toggle(settings.ShowChangelogOnUpdate);
         _hotkeyHint = new TextBlock
         {
@@ -126,6 +128,10 @@ internal sealed class SettingsWindow : Window
                     ToggleRow("Show the board before moving", _displayBeforeMoving),
                     Hint("The first navigation chord only brings the board up so you can see where you are. "
                          + "Keep the modifiers held and press again to move."),
+                    ToggleRow("Animate navigation moves", _animateNavigation),
+                    Hint("Slides the board in from the direction you moved, echoing the traditional "
+                         + "desktop-switch animation. Follows the Windows “Show animations” setting — "
+                         + "with that off, no slide plays."),
 
                     Divider(),
                     Title2("Hotkeys"),
@@ -171,6 +177,7 @@ internal sealed class SettingsWindow : Window
         {
             ShowTaskbarLabel = _showTaskbarLabel.IsChecked ?? true,
             DisplayBeforeMoving = _displayBeforeMoving.IsChecked ?? true,
+            AnimateNavigation = _animateNavigation.IsChecked ?? true,
             ShowChangelogOnUpdate = _showChangelog.IsChecked ?? true,
             LastSeenVersion = _initial.LastSeenVersion, // stamped at startup, not edited here — carry through
             BranchTemplates = _initial.BranchTemplates, // not edited here — carry through untouched

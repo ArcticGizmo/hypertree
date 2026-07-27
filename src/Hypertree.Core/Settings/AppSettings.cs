@@ -26,6 +26,14 @@ public sealed class AppSettings
     /// went. See <c>App.Navigate</c>.</summary>
     public bool DisplayBeforeMoving { get; set; } = true;
 
+    /// <summary>When true, a navigation move slides the flash board in from the direction of travel
+    /// (left/right within a row, up/down for dive/surface) instead of snapping it in place — a directional
+    /// cue that echoes the traditional desktop-switch slide. The real desktop still switches instantly
+    /// underneath (the OS owns that); this is Hypertree's own overlay carrying the motion. On by default,
+    /// but always yields to the Windows "Show animations" system setting — with animations off there, no
+    /// slide plays regardless of this flag. See <c>App.Navigate</c> and <c>HudWindow.Flash</c>.</summary>
+    public bool AnimateNavigation { get; set; } = true;
+
     /// <summary>Reusable branch recipes, offered via the branch card's "Load from template" button so you
     /// don't retype the desktop set each time. Empty by default — you build and delete them in the
     /// "Manage templates…" command.</summary>

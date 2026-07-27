@@ -7,6 +7,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Animated navigation moves**, on by default: the board now slides in from the direction you moved — left/right along a row, up/down to dive or surface — echoing the traditional desktop-switch feel.
+- Turn it off in **Settings → Navigation**. It also follows the Windows *Show animations* setting: with that off, no slide plays.
+
 ---
 
 ## [v0.2.1] - 2026-07-27

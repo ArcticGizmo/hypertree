@@ -19,4 +19,25 @@ internal static class WindowFx
         try { DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, ref on, sizeof(int)); }
         catch { /* best-effort — losing the tweak just restores the default animation */ }
     }
+
+    private const uint SPI_GETCLIENTAREAANIMATION = 0x1042;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SystemParametersInfo(uint action, uint param, ref int pvParam, uint winIni);
+
+    /// <summary>Whether the user has Windows animations turned on (Settings → Accessibility → Visual
+    /// effects → Animation effects). This is the OS "reduce motion" signal: when it's off we suppress
+    /// Hypertree's own navigation slide so the app honours the system-wide preference. Best-effort —
+    /// if the query fails we assume animations are allowed rather than silently killing the effect.</summary>
+    public static bool SystemAnimationsEnabled()
+    {
+        int enabled = 1;
+        try
+        {
+            if (SystemParametersInfo(SPI_GETCLIENTAREAANIMATION, 0, ref enabled, 0)) return enabled != 0;
+        }
+        catch { /* fall through to the permissive default */ }
+        return true;
+    }
 }
