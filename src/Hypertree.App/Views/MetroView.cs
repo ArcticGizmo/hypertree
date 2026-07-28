@@ -379,11 +379,12 @@ internal static class MetroView
             Foreground = new SolidColorBrush(Bg), // dark ink reads on every line colour
             VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
         };
+        // Branch labels sit 20% dimmer than their line — present, but not competing with the desktop chips
+        // for the eye. Opaque (faded toward the ground, not translucent), and floored so the dark text reads.
+        double badgeTone = Math.Max(op, 0.72) * 0.8;
         var badge = new Border
         {
-            // Opaque, and never so dim the dark text stops reading — a resting branch's name label recedes a
-            // little but stays crisp rather than washing out against the desktop behind.
-            Background = new SolidColorBrush(Dim(line.Colour, Math.Max(op, 0.72))),
+            Background = new SolidColorBrush(Dim(line.Colour, badgeTone)),
             CornerRadius = new CornerRadius(11 * s), Padding = new Thickness(11 * s, 3 * s),
             Child = text,
         };
