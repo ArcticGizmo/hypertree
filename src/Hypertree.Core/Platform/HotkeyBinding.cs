@@ -14,6 +14,10 @@ public enum HotkeyCommand
     MoveRight,
     Peek,
     CommandPalette,
+    OpenMap,
+    // Kept for backward compatibility: move-windows no longer has a default chord (it's reached via "m" on
+    // the map), but a user who deliberately rebound it still has that override in settings.json, so the
+    // member must stay for those bindings to deserialize and register. See Hotkeys.Defaults / ActionFor.
     MoveWindows,
 }
 
@@ -46,11 +50,12 @@ public static class Hotkeys
     public static readonly IReadOnlyList<HotkeyCommand> Order = new[]
     {
         HotkeyCommand.Dive, HotkeyCommand.Surface, HotkeyCommand.MoveLeft, HotkeyCommand.MoveRight,
-        HotkeyCommand.Peek, HotkeyCommand.CommandPalette, HotkeyCommand.MoveWindows,
+        HotkeyCommand.Peek, HotkeyCommand.CommandPalette, HotkeyCommand.OpenMap,
     };
 
     /// <summary>The out-of-the-box chords. Ctrl+Alt+Arrow is the nav layer (M0: Win+Ctrl+Arrow is the
-    /// native switch); the palette and move-windows commands sit on Ctrl+Alt+P / Ctrl+Alt+M.</summary>
+    /// native switch); the palette and open-map commands sit on Ctrl+Alt+P / Ctrl+Alt+M. Move-windows has
+    /// no default chord (reached via "m" on the map), so it isn't listed here — see <see cref="HotkeyCommand.MoveWindows"/>.</summary>
     public static readonly IReadOnlyDictionary<HotkeyCommand, HotkeyChord> Defaults =
         new Dictionary<HotkeyCommand, HotkeyChord>
         {
@@ -60,7 +65,7 @@ public static class Hotkeys
             [HotkeyCommand.MoveRight]      = new(NavMods, HotkeyKey.ArrowRight),
             [HotkeyCommand.Peek]           = new(NavMods, HotkeyKey.Space),
             [HotkeyCommand.CommandPalette] = new(NavMods, HotkeyKey.P),
-            [HotkeyCommand.MoveWindows]    = new(NavMods, HotkeyKey.M),
+            [HotkeyCommand.OpenMap]        = new(NavMods, HotkeyKey.M),
         };
 
     private const HotkeyModifiers NavMods = HotkeyModifiers.Control | HotkeyModifiers.Alt;
@@ -73,6 +78,7 @@ public static class Hotkeys
         HotkeyCommand.MoveRight      => "Move right",
         HotkeyCommand.Peek           => "Peek at the board",
         HotkeyCommand.CommandPalette => "Command palette",
+        HotkeyCommand.OpenMap        => "Open map",
         HotkeyCommand.MoveWindows    => "Move windows",
         _ => command.ToString(),
     };

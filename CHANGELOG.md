@@ -17,8 +17,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **`Ctrl+Alt+M` now opens the map** instead of starting the move-windows flow. The map is the surface you reach for far more often, so it gets the dedicated hotkey; move-windows stays a keystroke away as **`m`** on the map. (A rebind you'd set for move-windows in an earlier version is preserved.)
 - **Settings apply immediately.** The Save/Cancel buttons are gone — every toggle and rebind takes effect and persists the moment you make it. Close the window (or press Esc) when you're done.
-- The overlay's dimmed backdrop now carries a soft **vignette** — darker under the centred board, fading to the usual dim at the edges — so the board (and especially the metro map's thin coloured lines) keeps its contrast over a bright or busy desktop behind it.
+- The overlay's dimmed backdrop now carries a soft **vignette** — darker under the centred board, fading to the usual dim at the edges — so the board (and especially the metro map's thin coloured lines) keeps its contrast over a bright or busy desktop behind it. The transient navigation flash now shares this same backdrop, so it reads at the same weight as the full map.
 - **"Show the board before moving" now applies only to diving and surfacing** (the up/down moves between branches), where landing among a fresh set of desktops is disorienting. Moving left/right within a row — which stays in view — now moves immediately instead of costing a reveal press.
 
 ---

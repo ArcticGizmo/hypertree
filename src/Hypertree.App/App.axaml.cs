@@ -351,7 +351,8 @@ public sealed class App : Application
     private Action ActionFor(HotkeyCommand cmd, HotkeyModifiers mods) => cmd switch
     {
         HotkeyCommand.CommandPalette => ToggleCommandPalette,
-        HotkeyCommand.MoveWindows    => ToggleMoveWindows,
+        HotkeyCommand.OpenMap        => ToggleMap,
+        HotkeyCommand.MoveWindows    => ToggleMoveWindows, // no default chord; only a user's kept rebinding fires this
         HotkeyCommand.Peek           => () => Peek(mods),
         _ when NavCommands.TryGetValue(cmd, out NavAction action) => () => Navigate(action, mods),
         _ => () => { },
@@ -498,7 +499,7 @@ public sealed class App : Application
         if (_model is not null) _overlay?.SetBoard(_model.BuildMap());
     }
 
-    // ── Move windows to another desktop (Ctrl+Alt+M) ────────────────────────────────
+    // ── Move windows to another desktop (m on the map) ──────────────────────────────
 
     // Phase 1: snapshot the current desktop's windows and open the picker. Re-press toggles it closed.
     private void ToggleMoveWindows()
@@ -819,7 +820,7 @@ public sealed class App : Application
             new("Manage templates…", ManageTemplatesPrompt),
             // Delete-current-desktop / remove-current-branch are intentionally not commands — do them from the
             // map, where the target is visible (each tile / branch carries its own × control). Likewise
-            // move-windows is triggered from the map ("m") or Ctrl+Alt+M, not from here.
+            // move-windows is triggered from the map ("m"), not from here.
             // Save / restore / reset the whole desktop+branch arrangement — one manager for all three.
             new("Layouts…", LayoutsPrompt),
             // Quit Hypertree — behind a confirm (see ExitHypertree), since it's easy to land on while

@@ -53,7 +53,7 @@ reserves for its own desktop switch.)
 
 ### The map
 
-- **`Ctrl+Alt+P`** opens the command palette; **Open map** shows the whole arrangement, with blue marking where you are.
+- **`Ctrl+Alt+M`** opens the map — the whole arrangement, with blue marking where you are (also **Open map** in the command palette).
 - On the map: **`r`** renames a desktop, **`n`** adds one, **`Del`** removes a desktop and **`Shift+Del`** removes a whole branch — each behind a confirm.
 - The map is also where you **rearrange**: **`Ctrl+Arrow`** moves the selected desktop along its row or into the branch above/below, and **`Shift+↑↓`** re-slots the selected branch in the stack. Both work by mouse too — drag a desktop between branches, or drag a branch box to move it.
 - Every card previews its result before you commit — a jump highlights where you'd land; a template shows the branch it would build.
@@ -66,7 +66,7 @@ reserves for its own desktop switch.)
 
 ### Move windows
 
-- **`Ctrl+Alt+M`** picks up every window on the current desktop; navigate to the destination and drop them in one move.
+- **`m`** on the map picks up every window on the current desktop; navigate to the destination and drop them in one move.
 
 ### Branches, templates & layouts
 
