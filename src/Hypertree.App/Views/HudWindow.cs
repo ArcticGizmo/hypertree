@@ -5,6 +5,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using Hypertree.Layout;
 using Hypertree.Platform;
 using Hypertree.Scopes;
 using Hypertree.Settings;
@@ -51,8 +52,13 @@ internal sealed class HudWindow : Window
     // Peak darkness of the sweeping wipe band, over #101010. Tunable: this is the "how strong is the wipe".
     private const byte BandAlpha = 0x6E;
 
-    public HudWindow()
+    // The shared map camera (owned by App, also driving the interactive map). Flashing navigates it, so
+    // opening the map lands on the same framing, and the flash pans by the same dead-zone rules.
+    private readonly MapCamera _camera;
+
+    public HudWindow(MapCamera camera)
     {
+        _camera = camera;
         WindowDecorations = WindowDecorations.None;
         WindowStartupLocation = WindowStartupLocation.Manual;
         Background = _dim; // dim backdrop
@@ -99,7 +105,7 @@ internal sealed class HudWindow : Window
 
         // The flash is transient, so the metro train doesn't pulse here (animate:false) — the wipe below is
         // the only motion. board centres itself within the full screen.
-        Control board = MapSurface.Render(map, Width, Height, style);
+        Control board = MapSurface.Render(map, Width, Height, style, camera: _camera);
 
         // A directional move gets a soft gradient wipe: a dark band that begins on the edge opposite the
         // arrow and sweeps across toward the way you pressed, uncovering the (already-switched) desktop as

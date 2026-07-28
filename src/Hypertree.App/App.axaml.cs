@@ -10,6 +10,7 @@ using Hypertree.App.Views;
 using Hypertree.Changelog;
 using Hypertree.Desktops;
 using Hypertree.Ipc;
+using Hypertree.Layout;
 using Hypertree.Platform;
 using Hypertree.Scopes;
 using Hypertree.Settings;
@@ -47,6 +48,10 @@ public sealed class App : Application
     private NavigationModel? _model;
     private HudWindow? _hud;
     private MapOverlay? _overlay;
+    // One camera shared by the flash and the interactive map, so navigating with the map closed leaves it
+    // framed where the map opens, and the two never disagree about where the map sits. Reframed on a theme
+    // switch (metrics change). See docs/design/scene-camera.md.
+    private readonly MapCamera _mapCamera = new();
     private DesktopId? _moveOrigin; // where the current move flow started, for cancel/restore
     private TaskbarLabel? _taskbarLabel;
     private TrayIcon? _tray;
@@ -140,7 +145,7 @@ public sealed class App : Application
             _settingsStore.Save(_settings);
         }
 
-        _hud = new HudWindow();
+        _hud = new HudWindow(_mapCamera);
 
         // Persistent desktop-name pill over the taskbar. It re-reads the current desktop itself, but we
         // also poke it on every navigation so it never lags a keystroke.
@@ -165,7 +170,7 @@ public sealed class App : Application
         _stage.Shown += () => _taskbarLabel?.SetSuppressed(true);
         _stage.Hidden += () => _taskbarLabel?.SetSuppressed(false);
 
-        _overlay = new MapOverlay(_stage);
+        _overlay = new MapOverlay(_stage, _mapCamera);
         _overlay.JumpTopRequested += i => JumpFromMap(() => _model!.GoToTop(i));
         _overlay.JumpBranchRequested += (g, d) => JumpFromMap(() => _model!.GoToBranchDesktop(g, d));
         _overlay.RenameRequested += RenameSelected;
@@ -1082,6 +1087,7 @@ public sealed class App : Application
     {
         if (_stage is null || _stage.MapStyle == _settings.MapStyle) return;
         _stage.MapStyle = _settings.MapStyle;
+        _mapCamera.Reframe(); // the new theme's metrics invalidate the carried pixel offset — reframe the selection
         // While the Settings window is open it sits above the stage; re-rendering the map here would end in
         // _stage.BringToFront() and steal the top of the z-order from it. Defer the map repaint to the
         // Settings Closed handler; refreshing a card backdrop (no z-order change) is safe either way.

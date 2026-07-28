@@ -51,12 +51,12 @@ internal sealed class MapOverlay : IStageContent
     private static readonly Color DragScrim = Color.FromArgb(0x9E, 0x0E, 0x12, 0x1A);
 
     private readonly Grid _root = new();
-    // The shared dead-zone camera: the cursor moves over a stationary map, and the map pans only when the
-    // selection nears an edge. Persists across renders (its "don't move unless needed" state is the point);
-    // reframed when the map opens or the theme changes, where a carried pixel offset no longer applies.
-    private readonly MapCamera _camera = new();
+    // The shared dead-zone camera (owned by App, also driving the flash): the cursor moves over a stationary
+    // map, and the map pans only when the selection nears an edge. Persists across renders — its "don't move
+    // unless needed" state is the point — and across the flash, so the two stay in step. App reframes it on a
+    // theme switch. See docs/design/scene-camera.md.
+    private readonly MapCamera _camera;
     private readonly BoardPainter _boardPainter = new();
-    private MapStyle? _lastStyle;
     private NavMap _base = new(Array.Empty<NavMapTile>(), 0, true, Array.Empty<NavMapBranch>());
     private bool _initialised;
     private int _row; // index into the combined row sequence (branches split around main)
@@ -95,9 +95,10 @@ internal sealed class MapOverlay : IStageContent
     /// change and pushes the new style back onto the stage, so every surface follows, not just this map.</summary>
     public event Action? ViewStyleToggleRequested;
 
-    public MapOverlay(OverlayStage stage)
+    public MapOverlay(OverlayStage stage, MapCamera camera)
     {
         _stage = stage;
+        _camera = camera;
         // Drag-to-rearrange. The tiles' own handlers select/activate without marking the press handled, so
         // it bubbles up here and a press is both "select this" and "maybe start dragging it".
         _root.PointerPressed += OnPointerPressed;
@@ -118,7 +119,8 @@ internal sealed class MapOverlay : IStageContent
         _base = map;
         _initialised = false;
         _colOfRow.Clear(); // a fresh map session re-seeds each row from the model's resume points
-        _camera.Reframe();  // opening frames the selection; from then on it only follows when it must
+        // The camera is shared with the flash and persists deliberately, so opening doesn't reframe: it shows
+        // wherever navigation left it, with the current selection kept in view by the dead zone.
         _stage.Summon(this);
     }
 
@@ -541,9 +543,8 @@ internal sealed class MapOverlay : IStageContent
         // Both renderers fill it in the same scheme, so click/select and drag-rearrange work identically
         // whichever style is showing. Metro takes no delete callbacks (no × badges — Del still deletes) and
         // pulses the train only when the OS allows motion.
-        // A theme switch changes the metrics, so the carried pixel offset is stale — reframe the selection.
+        // A theme switch changes the metrics; App reframes the shared camera when it flips the style.
         MapStyle style = _stage.MapStyle;
-        if (_lastStyle != style) { _camera.Reframe(); _lastStyle = style; }
 
         var layout = new BoardLayout();
         NavMap display = BuildDisplayMap();
