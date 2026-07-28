@@ -4,6 +4,8 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Hypertree.App.Views;
+using Hypertree.App.Views.Scene;
+using Hypertree.Layout;
 using Hypertree.Scopes;
 
 namespace Hypertree.App;
@@ -159,7 +161,7 @@ internal static class DesignShot
     private static void SaveLayoutCheck(NavMap map, string path)
     {
         var layout = new BoardLayout();
-        Control board = BoardView.Render(map, ScreenW, ScreenH, 1.0, layout: layout);
+        Control board = SceneRenderer.Render(new BoardPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera(), layout: layout);
         SaveWithLayoutMarks(board, layout, path);
     }
 
@@ -169,7 +171,7 @@ internal static class DesignShot
     private static void SaveMetroLayoutCheck(NavMap map, string path)
     {
         var layout = new BoardLayout();
-        Control board = MetroView.Render(map, ScreenW, ScreenH, 1.0, layout: layout);
+        Control board = SceneRenderer.Render(new MetroPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera(), layout: layout);
         SaveWithLayoutMarks(board, layout, path);
     }
 
@@ -226,7 +228,7 @@ internal static class DesignShot
 
     // Render the metro-map view of a board to PNG, over the same dark ground the real overlay uses.
     private static void SaveMetro(NavMap map, string path)
-        => Save(MetroView.Render(map, ScreenW, ScreenH, 1.0), path);
+        => Save(SceneRenderer.Render(new MetroPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera()), path);
 
     // The overlay is semi-transparent over the live desktop, so how the board reads depends on the screen
     // behind it. This shot fakes a bright, busy desktop, lays the real stage dim (the centre-weighted
@@ -273,13 +275,14 @@ internal static class DesignShot
             Width = ScreenW, Height = ScreenH,
             Background = vignette ? StageWindow.BuildDim() : new SolidColorBrush(Color.FromArgb(0x9E, 0x0E, 0x0E, 0x12)),
         };
-        Control board = MetroView.Render(map, ScreenW, ScreenH, 1.0);
+        Control board = SceneRenderer.Render(new MetroPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera());
         Save(new Panel { Children = { desktop, dim, board } }, path);
     }
 
     private static void Save(NavMap map, string path)
         // Pass delete callbacks so the × badges render in the verification shot.
-        => Save(BoardView.Render(map, ScreenW, ScreenH, 1.0, onTopDelete: _ => { }, onBranchDelete: (_, _) => { }), path);
+        => Save(SceneRenderer.Render(new BoardPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera(),
+                                     onTopDelete: _ => { }, onBranchDelete: (_, _) => { }), path);
 
     private static void Save(Control content, string path)
     {

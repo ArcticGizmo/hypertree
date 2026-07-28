@@ -4,6 +4,8 @@ using Avalonia.Controls.Shapes;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Hypertree.App.Views.Scene;
+using Hypertree.Layout;
 using Hypertree.Scopes;
 using Hypertree.Settings;
 
@@ -49,6 +51,12 @@ internal sealed class MapOverlay : IStageContent
     private static readonly Color DragScrim = Color.FromArgb(0x9E, 0x0E, 0x12, 0x1A);
 
     private readonly Grid _root = new();
+    // The shared dead-zone camera: the cursor moves over a stationary map, and the map pans only when the
+    // selection nears an edge. Persists across renders (its "don't move unless needed" state is the point);
+    // reframed when the map opens or the theme changes, where a carried pixel offset no longer applies.
+    private readonly MapCamera _camera = new();
+    private readonly BoardPainter _boardPainter = new();
+    private MapStyle? _lastStyle;
     private NavMap _base = new(Array.Empty<NavMapTile>(), 0, true, Array.Empty<NavMapBranch>());
     private bool _initialised;
     private int _row; // index into the combined row sequence (branches split around main)
@@ -110,6 +118,7 @@ internal sealed class MapOverlay : IStageContent
         _base = map;
         _initialised = false;
         _colOfRow.Clear(); // a fresh map session re-seeds each row from the model's resume points
+        _camera.Reframe();  // opening frames the selection; from then on it only follows when it must
         _stage.Summon(this);
     }
 
@@ -532,23 +541,23 @@ internal sealed class MapOverlay : IStageContent
         // Both renderers fill it in the same scheme, so click/select and drag-rearrange work identically
         // whichever style is showing. Metro takes no delete callbacks (no × badges — Del still deletes) and
         // pulses the train only when the OS allows motion.
+        // A theme switch changes the metrics, so the carried pixel offset is stale — reframe the selection.
+        MapStyle style = _stage.MapStyle;
+        if (_lastStyle != style) { _camera.Reframe(); _lastStyle = style; }
+
         var layout = new BoardLayout();
         NavMap display = BuildDisplayMap();
-        Control board = _stage.MapStyle == MapStyle.Metro
-            ? MetroView.Render(display, width, height, 1.0, WindowFx.SystemAnimationsEnabled(),
-                onTopClick: SelectTop,
-                onBranchClick: SelectBranch,
-                onTopActivate: i => JumpTopRequested?.Invoke(i),
-                onBranchActivate: (g, d) => JumpBranchRequested?.Invoke(g, d),
-                layout: layout)
-            : BoardView.Render(display, width, height, 1.0,
-                onTopClick: SelectTop,
-                onBranchClick: SelectBranch,
-                onTopDelete: i => DeleteDesktopRequested?.Invoke(new DesktopSelection(true, -1, i)),
-                onBranchDelete: (g, d) => DeleteDesktopRequested?.Invoke(new DesktopSelection(false, g, d)),
-                onTopActivate: i => JumpTopRequested?.Invoke(i),
-                onBranchActivate: (g, d) => JumpBranchRequested?.Invoke(g, d),
-                layout: layout);
+        IScenePainter painter = style == MapStyle.Metro
+            ? new MetroPainter(WindowFx.SystemAnimationsEnabled())
+            : _boardPainter;
+        Control board = SceneRenderer.Render(painter, display, width, height, 1.0, _camera,
+            onTopClick: SelectTop,
+            onBranchClick: SelectBranch,
+            onTopDelete: i => DeleteDesktopRequested?.Invoke(new DesktopSelection(true, -1, i)),
+            onBranchDelete: (g, d) => DeleteDesktopRequested?.Invoke(new DesktopSelection(false, g, d)),
+            onTopActivate: i => JumpTopRequested?.Invoke(i),
+            onBranchActivate: (g, d) => JumpBranchRequested?.Invoke(g, d),
+            layout: layout);
         _layout = layout;
 
         _root.Children.Clear();
