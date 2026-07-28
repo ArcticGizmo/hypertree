@@ -46,11 +46,12 @@ already builds (selection → `IsCurrent`, actual position → `IsHere`), which 
   `TopPosition` above main, the rest below), and each line is centred on its own cursor
   so the trunk is straight through every line's resume station — exactly where the board
   draws its spine. Toggling board↔metro therefore doesn't teleport anything.
-- **…except vertical centring.** The board pins the *current* row to the screen centre
-  and scrolls the rest; the metro view centres the *whole stack* instead. It reads as an
-  overview — you find yourself by the green train, not by a fixed centre line — and it
-  removes the large dead margin you'd get sitting on the top line. Deliberate divergence;
-  flagged below in case it should match instead.
+- **Vertical centring: the whole stack, fixed.** Rather than pinning the *current* row to
+  the screen centre and scrolling the rest, the metro view centres the whole stack and
+  leaves it put — you find yourself by the green train, not by a moving centre line, so the
+  map doesn't lurch as you dive/surface. The board now does the same (it only scrolls when
+  the board is taller than the screen, keeping the current row on screen), so the two match
+  and toggling never jumps.
 - **main is the light spine.** Branch lines take saturated palette colours; main is a
   near-white line and only half-fades when you're away from it, so it stays the
   recognisable "home" thread.
@@ -110,13 +111,11 @@ theme. So now:
    matching the board's spine. Reads as "one central interchange corridor." Is that the
    right story, or should a branch visibly connect at a specific *anchor* station on main?
    (The data model has no per-branch anchor column today — branches hang off the centre.)
-3. **Vertical centring.** The metro view centres the whole stack (overview); the board
-   pins the current row. Deliberate divergence — keep it, or match the board so toggling
-   is seamless?
-4. **Long names & big trees.** Station chips can collide at the 156px station pitch if
+3. **Long names & big trees.** Station chips can collide at the 156px station pitch if
    names are long (truncate? stagger above/below?), and a very tall tree can overflow
-   vertically (scale-to-fit? scroll?). Not handled yet.
-5. **A command-palette entry?** You can reach the style from Settings and `v`; a "Switch
+   vertically. The board now scrolls to keep the current row on screen when it overflows;
+   the metro view still just centres the whole stack (no overflow handling yet).
+4. **A command-palette entry?** You can reach the style from Settings and `v`; a "Switch
    to metro / board map" palette command would be a third door. Worth it, or clutter?
 
 ## Files touched

@@ -67,12 +67,25 @@ internal static class BoardView
         }
         currentRow = Math.Clamp(currentRow, 0, rows.Count - 1);
 
-        // Stack rows top→bottom, then shift the whole column so the current row is centred on screen.
+        // Stack rows top→bottom, then place the column vertically. When the whole board fits on screen we
+        // centre it as a whole and leave it put — navigating moves the cursor between rows, not the board, so
+        // the map stays easy to follow (the same "it doesn't jump" feel as the metro view). Only when the
+        // board is taller than the screen do we scroll, keeping the current row centred so it can't fall off.
         var yTop = new double[rows.Count];
         double run = 0;
         for (int i = 0; i < rows.Count; i++) { yTop[i] = run; run += rows[i].Height + vgap; }
-        double curCentre = yTop[currentRow] + rows[currentRow].Height / 2;
-        double offset = cy - curCentre;
+        double stackTotal = run - vgap; // rows plus the gaps between them, without a trailing gap
+
+        double offset;
+        if (stackTotal <= screenH)
+        {
+            offset = (screenH - stackTotal) / 2; // fits: fixed, whole-board centre
+        }
+        else
+        {
+            double curCentre = yTop[currentRow] + rows[currentRow].Height / 2;
+            offset = cy - curCentre; // overflow: keep the current row on screen
+        }
 
         // Connector spine: a thin vertical line through cx joining consecutive rows (their cursors all
         // line up on cx), so the stack reads as one timeline.
