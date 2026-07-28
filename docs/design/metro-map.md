@@ -4,14 +4,19 @@ A transit-diagram rendering of the desktop tree — the "metro map" idea from
 [`docs/ideas.md`](../ideas.md). It draws the *same* `NavMap` the board draws, so it's
 a pure visual alternative, not a new data model.
 
-> **Status:** working prototype, landed on the `metro-map` branch. Reachable, renders
-> to PNG, and passes the suite — but see **Open questions** before taking it further.
+> **Status:** working, on the `metro-map` branch. It's now a persisted, whole-app
+> appearance setting with full interactive parity on the map — see **Settling in** for
+> what changed from the first prototype, and **Open questions** for what's still open.
 
 ## See it
 
-- **In the app:** open the map (`Ctrl+Alt+P` → *Open map*), then press **`v`** to toggle
-  between the board and the metro view. `v` again switches back. The legend shows the
-  toggle.
+- **Turn it on:** **Settings → Appearance → "Use the metro map style"**, or press **`v`**
+  on the map. It's a persisted, whole-app choice: once on it shows on *every* surface that
+  draws a board — the flash, the interactive map, card previews, and the move flow — not
+  just the main map. `v` (or the toggle) flips it back.
+- **On the map:** fully interactive in metro — arrow-select, Enter to switch, click to
+  select, double-click to jump, and drag to rearrange (a desktop by its station, a branch
+  by its route badge). Keyboard rearrange (Ctrl/Shift+arrows) works too.
 - **As a PNG (no tray):** `dotnet run --project src/Hypertree.App -- --shot captures`
   writes `metro-top-row.png`, `metro-dived.png`, and `metro-busy.png` alongside the
   board shots. This is how the look was iterated — `DesignShot` renders `MetroView`
@@ -55,43 +60,57 @@ already builds (selection → `IsCurrent`, actual position → `IsHere`), which 
 - **The train breathes.** Live only, a `DispatcherTimer` opacity pulse on the halo (the
   app's hand-rolled tween idiom, tied to the halo's visual-tree lifetime so it self-stops
   on re-render). Honours the OS reduce-motion preference.
-- **Keyboard-driven for now.** Arrow-select, Enter-to-switch, and keyboard rearrange all
-  work (they run on the model, independent of the renderer). **Click and drag are
-  board-only** — `MetroView` doesn't yet emit the `BoardLayout` hit geometry the map's
-  pointer code needs, so in metro mode a fresh empty layout leaves them as no-ops.
+- **Full interactive parity.** `MetroView` emits the same `BoardLayout` hit-geometry
+  `BoardView` does — station "cells" tile the strip (each stride-wide, centred on its
+  station), and each line's band runs out to its route badge, which is the branch's drag
+  handle. So the map's existing pointer code drives metro unchanged: click-select,
+  double-click jump, and drag-rearrange all work, with the drop caret landing on the
+  mid-points between stations. Verified by `metro-drag-layout.png` (`--shot`), the metro
+  twin of `board-drag-layout.png`. The one board affordance metro drops is the always-on
+  `×` delete badge (too noisy on the clean diagram) — `Del` still deletes.
 
-## Open questions (for the morning)
+## Settling in (what changed after the first prototype)
 
-1. **Entry point & persistence.** Is a `v` toggle on the map the right door, or should
-   there also be a command-palette entry ("Open metro map")? Should the chosen style
-   **persist** across sessions (an `AppSettings` field), and/or be settable as the
-   default in Settings?
-2. **Interaction parity.** Should metro grow click-to-select and drag-to-rearrange? That
-   means `MetroView` emitting station/line hit rects (reuse `BoardLayout`, or a metro-
-   native one) and a drag-caret treatment that fits stations rather than tile strips.
-   Or is "beautiful read-only overview, keyboard to drive" actually the right scope?
-3. **Branch colours should probably be stable.** Today a line's colour is its branch
+The first cut was a map-only `v` toggle, keyboard-driven. Feedback was to make it a real
+theme. So now:
+
+- It's a **persisted `AppSettings.MapStyle`** (default `Board`), set in Settings →
+  Appearance or with `v` (which just flips the setting).
+- It applies **everywhere a board renders**, via `MapSurface.Render` (the dispatch point
+  for non-interactive surfaces) and `OverlayStage.MapStyle` (the shared source of truth
+  the stage, map, and move flow all read). The flash takes the style as a `Flash` argument.
+- The interactive map gained **full click/drag parity** (see above), so metro is safe to
+  live in as a default, not just a peek.
+
+## Open questions (still open)
+
+1. **Branch colours should probably be stable.** Today a line's colour is its branch
    *index* mod the palette, so adding/removing/reordering branches can recolour existing
    lines. Feels wrong for a map you build spatial memory on — "the coral line" should
    stay coral. Options: persist a colour (or palette slot) per branch id; or derive a
    stable colour by hashing the branch id. Also: palette only has 8 entries — what past
    that, and is it colourblind-safe? Should main ever get a colour?
-4. **The trunk's meaning.** It runs vertically through each line's *resume* station,
+2. **The trunk's meaning.** It runs vertically through each line's *resume* station,
    matching the board's spine. Reads as "one central interchange corridor." Is that the
    right story, or should a branch visibly connect at a specific *anchor* station on main?
    (The data model has no per-branch anchor column today — branches hang off the centre.)
-5. **Vertical centring** (see above) — overview-style whole-stack centring, or match the
-   board's current-row centring for a seamless toggle?
-6. **Window counts** — keep the faint number above each station, or is it noise on an
+3. **Vertical centring.** The metro view centres the whole stack (overview); the board
+   pins the current row. Deliberate divergence — keep it, or match the board so toggling
+   is seamless?
+4. **Window counts** — keep the faint number above each station, or is it noise on an
    overview? Alternative: encode occupancy as station size only.
-7. **Long names & big trees.** Station labels can collide at the 156px station pitch if
+5. **Long names & big trees.** Station labels can collide at the 156px station pitch if
    names are long (truncate? stagger above/below?), and a very tall tree can overflow
    vertically (scale-to-fit? scroll?). Not handled yet.
-8. **Flash/HUD too?** The transient navigation flash still uses the board. Should the
-   metro style extend to it, or stay map-only?
+6. **A command-palette entry?** You can reach the style from Settings and `v`; a "Switch
+   to metro / board map" palette command would be a third door. Worth it, or clutter?
 
 ## Files touched
 
-- `src/Hypertree.App/Views/MetroView.cs` — the renderer (new).
-- `src/Hypertree.App/Views/MapOverlay.cs` — the `v` toggle, `MapStyle`, legend row.
-- `src/Hypertree.App/DesignShot.cs` — three metro `--shot` captures.
+- `src/Hypertree.App/Views/MetroView.cs` — the renderer (new), with click/drag geometry.
+- `src/Hypertree.App/Views/MapSurface.cs` — style dispatch for non-interactive surfaces (new).
+- `src/Hypertree.Core/Settings/AppSettings.cs` — `MapStyle` enum + persisted setting.
+- `src/Hypertree.App/Views/SettingsWindow.cs` — the Appearance region.
+- `src/Hypertree.App/Views/{OverlayStage,HudWindow,MoveWindowsOverlay,MapOverlay}.cs` — read/apply the style.
+- `src/Hypertree.App/App.axaml.cs` — keeps the stage style in sync; passes it to the flash.
+- `src/Hypertree.App/DesignShot.cs` — metro captures incl. `metro-drag-layout.png`.

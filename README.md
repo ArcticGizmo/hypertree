@@ -57,7 +57,7 @@ reserves for its own desktop switch.)
 - On the map: **`r`** renames a desktop, **`n`** adds one, **`Del`** removes a desktop and **`Shift+Del`** removes a whole branch — each behind a confirm.
 - The map is also where you **rearrange**: **`Ctrl+Arrow`** moves the selected desktop along its row or into the branch above/below, and **`Shift+↑↓`** re-slots the selected branch in the stack. Both work by mouse too — drag a desktop between branches, or drag a branch box to move it.
 - Every card previews its result before you commit — a jump highlights where you'd land; a template shows the branch it would build.
-- **`v`** flips the map into a **metro-map view** — the whole tree drawn as a transit diagram, each timeline a coloured line, each desktop a station, and a green "you are here" train marking where you stand. Same selection and navigation as the board; press `v` again to flip back. (Design notes: [docs/design/metro-map.md](docs/design/metro-map.md).)
+- A **metro-map style** draws the whole tree as a transit diagram — each timeline a coloured line, each desktop a station, and a green "you are here" train marking where you stand. It's a whole-app appearance choice (**Settings → Appearance**, or press **`v`** on the map): once on, it shows *everywhere* a board appears — the flash, the map, card previews and the move flow — and the map stays fully interactive (click, double-click to switch, drag to rearrange). (Design notes: [docs/design/metro-map.md](docs/design/metro-map.md).)
 
 ### Finder & command palette
 
@@ -113,7 +113,7 @@ htree watch             # stream your position as it changes
 ### Settings & tray
 
 - Lives in the system tray: **left-click** for the command palette, **right-click** for the menu, with the running version in the header.
-- Settings covers **start-on-login**, the **desktop-name pill**, **show-before-moving**, **rebinding every hotkey** (click a shortcut, press the new combination), and the changelog options.
+- Settings covers **start-on-login**, the **desktop-name pill**, the **map style** (board vs. metro), **show-before-moving**, **rebinding every hotkey** (click a shortcut, press the new combination), and the changelog options.
 - **One copy at a time** — launching Hypertree again while it's already in the tray opens the running one's command palette instead of starting a rival that would fight it for the hotkeys.
 - Branches, layouts, and settings persist under `%APPDATA%\hypertree`; a missing or corrupt file falls back to defaults rather than blocking startup.
 
