@@ -17,6 +17,17 @@ using Hypertree.Settings;
 namespace Hypertree.App.Views;
 
 /// <summary>
+/// How the Settings window's Updates row reaches the app's shared update flow. The window never checks
+/// or installs itself — one flow means one set of Windows notifications, whichever surface started it.
+/// </summary>
+/// <param name="Check">Start a check (the app notifies, and calls back into this window).</param>
+/// <param name="Install">Download + install the release the last check found; restarts the app.</param>
+/// <param name="Last">
+/// The most recent check's result, so a window opened afterwards still offers to install it.
+/// </param>
+internal sealed record UpdateHooks(Action Check, Action Install, Func<UpdateCheckResult?> Last);
+
+/// <summary>
 /// The settings window. A normal (focusable, opaque) window rendered in Fluent <b>dark</b> so it
 /// matches the board/palette look, summoned from the tray, the map's cog, or the command palette.
 /// Because a tray/hotkey process is a background process, it force-foregrounds on open via
@@ -57,18 +68,20 @@ internal sealed class SettingsWindow : Window
                                        // any change event that fires while the controls are still wiring up
 
     // Updates section: a status line, the check button, and an install button revealed only once a newer
-    // release has been found (holding the Velopack handles needed to apply it).
+    // release has been found. The checking/downloading itself belongs to the app (one flow, one set of
+    // Windows notifications, whichever surface started it) — this window only drives it and mirrors it.
     private readonly TextBlock _updateStatus;
     private readonly Button _checkUpdate;
     private readonly Button _installUpdate;
-    private UpdateCheckResult? _pendingUpdate;
-    private bool _updateBusy; // guards against a second check/install while one is in flight
+    private readonly UpdateHooks _updates;
 
     public SettingsWindow(AppSettings settings, bool startOnLogin,
-                          Action<AppSettings, bool> onSave, IForegroundActivator activator)
+                          Action<AppSettings, bool> onSave, IForegroundActivator activator,
+                          UpdateHooks updates)
     {
         _activator = activator;
         _onSave = onSave;
+        _updates = updates;
         _initial = settings;
         _chords = new Dictionary<HotkeyCommand, HotkeyChord>(settings.ResolveHotkeys());
 
@@ -101,15 +114,15 @@ internal sealed class SettingsWindow : Window
         {
             Foreground = Muted, FontSize = 11, TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(24, 2, 0, 0),
-            Text = "Check whether a newer release of Hypertree is available.",
+            Text = "Check whether a newer release of Hypertree is available. The result arrives as a Windows notification.",
         };
         _checkUpdate = new Button { Content = "Check for updates", HorizontalAlignment = HorizontalAlignment.Right };
-        _checkUpdate.Click += (_, _) => _ = CheckForUpdatesAsync();
+        _checkUpdate.Click += (_, _) => _updates.Check();
         _installUpdate = new Button
         {
             Content = "Download & install", HorizontalAlignment = HorizontalAlignment.Right, IsVisible = false,
         };
-        _installUpdate.Click += (_, _) => _ = InstallUpdateAsync();
+        _installUpdate.Click += (_, _) => _updates.Install();
 
         // No Save/Cancel — each control applies (and persists) the moment it changes; see ApplyLive.
         foreach (ToggleSwitch t in new[]
@@ -190,6 +203,9 @@ internal sealed class SettingsWindow : Window
         // Tunnel so we intercept the chord before anything else swallows it (and Esc-to-close, since there's
         // no Cancel button to carry IsCancel).
         AddHandler(KeyDownEvent, OnPreviewKeyDown, RoutingStrategies.Tunnel);
+        // A check run before this window opened still counts: pick its result up so an available update is
+        // installable from here without re-checking (matching the tray menu and the palette).
+        if (_updates.Last() is { } last) OnUpdateResult(last);
         _ready = true;
     }
 
@@ -421,8 +437,9 @@ internal sealed class SettingsWindow : Window
     // ── Updates ────────────────────────────────────────────────────────────────────
 
     // A status caption plus the check button, with a "Download & install" button that appears only once a
-    // newer release has been found. Mirrors the tray / command-palette check, kept inline here (like the
-    // changelog row) so Settings is a self-contained place to check.
+    // newer release has been found. The buttons drive the app's shared update flow (so a check from here
+    // raises the same Windows notifications as one from the tray or the palette); the caption below them
+    // mirrors it, because a window you deliberately opened is a fine place to read the detail.
     private Control UpdatesRow()
     {
         var buttons = new StackPanel
@@ -434,24 +451,24 @@ internal sealed class SettingsWindow : Window
         return new StackPanel { Spacing = 6, Children = { _updateStatus, buttons } };
     }
 
-    private async Task CheckForUpdatesAsync()
+    /// <summary>A check has started — from here or from any other surface.</summary>
+    public void OnUpdateCheckStarted()
     {
-        if (_updateBusy) return;
-        _updateBusy = true;
         _checkUpdate.IsEnabled = false;
         _installUpdate.IsVisible = false;
-        _pendingUpdate = null;
         SetUpdateStatus("Checking for updates…", Muted);
+    }
 
-        UpdateCheckResult result;
-        try { result = await UpdateChecker.CheckDetailedAsync(); }
-        catch { result = new UpdateCheckResult { Availability = UpdateAvailability.Failed }; }
+    /// <summary>A check finished: reveal the install button when there's something to install.</summary>
+    public void OnUpdateResult(UpdateCheckResult result)
+    {
+        _checkUpdate.IsEnabled = true;
+        _installUpdate.IsEnabled = true;
+        _installUpdate.IsVisible = result.Availability == UpdateAvailability.Available;
 
         switch (result.Availability)
         {
             case UpdateAvailability.Available:
-                _pendingUpdate = result;
-                _installUpdate.IsVisible = true;
                 SetUpdateStatus($"Update available: v{result.AvailableVersion} (you have v{result.CurrentVersion}).", Accent);
                 break;
             case UpdateAvailability.UpToDate:
@@ -464,29 +481,23 @@ internal sealed class SettingsWindow : Window
                 SetUpdateStatus("Couldn’t check for updates — the feed was unreachable. Check your connection and try again.", Warn);
                 break;
         }
-
-        _checkUpdate.IsEnabled = true;
-        _updateBusy = false;
     }
 
-    private async Task InstallUpdateAsync()
+    /// <summary>The update is downloading; the app restarts itself if it lands.</summary>
+    public void OnUpdateApplying()
     {
-        if (_updateBusy || _pendingUpdate is not { Availability: UpdateAvailability.Available }) return;
-        _updateBusy = true;
-        _installUpdate.IsEnabled = false;
         _checkUpdate.IsEnabled = false;
+        _installUpdate.IsEnabled = false;
         SetUpdateStatus("Downloading and installing… Hypertree will restart.", Accent);
+    }
 
-        try { await UpdateChecker.ApplyAsync(_pendingUpdate); } // restarts the app on success — doesn't return
-        catch
-        {
-            SetUpdateStatus("Update failed — the download or install didn’t complete. Try again.", Warn);
-            _pendingUpdate = null;
-            _installUpdate.IsVisible = false;
-            _installUpdate.IsEnabled = true;
-            _checkUpdate.IsEnabled = true;
-            _updateBusy = false;
-        }
+    /// <summary>The download or install didn't complete — the found release is no longer installable.</summary>
+    public void OnUpdateFailed()
+    {
+        _checkUpdate.IsEnabled = true;
+        _installUpdate.IsEnabled = true;
+        _installUpdate.IsVisible = false;
+        SetUpdateStatus("Update failed — the download or install didn’t complete. Try again.", Warn);
     }
 
     private void SetUpdateStatus(string text, IBrush colour)

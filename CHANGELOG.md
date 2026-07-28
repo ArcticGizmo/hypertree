@@ -9,6 +9,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.3.2] - 2026-07-28
+
+### Changed
+
+- **Checking for updates no longer takes over the screen** — it reports through Windows notifications instead of a card that dimmed the desktop and swallowed clicks.
+- **One notification per check**: it says it's checking, then updates in place with the result.
+- **Click an "Update available" notification** to download it and restart.
+- **The tray menu offers "Update now — vX"** once a check has found a release, matching the command palette.
+- **Settings → Updates raises the same notifications**, and still shows the detail inline.
+
+---
+
 ## [v0.3.1] - 2026-07-28
 
 ### Added

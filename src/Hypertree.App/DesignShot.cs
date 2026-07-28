@@ -117,8 +117,10 @@ internal static class DesignShot
             sections, activator, onSuppress: () => { });
         SaveCard(changelog, Path.Combine(outDir, "card-changelog.png"));
 
+        // Inert update hooks — the shot only needs the row's resting state, not a live check.
         var settings = new SettingsWindow(new Settings.AppSettings(), startOnLogin: true,
-                                          onSave: (_, _) => { }, activator);
+                                          onSave: (_, _) => { }, activator,
+                                          new UpdateHooks(() => { }, () => { }, () => null));
         SaveCard(settings, Path.Combine(outDir, "card-settings.png"));
     }
 

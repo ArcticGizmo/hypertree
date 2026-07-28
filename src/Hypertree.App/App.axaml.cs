@@ -55,6 +55,11 @@ public sealed class App : Application
     private DesktopId? _moveOrigin; // where the current move flow started, for cancel/restore
     private TaskbarLabel? _taskbarLabel;
     private TrayIcon? _tray;
+    // The tray's update entry, retitled to "Update now — vX" once a check has found one (RefreshUpdateMenuItem).
+    private NativeMenuItem? _updateMenuItem;
+    // Raises the Action Center notifications the update flow reports through, and hands back the click
+    // on an "update available" one. Null if the platform has no notifier.
+    private INotifier? _notifier;
     private OverlayStage? _stage;
     private SettingsWindow? _settingsWindow;
     private ISettingsStore? _settingsStore;
@@ -190,6 +195,7 @@ public sealed class App : Application
 
         RegisterHotkeys();
         BuildTray();
+        BuildNotifier();
 
         // Launching Hypertree again (a re-clicked shortcut, the start-menu entry, a second login task) doesn't
         // start a rival copy — that launch signals us and exits. Answer the way a tray click does: open the
@@ -1055,7 +1061,8 @@ public sealed class App : Application
         // They're re-registered from the (possibly changed) bindings when the window closes.
         SuspendHotkeys();
 
-        _settingsWindow = new SettingsWindow(_settings, _startup.IsEnabled, SaveSettings, _activator);
+        _settingsWindow = new SettingsWindow(_settings, _startup.IsEnabled, SaveSettings, _activator,
+            new UpdateHooks(CheckForUpdates, ApplyLastUpdate, () => _lastUpdate));
         _settingsWindow.Topmost = true; // sit above the map/flash if one is showing
         // Settings is the one surface that's still its own window; when it closes, re-register the hotkeys
         // (picking up any rebind) and hand the stage its key focus back so an underlying map resumes.
@@ -1135,17 +1142,19 @@ public sealed class App : Application
 
     // ── Software updates (tray · command palette · settings) ─────────────────────────
 
-    // Entry point for the tray item and the command palette's "Check for updates". Pops a "Checking…"
-    // card on the stage, runs the check, then swaps in the result — an "Update now" confirm when a newer
-    // release exists, or an informational notice otherwise.
+    // Entry point for the tray item, the command palette, and the Settings window's button. Deliberately
+    // stays out of the way: nothing opens over the desktop and nothing takes the pointer — the whole flow
+    // reports through Action Center notifications, and the "update available" one applies the update when
+    // clicked. The Settings window, when open, mirrors the same states inline.
     private void CheckForUpdates()
     {
-        var progress = new NoticeContent("Checking for updates…", dismissLabel: null);
-        _stage?.Summon(progress);
-        _ = ResolveUpdateAsync(progress);
+        _settingsWindow?.OnUpdateCheckStarted();
+        // Silent: the result notification follows moments later, and a check shouldn't chime twice.
+        Notify("Checking for updates…", "Looking for a newer release of Hypertree.", silent: true);
+        _ = ResolveUpdateAsync();
     }
 
-    private async Task ResolveUpdateAsync(NoticeContent progress)
+    private async Task ResolveUpdateAsync()
     {
         UpdateCheckResult result;
         try { result = await UpdateChecker.CheckDetailedAsync().ConfigureAwait(false); }
@@ -1153,35 +1162,65 @@ public sealed class App : Application
 
         OnUi(() =>
         {
+            // Recorded either way, so the tray menu and the palette can offer "Update now" from here on
+            // without re-checking — even if the notification was never seen.
             _lastUpdate = result;
-            // If the user dismissed the progress card (Esc / click-away) while we were checking, leave the
-            // stage alone — _lastUpdate is still recorded, so the palette can offer "Update now" later.
-            if (_stage?.Current != progress) return;
-            _stage.ReplaceTop(1, UpdateResultCard(result));
+            RefreshUpdateMenuItem();
+            _settingsWindow?.OnUpdateResult(result);
+            NotifyUpdateResult(result);
         });
     }
 
-    // The stage card for a finished check: an actionable confirm when an update is available, else a
-    // single-button notice explaining the state.
-    private IStageContent UpdateResultCard(UpdateCheckResult result) => result.Availability switch
+    // The notification for a finished check: actionable when a newer release exists, informational otherwise.
+    private void NotifyUpdateResult(UpdateCheckResult result)
     {
-        UpdateAvailability.Available => new ConfirmContent(
-            $"Update available: v{result.AvailableVersion}\nYou’re on v{result.CurrentVersion}. Download it and restart Hypertree now?",
-            ApplyLastUpdate, confirmLabel: "Update now"),
-        UpdateAvailability.UpToDate => new NoticeContent(
-            $"You’re up to date.\nHypertree v{result.CurrentVersion} is the latest release."),
-        UpdateAvailability.NotApplicable => new NoticeContent(
-            "Update checks only run in an installed build.\nThis looks like a dev build — install Hypertree from a GitHub release and it’ll check for updates automatically."),
-        _ => new NoticeContent(
-            "Couldn’t check for updates.\nThe update feed was unreachable — check your connection and try again."),
-    };
+        switch (result.Availability)
+        {
+            case UpdateAvailability.Available:
+                Notify($"Update available — v{result.AvailableVersion}",
+                       $"You’re on v{result.CurrentVersion}. Click to download it and restart Hypertree.",
+                       ApplyUpdateAction);
+                break;
+            case UpdateAvailability.UpToDate:
+                Notify("You’re up to date", $"Hypertree v{result.CurrentVersion} is the latest release.");
+                break;
+            case UpdateAvailability.NotApplicable:
+                Notify("Update checks need an installed build",
+                       "This looks like a dev build. Install Hypertree from a GitHub release and it can update itself.");
+                break;
+            default:
+                Notify("Couldn’t check for updates",
+                       "The update feed was unreachable — check your connection and try again.");
+                break;
+        }
+    }
 
-    // The command palette's "Update now" and the "Update available" confirm both land here: dismiss the
-    // overlay, then download + install (which restarts the app on success).
+    // The one action a notification of ours can carry: "the update you were told about — install it".
+    private const string ApplyUpdateAction = "update";
+    // Every step of the update flow reuses this key, so checking → result → downloading update one
+    // notification in place instead of leaving three behind in the Action Center.
+    private const string UpdateNoticeKey = "update-check";
+
+    // Raise a Windows notification. Informational unless given an action, which the user can click.
+    private void Notify(string title, string message, string? action = null, bool silent = false)
+        => _notifier?.Show(title, message, action, silent, replaces: UpdateNoticeKey);
+
+    // A notification click came back (on a background thread — see INotifier.Activated).
+    private void OnNotificationActivated(string action)
+    {
+        if (action == ApplyUpdateAction) OnUi(ApplyLastUpdate);
+    }
+
+    // The tray menu's and command palette's "Update now", the Settings install button, and a click on the
+    // "update available" notification all land here: clear anything showing, say it's running, then
+    // download + install (which restarts the app on success).
     private void ApplyLastUpdate()
     {
         if (_lastUpdate is not { Availability: UpdateAvailability.Available } pending) return;
         _stage?.Dismiss();
+        _settingsWindow?.OnUpdateApplying();
+        Notify($"Downloading v{pending.AvailableVersion}",
+               "Hypertree will restart itself once the update is installed.", silent: true);
         _ = ApplyUpdateAsync(pending);
     }
 
@@ -1191,8 +1230,14 @@ public sealed class App : Application
         catch
         {
             // Download/apply failed (network, locked files). The check handles are now spent, so drop the
-            // remembered result and surface the failure rather than leaving a stale "Update now" around.
-            OnUi(() => { _lastUpdate = null; _stage?.Summon(UpdateResultCard(new UpdateCheckResult { Availability = UpdateAvailability.Failed })); });
+            // remembered result — the tray and palette offer a fresh check rather than a stale "Update now".
+            OnUi(() =>
+            {
+                _lastUpdate = null;
+                RefreshUpdateMenuItem();
+                _settingsWindow?.OnUpdateFailed();
+                Notify("Update failed", "The download or install didn’t complete. Try checking again.");
+            });
         }
         // On success the process restarts and never returns here.
     }
@@ -1250,8 +1295,9 @@ public sealed class App : Application
         palette.Click += (_, _) => Dispatcher.UIThread.Post(OpenCommandPalette);
         var settings = new NativeMenuItem("Open settings");
         settings.Click += (_, _) => Dispatcher.UIThread.Post(OpenSettings);
-        var update = new NativeMenuItem("Check for updates");
-        update.Click += (_, _) => Dispatcher.UIThread.Post(CheckForUpdates);
+        // Held so a finished check can retitle it — see RefreshUpdateMenuItem.
+        _updateMenuItem = new NativeMenuItem("Check for updates");
+        _updateMenuItem.Click += (_, _) => Dispatcher.UIThread.Post(RunUpdateMenuItem);
         var exit = new NativeMenuItem("Exit");
         exit.Click += (_, _) => (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
 
@@ -1260,11 +1306,47 @@ public sealed class App : Application
             Icon = TrayIconFactory.Create(),
             ToolTipText = "Hypertree",
             IsVisible = true,
-            Menu = new NativeMenu { header, new NativeMenuItemSeparator(), palette, settings, update, new NativeMenuItemSeparator(), exit },
+            Menu = new NativeMenu { header, new NativeMenuItemSeparator(), palette, settings, _updateMenuItem, new NativeMenuItemSeparator(), exit },
         };
         // Left-click the tray icon → open the command palette (the app's main entry point).
         _tray.Clicked += (_, _) => Dispatcher.UIThread.Post(ToggleCommandPalette);
         TrayIcon.SetIcons(this, new TrayIcons { _tray });
+    }
+
+    // Stand up the Action Center notifier the update flow reports through. Constructing it registers the
+    // COM activator (so a click on an "update available" toast reaches this running instance), which is
+    // best-effort: if the platform refuses, the update flow simply runs without notifications and the
+    // Settings window's inline status carries the detail.
+    private void BuildNotifier()
+    {
+        try
+        {
+            _notifier = new WindowsToastNotifier();
+            _notifier.Activated += OnNotificationActivated;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Hypertree could not start notifications: {ex.Message}");
+        }
+    }
+
+    // The tray's update item does whatever its title says — apply a found release, else check. Reading
+    // _lastUpdate here (rather than trusting the title) keeps the two from drifting.
+    private void RunUpdateMenuItem()
+    {
+        if (_lastUpdate is { Availability: UpdateAvailability.Available }) ApplyLastUpdate();
+        else CheckForUpdates();
+    }
+
+    // Retitle the tray's update item to match what's known. Like the command palette, it offers "Update
+    // now — vX" once a check has found a newer release, so applying it doesn't re-check. (Avalonia's
+    // NativeMenu has no "about to open" hook, so the item is updated when the state changes instead.)
+    private void RefreshUpdateMenuItem()
+    {
+        if (_updateMenuItem is null) return;
+        _updateMenuItem.Header = _lastUpdate is { Availability: UpdateAvailability.Available } ready
+            ? $"Update now — v{ready.AvailableVersion}"
+            : "Check for updates";
     }
 
     // ── Branch definition ─────────────────────────────────────────────────────────
