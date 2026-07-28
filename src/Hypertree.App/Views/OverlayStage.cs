@@ -410,7 +410,7 @@ internal sealed class StageWindow : Window
     // dim it always was at the edges. Since the host is semi-transparent over the live desktop, a busy or
     // light screen behind used to wash the centre out; pooling the dark under the content fixes the contrast
     // without making the whole overlay heavier. Radii reach past the corners so the outer field is flat.
-    internal static IBrush BuildDim() => new RadialGradientBrush
+    internal static RadialGradientBrush BuildDim() => new RadialGradientBrush
     {
         Center = new RelativePoint(0.5, 0.5, RelativeUnit.Relative),
         GradientOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative),

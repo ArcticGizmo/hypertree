@@ -43,9 +43,10 @@ internal sealed class HudWindow : Window
     private const int SlideTickMs = 15;  // ~66fps tween step
 
     // The dim backdrop, held as a field so the transition can fade it in (0→full) rather than snap it on —
-    // the snap was the most visible part of the motion. Kept a touch lighter than the old flat backdrop so
-    // the gradient wipe reads as a reveal rather than a second slab of dark.
-    private readonly SolidColorBrush _dim = new(Color.FromArgb(0x59, 0x10, 0x10, 0x10));
+    // the snap was the most visible part of the motion. Shares the interactive map's vignette (StageWindow's
+    // DimBg) so the transient flash and the full map read at the same weight — the board keeps its contrast
+    // over a busy desktop either way. Its own instance, since the fade-in mutates Opacity.
+    private readonly RadialGradientBrush _dim = StageWindow.BuildDim();
 
     // Peak darkness of the sweeping wipe band, over #101010. Tunable: this is the "how strong is the wipe".
     private const byte BandAlpha = 0x6E;
