@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Settings persist across restarts again.** The settings file is written with string-named enums, but was read back without the matching converter — so once any enum value was present in it (now always, since the map style is stored there) the whole file failed to parse and *every* setting silently reverted to its default on the next launch. Reads now use the same options as writes. (This latently affected saved hotkey rebindings too.)
+
 ### Added
 
 - **Metro-map style**: draw the whole desktop tree as a transit diagram — each timeline a coloured line, each desktop a station, a green "you are here" train marking where you stand. Turn it on in **Settings → Appearance** or flip it with **`v`** on the map; it's a whole-app choice that applies everywhere a board is drawn (the flash, the map, previews, the move flow), and the map stays fully interactive in it (click, switch, drag-rearrange). (See `docs/design/metro-map.md`.)

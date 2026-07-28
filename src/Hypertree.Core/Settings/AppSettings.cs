@@ -120,11 +120,17 @@ public sealed class FileSettingsStore : ISettingsStore
     public string Path { get; }
 
     public FileSettingsStore()
+        : this(System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "hypertree"))
     {
-        string dir = System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "hypertree");
-        Directory.CreateDirectory(dir);
-        Path = System.IO.Path.Combine(dir, "settings.json");
+    }
+
+    /// <summary>Testing seam: keep <c>settings.json</c> in an explicit directory instead of the roaming
+    /// profile, so a round-trip can be exercised without touching a real install's settings.</summary>
+    internal FileSettingsStore(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        Path = System.IO.Path.Combine(directory, "settings.json");
     }
 
     public AppSettings Load()
@@ -132,7 +138,10 @@ public sealed class FileSettingsStore : ISettingsStore
         try
         {
             if (!File.Exists(Path)) return new AppSettings();
-            return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Path)) ?? new AppSettings();
+            // Read with the SAME options used to write (crucially the string-enum converter) — otherwise a
+            // string-serialised enum like "MapStyle": "Metro" can't be parsed back, the whole load throws,
+            // and every setting silently reverts to its default.
+            return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Path), Options) ?? new AppSettings();
         }
         catch
         {
