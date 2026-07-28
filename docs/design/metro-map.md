@@ -92,6 +92,11 @@ theme. So now:
   are dark and line-tinted (the line's colour as the text + a faint colour border);
   selected/here invert to a solid blue/green fill, so "dimmed unless selected" reads at a
   glance and matches the branch marker. The window count rides inside the chip.
+- **Dimming is by colour, never opacity** (`Dim` fades a colour toward the ground). The
+  overlay is semi-transparent over the live desktop, so a resting line/donut/badge drawn
+  at reduced alpha let the desktop bleed through and got lost against a bright screen.
+  Fading toward the ground keeps every element opaque, so a dimmed thing recedes but stays
+  legible over anything behind. (Route badges keep a floor so their dark text still reads.)
 
 ## Open questions (still open)
 

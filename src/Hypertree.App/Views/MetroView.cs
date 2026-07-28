@@ -174,7 +174,7 @@ internal static class MetroView
         double originX = cx - line.Cursor * stride; // the cursor station lands on cx
 
         double firstX = originX, lastX = originX + (n - 1) * stride;
-        var routeBrush = new SolidColorBrush(line.Colour) { Opacity = op };
+        var routeBrush = new SolidColorBrush(Dim(line.Colour, op)); // opaque dim — a resting line stays visible over anything behind
 
         // The route: a single rounded horizontal stroke spanning the stations. A one-station line still
         // gets a short stub so the colour and cap read.
@@ -256,12 +256,12 @@ internal static class MetroView
         double r = empty && !marked ? rOut * 0.66 : rOut;
         double ring = empty && !marked ? 2.5 * s : 3.5 * s;
 
-        Color donut = st.Focused ? Focus : st.Here ? Here : lineColour;
+        Color donut = st.Focused ? Focus : st.Here ? Here : Dim(lineColour, op);
         var dot = new Ellipse
         {
             Width = r * 2, Height = r * 2,
             Fill = new SolidColorBrush(Bg),
-            Stroke = new SolidColorBrush(donut) { Opacity = marked ? 1.0 : op },
+            Stroke = new SolidColorBrush(donut),
             StrokeThickness = ring,
         };
         Canvas.SetLeft(dot, x - r);
@@ -350,7 +350,7 @@ internal static class MetroView
         };
         if (!marked) // a faint coloured edge just defines the chip on varied backdrops, without pulling focus
         {
-            chip.BorderBrush = new SolidColorBrush(lineColour) { Opacity = empty ? 0.18 : 0.3 };
+            chip.BorderBrush = new SolidColorBrush(Dim(lineColour, empty ? 0.3 : 0.44)); // opaque dim, not translucent
             chip.BorderThickness = new Thickness(Math.Max(1, s));
         }
         chip.Measure(Size.Infinity);
@@ -366,6 +366,11 @@ internal static class MetroView
         return Color.FromArgb(0xFF, M(a.R, b.R), M(a.G, b.G), M(a.B, b.B));
     }
 
+    // Dim a colour by fading it toward the overlay ground rather than lowering its opacity — the result is
+    // opaque, so a dimmed line, station or badge keeps its contrast over a busy desktop instead of going
+    // translucent and getting lost in it. t = 1 is the full colour; smaller t recedes toward the ground.
+    private static Color Dim(Color c, double t) => Lerp(Bg, c, t);
+
     private static void AddRouteBadge(Canvas canvas, Line line, double x, double y, double s, double op)
     {
         var text = new TextBlock
@@ -376,7 +381,9 @@ internal static class MetroView
         };
         var badge = new Border
         {
-            Background = new SolidColorBrush(line.Colour) { Opacity = op },
+            // Opaque, and never so dim the dark text stops reading — a resting branch's name label recedes a
+            // little but stays crisp rather than washing out against the desktop behind.
+            Background = new SolidColorBrush(Dim(line.Colour, Math.Max(op, 0.72))),
             CornerRadius = new CornerRadius(11 * s), Padding = new Thickness(11 * s, 3 * s),
             Child = text,
         };
