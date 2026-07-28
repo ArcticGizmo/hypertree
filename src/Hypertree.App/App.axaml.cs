@@ -155,7 +155,11 @@ public sealed class App : Application
         // One shared, persistent presentation surface for every overlay (map, palettes, prompts, move).
         // Swapping between them is an in-place content change, not a window teardown — no flash. Card
         // content floats over the live map, which the stage pulls from here.
-        _stage = new OverlayStage(_desktops, _activator) { MapProvider = () => _model!.BuildMap() };
+        _stage = new OverlayStage(_desktops, _activator)
+        {
+            MapProvider = () => _model!.BuildMap(),
+            MapStyle = _settings.MapStyle, // board vs. metro, applied to every surface the stage draws
+        };
         // Park the taskbar pill while the overlay is up (the map already shows where you are) — this also
         // removes the topmost-z fight that made the pill flash in/out when a dialog opened.
         _stage.Shown += () => _taskbarLabel?.SetSuppressed(true);
@@ -174,6 +178,7 @@ public sealed class App : Application
         _overlay.MoveWindowsRequested += ToggleMoveWindows; // m — start the move-windows flow (replaces the map)
         _overlay.FinderRequested += () => OpenSpotlight(); // Ctrl+F — finder pushed over the map; Esc pops back to it
         _overlay.SettingsRequested += OpenSettings;
+        _overlay.ViewStyleToggleRequested += ToggleMapStyle; // v — flip board ↔ metro (persisted, app-wide)
 
         _stage.Prewarm(); // size the overlay host now, so the first summon doesn't render at the top-left then jump
 
@@ -399,7 +404,7 @@ public sealed class App : Application
             // Reveal fades the board in; a real move wipes; a blocked move does neither.
             bool doAnimate = animate && (revealOnly || moved);
             _hud?.Flash(_model.BuildMap(_gestureFrom), mods, moved ? action : null, doAnimate,
-                        _settings.SweepFromLeadingEdge);
+                        _settings.SweepFromLeadingEdge, _settings.MapStyle);
         }
         StartGesturePoll();
     }
@@ -417,7 +422,7 @@ public sealed class App : Application
         if (_overlay is { IsOpen: true }) return;
         _model.AnchorToCurrent(); // show where we stand now, not our stale cursor
         bool animate = _settings.AnimateNavigation && WindowFx.SystemAnimationsEnabled();
-        _hud?.Flash(_model.BuildMap(), mods, move: null, animate: animate);
+        _hud?.Flash(_model.BuildMap(), mods, move: null, animate: animate, style: _settings.MapStyle);
     }
 
     // "Show before moving": with the setting on, a nav chord that arrives while the flash is off screen
@@ -1045,7 +1050,27 @@ public sealed class App : Application
         _settings = settings;
         _settingsStore?.Save(settings);
         ApplyTaskbarLabel();
+        ApplyMapStyle();
         _startup?.SetEnabled(startOnLogin);
+    }
+
+    // v on the map (or the Settings toggle) flips the board style. It's a persisted, app-wide choice, so we
+    // update the setting, save it, and push it onto the stage — every surface that draws a board follows.
+    private void ToggleMapStyle()
+    {
+        _settings.MapStyle = _settings.MapStyle == MapStyle.Metro ? MapStyle.Board : MapStyle.Metro;
+        _settingsStore?.Save(_settings);
+        ApplyMapStyle();
+    }
+
+    // Push the current style onto the stage and repaint whatever it's showing, so the switch is immediate
+    // (the interactive map re-renders; a card's backdrop refreshes behind it).
+    private void ApplyMapStyle()
+    {
+        if (_stage is null) return;
+        _stage.MapStyle = _settings.MapStyle;
+        if (_overlay is { IsOpen: true } && _model is not null) _overlay.SetBoard(_model.BuildMap());
+        _stage.RefreshBackdrop();
     }
 
     // Show or hide the persistent taskbar label to match the setting.
@@ -1145,7 +1170,7 @@ public sealed class App : Application
         if (_model is null) return;
         NavMap map = _model.BuildMap();
         if (_stage is not null && _stage.HasDurableBase) _overlay?.SetBoard(map);
-        else _hud?.Flash(map, HotkeyModifiers.None); // a result flash, not a gesture — just times out
+        else _hud?.Flash(map, HotkeyModifiers.None, style: _settings.MapStyle); // a result flash, not a gesture — just times out
     }
 
     // The product version for the tray header, read from the assembly (set by <Version> in the csproj) so

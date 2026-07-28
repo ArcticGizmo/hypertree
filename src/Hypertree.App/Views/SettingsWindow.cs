@@ -40,6 +40,7 @@ internal sealed class SettingsWindow : Window
 
     private readonly ToggleSwitch _startOnLogin;
     private readonly ToggleSwitch _showTaskbarLabel;
+    private readonly ToggleSwitch _metroMapStyle;
     private readonly ToggleSwitch _displayBeforeMoving;
     private readonly ToggleSwitch _animateNavigation;
     private readonly ToggleSwitch _sweepFromLeadingEdge;
@@ -81,6 +82,7 @@ internal sealed class SettingsWindow : Window
 
         _startOnLogin = Toggle(startOnLogin);
         _showTaskbarLabel = Toggle(settings.ShowTaskbarLabel);
+        _metroMapStyle = Toggle(settings.MapStyle == MapStyle.Metro);
         _displayBeforeMoving = Toggle(settings.DisplayBeforeMoving);
         _animateNavigation = Toggle(settings.AnimateNavigation);
         _sweepFromLeadingEdge = Toggle(settings.SweepFromLeadingEdge);
@@ -124,6 +126,13 @@ internal sealed class SettingsWindow : Window
                     Divider(),
                     Title2("Desktop label"),
                     ToggleRow("Show the current desktop name over the taskbar", _showTaskbarLabel),
+
+                    Divider(),
+                    Title2("Appearance"),
+                    ToggleRow("Use the metro map style", _metroMapStyle),
+                    Hint("Draw the whole tree as a transit diagram — each timeline a coloured line, each "
+                         + "desktop a station, a green “you are here” train — everywhere a board appears: the "
+                         + "flash, the map, previews and the move flow. You can also flip it with “v” on the map."),
 
                     Divider(),
                     Title2("Navigation"),
@@ -181,6 +190,7 @@ internal sealed class SettingsWindow : Window
         var settings = new AppSettings
         {
             ShowTaskbarLabel = _showTaskbarLabel.IsChecked ?? true,
+            MapStyle = (_metroMapStyle.IsChecked ?? false) ? MapStyle.Metro : MapStyle.Board,
             DisplayBeforeMoving = _displayBeforeMoving.IsChecked ?? true,
             AnimateNavigation = _animateNavigation.IsChecked ?? true,
             SweepFromLeadingEdge = _sweepFromLeadingEdge.IsChecked ?? true,

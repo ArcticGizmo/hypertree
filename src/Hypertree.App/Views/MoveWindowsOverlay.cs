@@ -6,6 +6,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Hypertree.Desktops;
 using Hypertree.Scopes;
+using Hypertree.Settings;
 
 namespace Hypertree.App.Views;
 
@@ -319,7 +320,7 @@ internal sealed class MoveContent : IStageContent
         if (map is null) return;
 
         double width = _stage?.HostWidth ?? 1280, height = _stage?.HostHeight ?? 800;
-        Control board = BoardView.Render(map, width, height, 1.0);
+        Control board = MapSurface.Render(map, width, height, _stage?.MapStyle ?? MapStyle.Board);
 
         int n = _session.SelectedCount;
         Border banner = HintBar($"Moving {n} window{(n == 1 ? "" : "s")} · ←→↑↓ navigate · Enter to drop here · Esc/Backspace cancel");

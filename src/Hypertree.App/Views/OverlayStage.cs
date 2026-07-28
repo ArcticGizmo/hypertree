@@ -10,6 +10,7 @@ using Avalonia.Threading;
 using Hypertree.Desktops;
 using Hypertree.Platform;
 using Hypertree.Scopes;
+using Hypertree.Settings;
 
 namespace Hypertree.App.Views;
 
@@ -56,6 +57,11 @@ internal sealed class OverlayStage
 
     /// <summary>Supplies the live board rendered behind Card content (App: <c>() =&gt; _model.BuildMap()</c>).</summary>
     public Func<NavMap>? MapProvider;
+
+    /// <summary>The board style for every surface the stage draws (card backdrops here; the map and move
+    /// flow read it off the stage too). App keeps this in sync with the persisted setting, so choosing the
+    /// metro map applies everywhere at once.</summary>
+    public MapStyle MapStyle { get; set; } = MapStyle.Board;
 
     /// <summary>Raised when the stage becomes visible (first content shown) and when it hides (stack
     /// emptied). App uses these to park the taskbar pill while the overlay is up.</summary>
@@ -217,7 +223,7 @@ internal sealed class OverlayStage
         NavMap? map = content.BackdropBoard() ?? MapProvider?.Invoke();
         if (map is null) return null;
         double w = HostWidth > 0 ? HostWidth : 1280, h = HostHeight > 0 ? HostHeight : 800;
-        return BoardView.Render(map, w, h, 1.0);
+        return MapSurface.Render(map, w, h, MapStyle);
     }
 
     /// <summary>Re-render the current card's backdrop board — after its selection moved (palette preview).</summary>

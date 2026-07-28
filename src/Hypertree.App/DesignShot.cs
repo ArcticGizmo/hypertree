@@ -70,6 +70,8 @@ internal static class DesignShot
             new(3, "spike", new List<NavMapTile> { new("scratch", false, WindowCount: 2) }, false, 0),
         };
         SaveMetro(new NavMap(Top(2), 2, true, busy, 2), Path.Combine(outDir, "metro-busy.png"));
+        SaveMetroLayoutCheck(new NavMap(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1),
+                             Path.Combine(outDir, "metro-drag-layout.png"));
 
         SaveCards(outDir);
     }
@@ -152,7 +154,21 @@ internal static class DesignShot
     {
         var layout = new BoardLayout();
         Control board = BoardView.Render(map, ScreenW, ScreenH, 1.0, layout: layout);
+        SaveWithLayoutMarks(board, layout, path);
+    }
 
+    // The same verification for the metro view: prove the station cells, line bands, carets and boundaries
+    // MetroView reports sit on the diagram, so the interactive map's click/drag hit-testing lines up there
+    // exactly as it does on the board.
+    private static void SaveMetroLayoutCheck(NavMap map, string path)
+    {
+        var layout = new BoardLayout();
+        Control board = MetroView.Render(map, ScreenW, ScreenH, 1.0, layout: layout);
+        SaveWithLayoutMarks(board, layout, path);
+    }
+
+    private static void SaveWithLayoutMarks(Control board, BoardLayout layout, string path)
+    {
         var marks = new Canvas { Width = ScreenW, Height = ScreenH };
         void Outline(Rect r, Color c, double thickness)
         {

@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Hypertree.Scopes;
+using Hypertree.Settings;
 
 namespace Hypertree.App.Views;
 
@@ -52,7 +53,6 @@ internal sealed class MapOverlay : IStageContent
     private bool _initialised;
     private int _row; // index into the combined row sequence (branches split around main)
     private int _col; // index within the current row
-    private MapStyle _style = MapStyle.Board; // board (default) vs. the transit-diagram metro view ('v' toggles)
     // Where the selection last sat in each row, so stepping up/down back into a row returns to that desktop
     // rather than carrying the column across. Keyed by branch index (-1 = main); seeded from the model's own
     // resume points, then kept current as the selection browses. See MoveRow.
@@ -83,6 +83,9 @@ internal sealed class MapOverlay : IStageContent
     public event Action? FinderRequested;
     /// <summary>The cog icon — open settings.</summary>
     public event Action? SettingsRequested;
+    /// <summary>v — flip the whole-app board style (board ↔ metro). App owns the setting: it persists the
+    /// change and pushes the new style back onto the stage, so every surface follows, not just this map.</summary>
+    public event Action? ViewStyleToggleRequested;
 
     public MapOverlay(OverlayStage stage)
     {
@@ -177,7 +180,7 @@ internal sealed class MapOverlay : IStageContent
             case Key.Up: MoveRow(-1); e.Handled = true; break;
             case Key.Down: MoveRow(+1); e.Handled = true; break;
             case Key.F when e.KeyModifiers.HasFlag(KeyModifiers.Control): FinderRequested?.Invoke(); e.Handled = true; break;
-            case Key.V: _style = _style == MapStyle.Board ? MapStyle.Metro : MapStyle.Board; Render(); e.Handled = true; break;
+            case Key.V: ViewStyleToggleRequested?.Invoke(); e.Handled = true; break;
             case Key.R: RenameRequested?.Invoke(CurrentSelection()); e.Handled = true; break;
             case Key.N: NewDesktopRequested?.Invoke(); e.Handled = true; break;
             case Key.B: NewBranchRequested?.Invoke(); e.Handled = true; break;
@@ -526,19 +529,19 @@ internal sealed class MapOverlay : IStageContent
         double height = _stage.HostHeight > 0 ? _stage.HostHeight : 800;
 
         // The layout the render reports is what a drag hit-tests against, so it's refreshed with the board.
-        // The metro view is keyboard-driven for now — it reports no tile/row geometry, so a fresh empty
-        // layout leaves click and drag as no-ops there (arrows + Enter still select and switch).
-        Control board;
-        if (_style == MapStyle.Metro)
-        {
-            // The train's pulse honours the OS reduce-motion preference — same signal the nav wipe checks.
-            board = MetroView.Render(BuildDisplayMap(), width, height, 1.0, animate: WindowFx.SystemAnimationsEnabled());
-            _layout = new BoardLayout();
-        }
-        else
-        {
-            var layout = new BoardLayout();
-            board = BoardView.Render(BuildDisplayMap(), width, height, 1.0,
+        // Both renderers fill it in the same scheme, so click/select and drag-rearrange work identically
+        // whichever style is showing. Metro takes no delete callbacks (no × badges — Del still deletes) and
+        // pulses the train only when the OS allows motion.
+        var layout = new BoardLayout();
+        NavMap display = BuildDisplayMap();
+        Control board = _stage.MapStyle == MapStyle.Metro
+            ? MetroView.Render(display, width, height, 1.0, WindowFx.SystemAnimationsEnabled(),
+                onTopClick: SelectTop,
+                onBranchClick: SelectBranch,
+                onTopActivate: i => JumpTopRequested?.Invoke(i),
+                onBranchActivate: (g, d) => JumpBranchRequested?.Invoke(g, d),
+                layout: layout)
+            : BoardView.Render(display, width, height, 1.0,
                 onTopClick: SelectTop,
                 onBranchClick: SelectBranch,
                 onTopDelete: i => DeleteDesktopRequested?.Invoke(new DesktopSelection(true, -1, i)),
@@ -546,8 +549,7 @@ internal sealed class MapOverlay : IStageContent
                 onTopActivate: i => JumpTopRequested?.Invoke(i),
                 onBranchActivate: (g, d) => JumpBranchRequested?.Invoke(g, d),
                 layout: layout);
-            _layout = layout;
-        }
+        _layout = layout;
 
         _root.Children.Clear();
         _root.Children.Add(board);
@@ -648,7 +650,7 @@ internal sealed class MapOverlay : IStageContent
         rows.Children.Add(LegendRow("b", "new branch"));
         rows.Children.Add(LegendRow("m", "move windows"));
         rows.Children.Add(LegendRow("Ctrl+F", "find a desktop"));
-        rows.Children.Add(LegendRow("v", _style == MapStyle.Metro ? "board view" : "metro view"));
+        rows.Children.Add(LegendRow("v", _stage.MapStyle == MapStyle.Metro ? "board view" : "metro view"));
         rows.Children.Add(LegendRow("Esc", "close"));
         rows.Children.Add(new TextBlock
         {
@@ -720,11 +722,6 @@ internal sealed class MapOverlay : IStageContent
         return cog;
     }
 }
-
-/// <summary>How the map draws the board: the default screen-tile <see cref="BoardView"/>, or the
-/// transit-diagram <see cref="MetroView"/>. Toggled with <c>v</c>; a purely visual choice — the selection,
-/// navigation, and rearrange logic are identical either way.</summary>
-internal enum MapStyle { Board, Metro }
 
 /// <summary>Which desktop the map has selected: a main-timeline desktop (<paramref name="OnMain"/> true,
 /// <paramref name="DesktopIndex"/> = its top-row index) or a branch desktop (<paramref name="BranchIndex"/>

@@ -7,6 +7,7 @@ using Avalonia.Platform;
 using Avalonia.Threading;
 using Hypertree.Platform;
 using Hypertree.Scopes;
+using Hypertree.Settings;
 
 namespace Hypertree.App.Views;
 
@@ -89,13 +90,15 @@ internal sealed class HudWindow : Window
     /// animates. The caller gates <paramref name="animate"/> on the user setting and the OS "show animations"
     /// preference.</summary>
     public void Flash(NavMap map, HotkeyModifiers holdMods, NavAction? move = null, bool animate = false,
-                      bool fromLeadingEdge = true)
+                      bool fromLeadingEdge = true, MapStyle style = MapStyle.Board)
     {
         _holdMods = holdMods;
         if (!IsVisible) Show();   // realizes the handle so Screens is available
         CoverPrimary();           // sets Width/Height to the primary screen (DIPs)
 
-        Control board = BoardView.Render(map, Width, Height); // board centres itself within the full screen
+        // The flash is transient, so the metro train doesn't pulse here (animate:false) — the wipe below is
+        // the only motion. board centres itself within the full screen.
+        Control board = MapSurface.Render(map, Width, Height, style);
 
         // A directional move gets a soft gradient wipe: a dark band that begins on the edge opposite the
         // arrow and sweeps across toward the way you pressed, uncovering the (already-switched) desktop as

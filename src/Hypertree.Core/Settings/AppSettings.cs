@@ -40,6 +40,12 @@ public sealed class AppSettings
     /// <see cref="AnimateNavigation"/> is on. See <c>HudWindow.SweepTravel</c>.</summary>
     public bool SweepFromLeadingEdge { get; set; } = true;
 
+    /// <summary>How the board is drawn wherever it appears — the flash, the map, card backdrops, previews,
+    /// the move flow. <see cref="MapStyle.Board"/> (default) is the screen-tile layout; <see cref="MapStyle.Metro"/>
+    /// is the transit-diagram "metro map". A whole-app appearance choice, set in Settings → Appearance or by
+    /// pressing <c>v</c> on the map.</summary>
+    public MapStyle MapStyle { get; set; } = MapStyle.Board;
+
     /// <summary>Reusable branch recipes, offered via the branch card's "Load from template" button so you
     /// don't retype the desktop set each time. Empty by default — you build and delete them in the
     /// "Manage templates…" command.</summary>
@@ -68,6 +74,17 @@ public sealed class AppSettings
         foreach (HotkeyBinding b in HotkeyBindings) map[b.Command] = new HotkeyChord(b.Modifiers, b.Key);
         return map;
     }
+}
+
+/// <summary>How the board is rendered across the app. Persisted as a string in settings.json (via the
+/// enum converter), so the names are load-bearing — don't rename without a migration.</summary>
+public enum MapStyle
+{
+    /// <summary>The screen-tile board: desktops as little screen mockups in rows.</summary>
+    Board,
+
+    /// <summary>The transit-diagram metro map: timelines as coloured lines, desktops as stations.</summary>
+    Metro,
 }
 
 /// <summary>

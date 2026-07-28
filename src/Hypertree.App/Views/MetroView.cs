@@ -50,7 +50,13 @@ internal static class MetroView
 
     /// <param name="animate">When true (the live overlay), the "you are here" train gently pulses. The
     /// offscreen shot path leaves it false so a capture is a single settled frame.</param>
-    public static Control Render(NavMap map, double screenW, double screenH, double s = 1.0, bool animate = false)
+    /// <param name="layout">When supplied, filled with each station's cell and each line's band in the same
+    /// scheme <see cref="BoardView"/> uses — so the interactive map's click and drag code hit-tests the metro
+    /// diagram with no changes. A line's route badge is its branch drag handle (stations tile the strip).</param>
+    public static Control Render(NavMap map, double screenW, double screenH, double s = 1.0, bool animate = false,
+                                 Action<int>? onTopClick = null, Action<int, int>? onBranchClick = null,
+                                 Action<int>? onTopActivate = null, Action<int, int>? onBranchActivate = null,
+                                 BoardLayout? layout = null)
     {
         double stride = 156 * s;   // spacing between stations along a line
         double lineW = 8 * s;      // route stroke width
@@ -107,8 +113,13 @@ internal static class MetroView
         // recognisable home spine even from inside a branch), where a resting branch fades further.
         for (int i = 0; i < lines.Count; i++)
         {
-            double op = lines[i].Active ? 1.0 : lines[i].IsMain ? 0.82 : 0.5;
-            DrawLine(canvas, lines[i], bx, y[i], stride, lineW, rOut, s, op, animate);
+            Line ln = lines[i];
+            double op = ln.Active ? 1.0 : ln.IsMain ? 0.82 : 0.5;
+            Action<int>? click = ln.IsMain ? onTopClick
+                                : onBranchClick is null ? null : j => onBranchClick(ln.BranchIndex, j);
+            Action<int>? activate = ln.IsMain ? onTopActivate
+                                : onBranchActivate is null ? null : j => onBranchActivate(ln.BranchIndex, j);
+            DrawLine(canvas, ln, bx, y[i], stride, lineW, rOut, s, op, animate, click, activate, layout);
         }
 
         return canvas;
@@ -144,18 +155,19 @@ internal static class MetroView
     }
 
     private sealed record Station(string Label, bool Focused, bool Here, int WindowCount);
-    private sealed record Line(string Name, Color Colour, bool IsMain, bool Active, int Cursor, IReadOnlyList<Station> Stations);
+    private sealed record Line(string Name, Color Colour, bool IsMain, int BranchIndex, bool Active, int Cursor, IReadOnlyList<Station> Stations);
 
     private static Line MainLineOf(NavMap map)
-        => new("main", MainLine, IsMain: true, Active: map.OnTop, map.TopCursor,
+        => new("main", MainLine, IsMain: true, BranchIndex: -1, Active: map.OnTop, map.TopCursor,
                map.TopRow.Select(t => new Station(t.Label, map.OnTop && t.IsCurrent, t.IsHere, t.WindowCount)).ToList());
 
     private static Line BranchLine(NavMapBranch g)
-        => new(g.Name, BranchColour(g.Index), IsMain: false, Active: g.IsCurrentLevel, g.Cursor,
+        => new(g.Name, BranchColour(g.Index), IsMain: false, g.Index, Active: g.IsCurrentLevel, g.Cursor,
                g.Desktops.Select(d => new Station(d.Label, d.IsCurrent, d.IsHere, d.WindowCount)).ToList());
 
     private static void DrawLine(Canvas canvas, Line line, double cx, double y, double stride,
-                                 double lineW, double rOut, double s, double op, bool animate)
+                                 double lineW, double rOut, double s, double op, bool animate,
+                                 Action<int>? onClick, Action<int>? onActivate, BoardLayout? layout)
     {
         int n = line.Stations.Count;
         double originX = cx - line.Cursor * stride; // the cursor station lands on cx
@@ -180,14 +192,54 @@ internal static class MetroView
         canvas.Children.Add(route);
 
         // Route badge (the line name) just past the terminus, in the line's colour.
-        AddRouteBadge(canvas, line, routeRight + 16 * s, y, s, op);
+        double badgeLeft = routeRight + 16 * s;
+        AddRouteBadge(canvas, line, badgeLeft, y, s, op);
+
+        // Report geometry for the interactive map. Station "cells" tile the strip (each stride wide, centred
+        // on its station), so a press on a station is a desktop drag; the leftover band out to the badge is
+        // the branch drag handle (see the class doc). Boundaries land on the mid-points between stations.
+        double cellTop = y - rOut - 20 * s, cellH = (rOut + 20 * s) + (rOut + 28 * s);
+        if (layout is not null)
+        {
+            double bandLeft = originX - stride / 2;
+            double bandRight = badgeLeft + EstimateBadgeWidth(line.Name, s);
+            layout.Add(new BoardRow(new Rect(bandLeft, cellTop, bandRight - bandLeft, cellH),
+                                    line.IsMain, line.BranchIndex, n,
+                                    FirstTileLeft: originX, TileStride: stride, TileGap: stride,
+                                    TileTop: cellTop, TileHeight: cellH));
+        }
 
         // Stations along the line.
         for (int i = 0; i < n; i++)
         {
+            int idx = i;
             double sx = originX + i * stride;
             AddStation(canvas, line.Stations[i], line.Colour, sx, y, rOut, s, op, animate);
             AddStationLabel(canvas, line.Stations[i], sx, y, rOut, s, op);
+
+            if (layout is not null)
+                layout.Add(new BoardTile(new Rect(sx - stride / 2, cellTop, stride, cellH),
+                                         line.IsMain, line.BranchIndex, i));
+
+            // A transparent cell on top carries the click: single = select (onClick), double = switch
+            // (onActivate). It must NOT mark the press handled, so it bubbles to the map, which reads it as
+            // "a tile was pressed" and may turn it into a drag — mirrors BoardView's tile handler exactly.
+            if (onClick is not null || onActivate is not null)
+            {
+                var hit = new Border
+                {
+                    Width = stride, Height = cellH, Background = Brushes.Transparent,
+                    Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+                };
+                hit.PointerPressed += (_, e) =>
+                {
+                    if (e.ClickCount >= 2) onActivate?.Invoke(idx);
+                    else onClick?.Invoke(idx);
+                };
+                Canvas.SetLeft(hit, sx - stride / 2);
+                Canvas.SetTop(hit, cellTop);
+                canvas.Children.Add(hit);
+            }
         }
     }
 
