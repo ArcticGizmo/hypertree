@@ -1,6 +1,7 @@
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
@@ -72,12 +73,12 @@ internal sealed class SettingsWindow : Window
         try { Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://hypertree/Assets/icon.ico"))); } catch { }
         RequestedThemeVariant = ThemeVariant.Dark;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        // Height follows the content; width is fixed. Sizing to content in BOTH directions fights the
-        // explicit Width below — the window would collapse back to whatever the widest row happens to
-        // measure, which is how it stayed narrow regardless of what Width said.
-        SizeToContent = SizeToContent.Height;
+        // Fixed size; the options scroll inside (see below) once they outgrow the height. Sizing to content
+        // fought the explicit Width, and — now that there are enough options to run past a shorter screen —
+        // would overflow a window that can't be resized. 600 fits comfortably even on a 1080p/150% laptop.
         CanResize = false;
         Width = 720;
+        Height = 600;
         Background = new SolidColorBrush(Color.Parse("#12161F"));
 
         _startOnLogin = Toggle(startOnLogin);
@@ -112,14 +113,11 @@ internal sealed class SettingsWindow : Window
         var cancel = new Button { Content = "Cancel", IsCancel = true };
         cancel.Click += (_, _) => Close();
 
-        Content = new Border
+        var options = new StackPanel
         {
-            Padding = new Thickness(22),
-            Child = new StackPanel
+            Spacing = 10,
+            Children =
             {
-                Spacing = 10,
-                Children =
-                {
                     Title2("Startup"),
                     ToggleRow("Start Hypertree when I log in", _startOnLogin),
 
@@ -160,14 +158,32 @@ internal sealed class SettingsWindow : Window
                     Divider(),
                     Title2("Updates"),
                     UpdatesRow(),
+            },
+        };
 
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal, Spacing = 8,
-                        HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0),
-                        Children = { cancel, save },
-                    },
-                },
+        // The options can outgrow the window, so they scroll while Save/Cancel stay pinned below it.
+        var scroller = new ScrollViewer
+        {
+            Content = options,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Padding = new Thickness(0, 0, 8, 0), // keep the scrollbar off the option rows
+        };
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0),
+            Children = { cancel, save },
+        };
+        Grid.SetRow(scroller, 0);
+        Grid.SetRow(actions, 1);
+        Content = new Border
+        {
+            Padding = new Thickness(22),
+            Child = new Grid
+            {
+                RowDefinitions = new RowDefinitions("*,Auto"),
+                Children = { scroller, actions },
             },
         };
 
