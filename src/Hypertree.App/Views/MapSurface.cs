@@ -21,7 +21,7 @@ internal static class MapSurface
     public static Control Render(NavMap map, double width, double height, MapStyle style,
                                  double scale = 1.0, bool animate = false, MapCamera? camera = null)
     {
-        IScenePainter painter = style == MapStyle.Metro ? new MetroPainter(animate) : new BoardPainter();
+        IScenePainter painter = ScenePainters.For(style, animate);
         return SceneRenderer.Render(painter, map, width, height, scale, camera ?? new MapCamera());
     }
 }

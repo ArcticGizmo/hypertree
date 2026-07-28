@@ -86,6 +86,9 @@ public enum MapStyle
 
     /// <summary>The transit-diagram metro map: timelines as coloured lines, desktops as stations.</summary>
     Metro,
+
+    /// <summary>The terminal look: desktops as monospace box-drawing cards joined by an ASCII spine.</summary>
+    Ascii,
 }
 
 /// <summary>

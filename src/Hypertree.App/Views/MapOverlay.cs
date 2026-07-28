@@ -56,7 +56,6 @@ internal sealed class MapOverlay : IStageContent
     // unless needed" state is the point — and across the flash, so the two stay in step. App reframes it on a
     // theme switch. See docs/design/scene-camera.md.
     private readonly MapCamera _camera;
-    private readonly BoardPainter _boardPainter = new();
     private NavMap _base = new(Array.Empty<NavMapTile>(), 0, true, Array.Empty<NavMapBranch>());
     private bool _initialised;
     private int _row; // index into the combined row sequence (branches split around main)
@@ -548,9 +547,7 @@ internal sealed class MapOverlay : IStageContent
 
         var layout = new BoardLayout();
         NavMap display = BuildDisplayMap();
-        IScenePainter painter = style == MapStyle.Metro
-            ? new MetroPainter(WindowFx.SystemAnimationsEnabled())
-            : _boardPainter;
+        IScenePainter painter = ScenePainters.For(style, WindowFx.SystemAnimationsEnabled());
         Control board = SceneRenderer.Render(painter, display, width, height, 1.0, _camera,
             onTopClick: SelectTop,
             onBranchClick: SelectBranch,
@@ -659,7 +656,12 @@ internal sealed class MapOverlay : IStageContent
         rows.Children.Add(LegendRow("b", "new branch"));
         rows.Children.Add(LegendRow("m", "move windows"));
         rows.Children.Add(LegendRow("Ctrl+F", "find a desktop"));
-        rows.Children.Add(LegendRow("v", _stage.MapStyle == MapStyle.Metro ? "board view" : "metro view"));
+        rows.Children.Add(LegendRow("v", _stage.MapStyle switch
+        {
+            MapStyle.Board => "metro view",
+            MapStyle.Metro => "ascii view",
+            _ => "board view",
+        }));
         rows.Children.Add(LegendRow("Esc", "close"));
         rows.Children.Add(new TextBlock
         {

@@ -72,6 +72,13 @@ internal static class DesignShot
             new(3, "spike", new List<NavMapTile> { new("scratch", false, WindowCount: 2) }, false, 0),
         };
         SaveMetro(new NavMap(Top(2), 2, true, busy, 2), Path.Combine(outDir, "metro-busy.png"));
+
+        // The ASCII terminal theme of the same states, so it can be compared card-for-tile against the others.
+        SaveAscii(new NavMap(Top(2), 2, true, new List<NavMapBranch> { Feat(false, 1), Hotfix() }, 1),
+                  Path.Combine(outDir, "ascii-top-row.png"));
+        SaveAscii(new NavMap(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1),
+                  Path.Combine(outDir, "ascii-dived.png"));
+        SaveAscii(new NavMap(Top(2), 2, true, busy, 2), Path.Combine(outDir, "ascii-busy.png"));
         SaveMetroLayoutCheck(new NavMap(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1),
                              Path.Combine(outDir, "metro-drag-layout.png"));
 
@@ -229,6 +236,9 @@ internal static class DesignShot
     // Render the metro-map view of a board to PNG, over the same dark ground the real overlay uses.
     private static void SaveMetro(NavMap map, string path)
         => Save(SceneRenderer.Render(new MetroPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera()), path);
+
+    private static void SaveAscii(NavMap map, string path)
+        => Save(SceneRenderer.Render(new AsciiPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera()), path);
 
     // The overlay is semi-transparent over the live desktop, so how the board reads depends on the screen
     // behind it. This shot fakes a bright, busy desktop, lays the real stage dim (the centre-weighted

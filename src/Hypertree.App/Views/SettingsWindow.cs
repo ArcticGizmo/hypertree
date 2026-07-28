@@ -42,7 +42,7 @@ internal sealed class SettingsWindow : Window
 
     private readonly ToggleSwitch _startOnLogin;
     private readonly ToggleSwitch _showTaskbarLabel;
-    private readonly ToggleSwitch _metroMapStyle;
+    private readonly ComboBox _mapStyle;
     private readonly ToggleSwitch _displayBeforeMoving;
     private readonly ToggleSwitch _animateNavigation;
     private readonly ToggleSwitch _sweepFromLeadingEdge;
@@ -86,7 +86,7 @@ internal sealed class SettingsWindow : Window
 
         _startOnLogin = Toggle(startOnLogin);
         _showTaskbarLabel = Toggle(settings.ShowTaskbarLabel);
-        _metroMapStyle = Toggle(settings.MapStyle == MapStyle.Metro);
+        _mapStyle = MapStyleSelector(settings.MapStyle);
         _displayBeforeMoving = Toggle(settings.DisplayBeforeMoving);
         _animateNavigation = Toggle(settings.AnimateNavigation);
         _sweepFromLeadingEdge = Toggle(settings.SweepFromLeadingEdge);
@@ -113,9 +113,10 @@ internal sealed class SettingsWindow : Window
 
         // No Save/Cancel — each control applies (and persists) the moment it changes; see ApplyLive.
         foreach (ToggleSwitch t in new[]
-                 { _startOnLogin, _showTaskbarLabel, _metroMapStyle, _displayBeforeMoving,
+                 { _startOnLogin, _showTaskbarLabel, _displayBeforeMoving,
                    _animateNavigation, _sweepFromLeadingEdge, _showChangelog })
             t.IsCheckedChanged += (_, _) => ApplyLive();
+        _mapStyle.SelectionChanged += (_, _) => ApplyLive();
 
         var options = new StackPanel
         {
@@ -131,10 +132,10 @@ internal sealed class SettingsWindow : Window
 
                     Divider(),
                     Title2("Appearance"),
-                    ToggleRow("Use the metro map style", _metroMapStyle),
-                    Hint("Draw the whole tree as a transit diagram — each timeline a coloured line, each "
-                         + "desktop a station, a green “you are here” train — everywhere a board appears: the "
-                         + "flash, the map, previews and the move flow. You can also flip it with “v” on the map."),
+                    SelectRow("Map style", _mapStyle),
+                    Hint("How every board is drawn — the flash, the map, previews and the move flow. "
+                         + "“Board” is the screen-tile view, “Metro” a transit diagram (coloured lines and "
+                         + "stations), “ASCII” a monospace terminal look. Cycle it with “v” on the map."),
 
                     Divider(),
                     Title2("Navigation"),
@@ -209,7 +210,7 @@ internal sealed class SettingsWindow : Window
         return new AppSettings
         {
             ShowTaskbarLabel = _showTaskbarLabel.IsChecked ?? true,
-            MapStyle = (_metroMapStyle.IsChecked ?? false) ? MapStyle.Metro : MapStyle.Board,
+            MapStyle = (MapStyle)Math.Max(0, _mapStyle.SelectedIndex),
             DisplayBeforeMoving = _displayBeforeMoving.IsChecked ?? true,
             AnimateNavigation = _animateNavigation.IsChecked ?? true,
             SweepFromLeadingEdge = _sweepFromLeadingEdge.IsChecked ?? true,
@@ -500,6 +501,30 @@ internal sealed class SettingsWindow : Window
     {
         IsChecked = value, HorizontalAlignment = HorizontalAlignment.Right,
     };
+
+    // The map-style dropdown. Item order matches the MapStyle enum (Board, Metro, ASCII), so the selected
+    // index is the enum value — see SnapshotSettings.
+    private static ComboBox MapStyleSelector(MapStyle style) => new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Right, MinWidth = 132,
+        ItemsSource = new[] { "Board", "Metro", "ASCII" },
+        SelectedIndex = (int)style,
+    };
+
+    // A label on the left, its selector pinned right — the ToggleRow shape for a non-toggle control.
+    private static Control SelectRow(string label, Control control)
+    {
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(24, 0, 0, 0) };
+        var text = new TextBlock
+        {
+            Text = label, Foreground = Ink, FontSize = 12, VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(text, 0);
+        Grid.SetColumn(control, 1);
+        grid.Children.Add(text);
+        grid.Children.Add(control);
+        return grid;
+    }
 
     // A label on the left, its toggle pinned right — the shared shape for the on/off options.
     private static Control ToggleRow(string label, ToggleSwitch toggle)

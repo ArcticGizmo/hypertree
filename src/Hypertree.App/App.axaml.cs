@@ -1071,11 +1071,17 @@ public sealed class App : Application
         _startup?.SetEnabled(startOnLogin);
     }
 
-    // v on the map (or the Settings toggle) flips the board style. It's a persisted, app-wide choice, so we
-    // update the setting, save it, and push it onto the stage — every surface that draws a board follows.
+    // v on the map (or the Settings selector) cycles the board style board → metro → ascii → board. It's a
+    // persisted, app-wide choice, so we update the setting, save it, and push it onto the stage — every
+    // surface that draws a board follows.
     private void ToggleMapStyle()
     {
-        _settings.MapStyle = _settings.MapStyle == MapStyle.Metro ? MapStyle.Board : MapStyle.Metro;
+        _settings.MapStyle = _settings.MapStyle switch
+        {
+            MapStyle.Board => MapStyle.Metro,
+            MapStyle.Metro => MapStyle.Ascii,
+            _ => MapStyle.Board,
+        };
         _settingsStore?.Save(_settings);
         ApplyMapStyle();
     }

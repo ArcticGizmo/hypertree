@@ -124,9 +124,17 @@ is unchanged.
 6. Visual reconciliation across themes.
 7. ✅ Remove dead code (`BoardView`/`MetroView`); update README/CHANGELOG and metro-map.md.
 
+## Adding a theme
+
+The payoff of the split: a whole new look is *just a painter*. The **ASCII** theme (a monospace
+terminal view — box-drawing cards, an ASCII spine, a blinking here-cursor) was added as
+`AsciiPainter : IScenePainter` plus one `MapStyle` enum value and a case in `ScenePainters.For`.
+It owns no ordering, alignment or camera logic, so it stacks, aligns and pans identically to the
+board and metro themes for free. That's the abstraction working as intended.
+
 ## Files
 
 - `src/Hypertree.Core/Layout/{LayoutRect,Scene,SceneMetrics,SceneLayout,MapCamera}.cs` — new.
-- `src/Hypertree.App/Views/Scene/{IScenePainter,SceneRenderer,BoardPainter,MetroPainter,BoardLayout}.cs` — new (BoardLayout moved here from the deleted BoardView).
+- `src/Hypertree.App/Views/Scene/{IScenePainter,SceneRenderer,ScenePainters,BoardPainter,MetroPainter,AsciiPainter,BoardLayout}.cs` — new (BoardLayout moved here from the deleted BoardView).
 - `src/Hypertree.App/Views/{BoardView,MetroView,MapSurface,MapOverlay,HudWindow}.cs` — migrated.
 - `tests/Hypertree.Tests/{SceneLayoutTests,MapCameraTests}.cs` — new.

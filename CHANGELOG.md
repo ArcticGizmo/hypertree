@@ -13,6 +13,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **ASCII map style**: a terminal look for the whole board — each desktop a monospace box-drawing
+  card, timelines joined by an ASCII spine, and a blinking block cursor on the desktop you're on.
+  Pick it under **Settings → Appearance → Map style**, or cycle **board → metro → ASCII** with
+  **`v`** on the map. Like the other styles it applies everywhere a board is drawn.
 - **Metro-map style**: draw the whole desktop tree as a transit diagram — each timeline a coloured line, each desktop a station, a green "you are here" train marking where you stand. Turn it on in **Settings → Appearance** or flip it with **`v`** on the map; it's a whole-app choice that applies everywhere a board is drawn (the flash, the map, previews, the move flow), and the map stays fully interactive in it (click, switch, drag-rearrange). (See `docs/design/metro-map.md`.)
 
 ### Changed
