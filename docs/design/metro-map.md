@@ -27,13 +27,13 @@ a pure visual alternative, not a new data model.
 | Desktop-tree concept | Metro vocabulary |
 |---|---|
 | A timeline (main, or a branch) | A coloured **line** running horizontally |
-| A desktop | A **station** — a donut tick on the line |
+| A desktop | A **station** — a donut tick on the line, with a **label chip** below it |
 | The dive/surface (depth) axis | A neutral vertical **interchange trunk** at screen-centre |
 | A branch's name | A **route badge** at the line's terminus |
-| The desktop you're on | The green **"you are here" train** (a glowing core + a breathing halo) |
-| The selection / jump target | A blue **focus ring** around the station |
-| Window count | A faint tally above an occupied station |
-| An empty desktop (0 windows) | A smaller, hollow "minor" station |
+| The desktop you're on | The green **"you are here" train** — a glowing core, and the station's chip goes solid green |
+| The selection / jump target | A blue **focus ring** on the station, and its chip goes solid blue |
+| Window count | A tally inside the station's chip (on the opaque ground, so it stays legible) |
+| An empty desktop (0 windows) | A smaller, hollow "minor" station and a dimmer chip |
 
 Everything lives in [`src/Hypertree.App/Views/MetroView.cs`](../../src/Hypertree.App/Views/MetroView.cs).
 It mirrors `BoardView.Render`'s signature and consumes the display map `MapOverlay`
@@ -86,6 +86,12 @@ theme. So now:
   over the live desktop, and a bright screen behind was washing out the thin metro lines;
   pooling the dark under the content restores contrast without making the overlay heavier.
   `metro-backdrop-{flat,vignette}.png` (`--shot`) show it over a faked busy desktop.
+- **Desktop labels became chips** (`AddChip`), the same rounded pill as the branch route
+  badge. Floating text over the semi-transparent dim was still low-contrast even with the
+  vignette; an opaque chip guarantees a readable ground whatever's behind. Resting chips
+  are dark and line-tinted (the line's colour as the text + a faint colour border);
+  selected/here invert to a solid blue/green fill, so "dimmed unless selected" reads at a
+  glance and matches the branch marker. The window count rides inside the chip.
 
 ## Open questions (still open)
 
@@ -102,12 +108,10 @@ theme. So now:
 3. **Vertical centring.** The metro view centres the whole stack (overview); the board
    pins the current row. Deliberate divergence — keep it, or match the board so toggling
    is seamless?
-4. **Window counts** — keep the faint number above each station, or is it noise on an
-   overview? Alternative: encode occupancy as station size only.
-5. **Long names & big trees.** Station labels can collide at the 156px station pitch if
+4. **Long names & big trees.** Station chips can collide at the 156px station pitch if
    names are long (truncate? stagger above/below?), and a very tall tree can overflow
    vertically (scale-to-fit? scroll?). Not handled yet.
-6. **A command-palette entry?** You can reach the style from Settings and `v`; a "Switch
+5. **A command-palette entry?** You can reach the style from Settings and `v`; a "Switch
    to metro / board map" palette command would be a third door. Worth it, or clutter?
 
 ## Files touched

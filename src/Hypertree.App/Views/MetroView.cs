@@ -26,7 +26,8 @@ internal static class MetroView
     private static readonly Color Bg = Color.Parse("#0F131B");
     private static readonly Color Trunk = Color.Parse("#3A4453");
     private static readonly Color MainLine = Color.Parse("#C5D0E0");
-    private static readonly Color Ink = Color.Parse("#E8EDF5"), InkSoft = Color.Parse("#9AA6B8"), InkFaint = Color.Parse("#69748A");
+    private static readonly Color ChipBase = Color.Parse("#111722"); // opaque ground for a resting desktop chip
+    private static readonly Color ChipInk = Color.Parse("#0A0D12");   // dark text on a bright (selected/here) chip
     private static readonly Color Focus = Color.Parse("#6EA8FF");
     private static readonly Color Here = Color.Parse("#34D399");
     private static readonly FontFamily Sans = new("Inter,Segoe UI,sans-serif");
@@ -198,7 +199,8 @@ internal static class MetroView
         // Report geometry for the interactive map. Station "cells" tile the strip (each stride wide, centred
         // on its station), so a press on a station is a desktop drag; the leftover band out to the badge is
         // the branch drag handle (see the class doc). Boundaries land on the mid-points between stations.
-        double cellTop = y - rOut - 20 * s, cellH = (rOut + 20 * s) + (rOut + 28 * s);
+        // The cell spans the on-line donut down through the label chip below it.
+        double cellTop = y - rOut - 10 * s, cellH = 2 * rOut + 48 * s;
         if (layout is not null)
         {
             double bandLeft = originX - stride / 2;
@@ -215,7 +217,7 @@ internal static class MetroView
             int idx = i;
             double sx = originX + i * stride;
             AddStation(canvas, line.Stations[i], line.Colour, sx, y, rOut, s, op, animate);
-            AddStationLabel(canvas, line.Stations[i], sx, y, rOut, s, op);
+            AddChip(canvas, line.Stations[i], line.Colour, sx, y, rOut, s);
 
             if (layout is not null)
                 layout.Add(new BoardTile(new Rect(sx - stride / 2, cellTop, stride, cellH),
@@ -266,21 +268,6 @@ internal static class MetroView
         Canvas.SetTop(dot, y - r);
         canvas.Children.Add(dot);
 
-        // Window count: a faint tally above an occupied station — the metro equivalent of the board's count
-        // badge. Empty stations stay bare, which (with the smaller hollow donut) reads as "nothing here".
-        if (!empty)
-        {
-            var count = new TextBlock
-            {
-                Text = st.WindowCount.ToString(), FontFamily = Mono, FontSize = 10 * s, FontWeight = FontWeight.SemiBold,
-                Foreground = new SolidColorBrush(st.Here ? Here : st.Focused ? Focus : InkFaint) { Opacity = marked ? 1.0 : op },
-            };
-            count.Measure(Size.Infinity);
-            Canvas.SetLeft(count, x - count.DesiredSize.Width / 2);
-            Canvas.SetTop(count, y - rOut - 15 * s);
-            canvas.Children.Add(count);
-        }
-
         // "You are here" — the train: a filled green core with a translucent halo, so the current desktop
         // reads as occupied, not just outlined.
         if (st.Here)
@@ -320,20 +307,60 @@ internal static class MetroView
         }
     }
 
-    private static void AddStationLabel(Canvas canvas, Station st, double x, double y, double rOut, double s, double op)
+    // Each desktop is a chip below its station — the same rounded pill as the branch route badge, so the
+    // label always sits on an opaque ground and stays legible over whatever desktop shows through the
+    // semi-transparent overlay. Resting chips are dimmed (a dark, line-tinted fill with the line's colour as
+    // the text); the selected desktop (blue) and the one you're actually on (green) invert to a bright solid
+    // fill, mirroring the branch marker. The window count rides along inside the chip, so it's on the opaque
+    // ground too.
+    private static void AddChip(Canvas canvas, Station st, Color lineColour, double x, double y, double rOut, double s)
     {
+        bool empty = st.WindowCount == 0;
         bool marked = st.Focused || st.Here;
-        var label = new TextBlock
+
+        Color fill = st.Focused ? Focus : st.Here ? Here : Lerp(ChipBase, lineColour, 0.16);
+        Color textColour = marked ? ChipInk : empty ? Lerp(lineColour, ChipBase, 0.45) : lineColour;
+
+        var content = new StackPanel
         {
-            Text = st.Label, FontFamily = Sans, FontSize = 13 * s,
-            FontWeight = marked ? FontWeight.SemiBold : FontWeight.Normal,
-            Foreground = new SolidColorBrush(st.Focused ? Ink : st.Here ? Here : (st.WindowCount == 0 ? InkFaint : InkSoft))
-                { Opacity = marked ? 1.0 : op },
+            Orientation = Orientation.Horizontal, Spacing = 6 * s, VerticalAlignment = VerticalAlignment.Center,
         };
-        label.Measure(Size.Infinity);
-        Canvas.SetLeft(label, x - label.DesiredSize.Width / 2);
-        Canvas.SetTop(label, y + rOut + 12 * s);
-        canvas.Children.Add(label);
+        content.Children.Add(new TextBlock
+        {
+            Text = st.Label, FontFamily = Sans, FontSize = 12.5 * s,
+            FontWeight = marked ? FontWeight.SemiBold : FontWeight.Normal,
+            Foreground = new SolidColorBrush(textColour), VerticalAlignment = VerticalAlignment.Center,
+        });
+        if (!empty)
+            content.Children.Add(new TextBlock
+            {
+                Text = st.WindowCount.ToString(), FontFamily = Mono, FontSize = 10 * s, FontWeight = FontWeight.SemiBold,
+                Foreground = new SolidColorBrush(marked ? Color.FromArgb(0xB4, ChipInk.R, ChipInk.G, ChipInk.B)
+                                                        : Lerp(lineColour, ChipBase, 0.4)),
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+
+        var chip = new Border
+        {
+            Background = new SolidColorBrush(fill),
+            CornerRadius = new CornerRadius(9 * s), Padding = new Thickness(9 * s, 3 * s), Child = content,
+        };
+        if (!marked) // a subtle coloured edge keeps the line identity on the dark resting chip
+        {
+            chip.BorderBrush = new SolidColorBrush(lineColour) { Opacity = empty ? 0.35 : 0.6 };
+            chip.BorderThickness = new Thickness(Math.Max(1, s));
+        }
+        chip.Measure(Size.Infinity);
+        Canvas.SetLeft(chip, x - chip.DesiredSize.Width / 2);
+        Canvas.SetTop(chip, y + rOut + 10 * s);
+        canvas.Children.Add(chip);
+    }
+
+    // Opaque blend from a→b by t, for the dark, line-tinted resting chip fill and its muted text.
+    private static Color Lerp(Color a, Color b, double t)
+    {
+        byte M(byte from, byte to) => (byte)Math.Round(from + (to - from) * t);
+        return Color.FromArgb(0xFF, M(a.R, b.R), M(a.G, b.G), M(a.B, b.B));
     }
 
     private static void AddRouteBadge(Canvas canvas, Line line, double x, double y, double s, double op)
