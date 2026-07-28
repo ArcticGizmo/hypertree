@@ -6,13 +6,14 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Hypertree.Desktops;
 using Hypertree.Scopes;
+using Hypertree.Settings;
 
 namespace Hypertree.App.Views;
 
 /// <summary>
 /// The two-phase "move windows" flow, hosted on the shared <see cref="OverlayStage"/>. Phase 1 is a
 /// Task-View-style grid of the current desktop's windows (live DWM thumbnails) with keyboard/mouse
-/// multi-select; phase 2 reuses <see cref="BoardView"/> to show the map while the user navigates to a
+/// multi-select; phase 2 reuses <see cref="MapSurface"/> to show the map while the user navigates to a
 /// destination, then drops the selected windows there. Both phases mutate one persistent root, so the
 /// summon and the phase-1→phase-2 change are content swaps on the already-shown stage — no flash.
 ///
@@ -319,7 +320,7 @@ internal sealed class MoveContent : IStageContent
         if (map is null) return;
 
         double width = _stage?.HostWidth ?? 1280, height = _stage?.HostHeight ?? 800;
-        Control board = BoardView.Render(map, width, height, 1.0);
+        Control board = MapSurface.Render(map, width, height, _stage?.MapStyle ?? MapStyle.Board);
 
         int n = _session.SelectedCount;
         Border banner = HintBar($"Moving {n} window{(n == 1 ? "" : "s")} · ←→↑↓ navigate · Enter to drop here · Esc/Backspace cancel");

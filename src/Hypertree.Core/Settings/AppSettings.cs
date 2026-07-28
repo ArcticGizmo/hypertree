@@ -19,11 +19,12 @@ public sealed class AppSettings
     /// It auto-hides while the cursor is near it so the taskbar underneath stays clickable.</summary>
     public bool ShowTaskbarLabel { get; set; } = true;
 
-    /// <summary>When true, a navigation chord pressed while the flash is <i>not</i> on screen only raises
-    /// the flash — it shows you where you are without moving. The next press (still holding the modifiers,
-    /// so the flash is still up) navigates for real. Off means every press moves immediately. On by
-    /// default: landing somewhere first and reading the board afterwards makes it harder to tell where you
-    /// went. See <c>App.Navigate</c>.</summary>
+    /// <summary>When true, a <b>dive or surface</b> chord (the vertical, branch-changing moves) pressed
+    /// while the flash is <i>not</i> on screen only raises the flash — it shows you where you are without
+    /// moving. The next press (still holding the modifiers, so the flash is still up) navigates for real.
+    /// Left/right moves within a row are unaffected: they always move immediately, since you stay on a row
+    /// you can already see. Off means every press moves immediately. On by default — the disorientation is
+    /// in the vertical jump, where you land among a fresh set of lookalike desktops. See <c>App.RevealOnly</c>.</summary>
     public bool DisplayBeforeMoving { get; set; } = true;
 
     /// <summary>When true, a navigation move slides the flash board in from the direction of travel
@@ -39,6 +40,13 @@ public sealed class AppSettings
     /// opposite edge and sweeps toward where you're heading. Purely a taste knob; only has an effect while
     /// <see cref="AnimateNavigation"/> is on. See <c>HudWindow.SweepTravel</c>.</summary>
     public bool SweepFromLeadingEdge { get; set; } = true;
+
+    /// <summary>How the board is drawn wherever it appears — the flash, the map, card backdrops, previews,
+    /// the move flow. <see cref="MapStyle.Ascii"/> (default) is the monospace terminal look;
+    /// <see cref="MapStyle.Board"/> is the screen-tile layout and <see cref="MapStyle.Metro"/> the
+    /// transit-diagram "metro map". A whole-app appearance choice, set in Settings → Appearance or by
+    /// pressing <c>v</c> on the map.</summary>
+    public MapStyle MapStyle { get; set; } = MapStyle.Ascii;
 
     /// <summary>Reusable branch recipes, offered via the branch card's "Load from template" button so you
     /// don't retype the desktop set each time. Empty by default — you build and delete them in the
@@ -68,6 +76,20 @@ public sealed class AppSettings
         foreach (HotkeyBinding b in HotkeyBindings) map[b.Command] = new HotkeyChord(b.Modifiers, b.Key);
         return map;
     }
+}
+
+/// <summary>How the board is rendered across the app. Persisted as a string in settings.json (via the
+/// enum converter), so the names are load-bearing — don't rename without a migration.</summary>
+public enum MapStyle
+{
+    /// <summary>The screen-tile board: desktops as little screen mockups in rows.</summary>
+    Board,
+
+    /// <summary>The transit-diagram metro map: timelines as coloured lines, desktops as stations.</summary>
+    Metro,
+
+    /// <summary>The terminal look: desktops as monospace box-drawing cards joined by an ASCII spine.</summary>
+    Ascii,
 }
 
 /// <summary>
@@ -102,11 +124,17 @@ public sealed class FileSettingsStore : ISettingsStore
     public string Path { get; }
 
     public FileSettingsStore()
+        : this(System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "hypertree"))
     {
-        string dir = System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "hypertree");
-        Directory.CreateDirectory(dir);
-        Path = System.IO.Path.Combine(dir, "settings.json");
+    }
+
+    /// <summary>Testing seam: keep <c>settings.json</c> in an explicit directory instead of the roaming
+    /// profile, so a round-trip can be exercised without touching a real install's settings.</summary>
+    internal FileSettingsStore(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        Path = System.IO.Path.Combine(directory, "settings.json");
     }
 
     public AppSettings Load()
@@ -114,7 +142,10 @@ public sealed class FileSettingsStore : ISettingsStore
         try
         {
             if (!File.Exists(Path)) return new AppSettings();
-            return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Path)) ?? new AppSettings();
+            // Read with the SAME options used to write (crucially the string-enum converter) — otherwise a
+            // string-serialised enum like "MapStyle": "Metro" can't be parsed back, the whole load throws,
+            // and every setting silently reverts to its default.
+            return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Path), Options) ?? new AppSettings();
         }
         catch
         {

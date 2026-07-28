@@ -4,6 +4,8 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Hypertree.App.Views;
+using Hypertree.App.Views.Scene;
+using Hypertree.Layout;
 using Hypertree.Scopes;
 
 namespace Hypertree.App;
@@ -53,6 +55,38 @@ internal static class DesignShot
         // middle of the gap it inserts at.
         SaveLayoutCheck(new NavMap(Top(2), 2, true, new List<NavMapBranch> { Feat(false, 1), Hotfix() }, 1),
                         Path.Combine(outDir, "board-drag-layout.png"));
+
+        // The metro-map view of the same two states, so it can be compared tile-for-station against the board.
+        SaveMetro(new NavMap(Top(2), 2, true, new List<NavMapBranch> { Feat(false, 1), Hotfix() }, 1),
+                  Path.Combine(outDir, "metro-top-row.png"));
+        SaveMetro(new NavMap(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1),
+                  Path.Combine(outDir, "metro-dived.png"));
+
+        // A busier board: four branches (two above main, two below) exercise the line-colour cycle and the
+        // vertical stack, and a one-desktop branch checks the single-station stub route.
+        var busy = new List<NavMapBranch>
+        {
+            new(0, "FEAT-123", new List<NavMapTile> { new("SPA", false, WindowCount: 3), new("API", false, WindowCount: 1), new("Mobile", false, WindowCount: 0) }, false, 1),
+            new(1, "release-4.2", new List<NavMapTile> { new("build", false, WindowCount: 2), new("test", false, WindowCount: 5), new("docs", false, WindowCount: 1), new("ship", false, WindowCount: 0) }, false, 0),
+            new(2, "hotfix", new List<NavMapTile> { new("db", false, WindowCount: 1), new("api", false, WindowCount: 0) }, false, 0),
+            new(3, "spike", new List<NavMapTile> { new("scratch", false, WindowCount: 2) }, false, 0),
+        };
+        SaveMetro(new NavMap(Top(2), 2, true, busy, 2), Path.Combine(outDir, "metro-busy.png"));
+
+        // The ASCII terminal theme of the same states, so it can be compared card-for-tile against the others.
+        SaveAscii(new NavMap(Top(2), 2, true, new List<NavMapBranch> { Feat(false, 1), Hotfix() }, 1),
+                  Path.Combine(outDir, "ascii-top-row.png"));
+        SaveAscii(new NavMap(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1),
+                  Path.Combine(outDir, "ascii-dived.png"));
+        SaveAscii(new NavMap(Top(2), 2, true, busy, 2), Path.Combine(outDir, "ascii-busy.png"));
+        SaveMetroLayoutCheck(new NavMap(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1),
+                             Path.Combine(outDir, "metro-drag-layout.png"));
+
+        // Metro over a bright, busy fake desktop — the flat dim vs. the shipped centre-weighted vignette, so
+        // the contrast gain under the coloured lines is visible side by side.
+        NavMap backdropMap = new(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1);
+        SaveMetroBackdrop(backdropMap, Path.Combine(outDir, "metro-backdrop-flat.png"), vignette: false);
+        SaveMetroBackdrop(backdropMap, Path.Combine(outDir, "metro-backdrop-vignette.png"), vignette: true);
 
         SaveCards(outDir);
     }
@@ -134,8 +168,22 @@ internal static class DesignShot
     private static void SaveLayoutCheck(NavMap map, string path)
     {
         var layout = new BoardLayout();
-        Control board = BoardView.Render(map, ScreenW, ScreenH, 1.0, layout: layout);
+        Control board = SceneRenderer.Render(new BoardPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera(), layout: layout);
+        SaveWithLayoutMarks(board, layout, path);
+    }
 
+    // The same verification for the metro view: prove the station cells, line bands, carets and boundaries
+    // MetroView reports sit on the diagram, so the interactive map's click/drag hit-testing lines up there
+    // exactly as it does on the board.
+    private static void SaveMetroLayoutCheck(NavMap map, string path)
+    {
+        var layout = new BoardLayout();
+        Control board = SceneRenderer.Render(new MetroPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera(), layout: layout);
+        SaveWithLayoutMarks(board, layout, path);
+    }
+
+    private static void SaveWithLayoutMarks(Control board, BoardLayout layout, string path)
+    {
         var marks = new Canvas { Width = ScreenW, Height = ScreenH };
         void Outline(Rect r, Color c, double thickness)
         {
@@ -185,9 +233,66 @@ internal static class DesignShot
         Save(new Panel { Children = { board, marks } }, path);
     }
 
+    // Render the metro-map view of a board to PNG, over the same dark ground the real overlay uses.
+    private static void SaveMetro(NavMap map, string path)
+        => Save(SceneRenderer.Render(new MetroPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera()), path);
+
+    private static void SaveAscii(NavMap map, string path)
+        => Save(SceneRenderer.Render(new AsciiPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera()), path);
+
+    // The overlay is semi-transparent over the live desktop, so how the board reads depends on the screen
+    // behind it. This shot fakes a bright, busy desktop, lays the real stage dim (the centre-weighted
+    // vignette) over it, then the metro board — the only way to eyeball that contrast without the tray.
+    private static void SaveMetroBackdrop(NavMap map, string path, bool vignette)
+    {
+        var desktop = new Panel { Width = ScreenW, Height = ScreenH };
+        desktop.Children.Add(new Border
+        {
+            Width = ScreenW, Height = ScreenH,
+            Background = new LinearGradientBrush
+            {
+                StartPoint = RelativePoint.TopLeft, EndPoint = RelativePoint.BottomRight,
+                GradientStops =
+                {
+                    new GradientStop(Color.Parse("#BFD6EE"), 0), new GradientStop(Color.Parse("#F4F7FB"), 0.5),
+                    new GradientStop(Color.Parse("#DAE2EC"), 1),
+                },
+            },
+        });
+        // A scatter of bright "windows", so the board is judged against varied high-luminance content.
+        (double x, double y, double w, double h, string c)[] wins =
+        {
+            (120, 90, 520, 360, "#FFFFFF"), (900, 120, 380, 300, "#EAF2FF"),
+            (300, 520, 560, 300, "#FFF6E6"), (980, 520, 340, 280, "#F0FFF4"),
+            (60, 470, 200, 360, "#FDE8EF"),
+        };
+        var winCanvas = new Canvas { Width = ScreenW, Height = ScreenH };
+        foreach ((double x, double y, double w, double h, string c) in wins)
+        {
+            var win = new Border
+            {
+                Width = w, Height = h, Background = new SolidColorBrush(Color.Parse(c)),
+                CornerRadius = new CornerRadius(8),
+            };
+            Canvas.SetLeft(win, x);
+            Canvas.SetTop(win, y);
+            winCanvas.Children.Add(win);
+        }
+        desktop.Children.Add(winCanvas);
+
+        var dim = new Border
+        {
+            Width = ScreenW, Height = ScreenH,
+            Background = vignette ? StageWindow.BuildDim() : new SolidColorBrush(Color.FromArgb(0x9E, 0x0E, 0x0E, 0x12)),
+        };
+        Control board = SceneRenderer.Render(new MetroPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera());
+        Save(new Panel { Children = { desktop, dim, board } }, path);
+    }
+
     private static void Save(NavMap map, string path)
         // Pass delete callbacks so the × badges render in the verification shot.
-        => Save(BoardView.Render(map, ScreenW, ScreenH, 1.0, onTopDelete: _ => { }, onBranchDelete: (_, _) => { }), path);
+        => Save(SceneRenderer.Render(new BoardPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera(),
+                                     onTopDelete: _ => { }, onBranchDelete: (_, _) => { }), path);
 
     private static void Save(Control content, string path)
     {

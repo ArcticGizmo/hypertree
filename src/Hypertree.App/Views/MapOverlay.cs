@@ -4,7 +4,10 @@ using Avalonia.Controls.Shapes;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Hypertree.App.Views.Scene;
+using Hypertree.Layout;
 using Hypertree.Scopes;
+using Hypertree.Settings;
 
 namespace Hypertree.App.Views;
 
@@ -48,6 +51,11 @@ internal sealed class MapOverlay : IStageContent
     private static readonly Color DragScrim = Color.FromArgb(0x9E, 0x0E, 0x12, 0x1A);
 
     private readonly Grid _root = new();
+    // The shared dead-zone camera (owned by App, also driving the flash): the cursor moves over a stationary
+    // map, and the map pans only when the selection nears an edge. Persists across renders — its "don't move
+    // unless needed" state is the point — and across the flash, so the two stay in step. App reframes it on a
+    // theme switch. See docs/design/scene-camera.md.
+    private readonly MapCamera _camera;
     private NavMap _base = new(Array.Empty<NavMapTile>(), 0, true, Array.Empty<NavMapBranch>());
     private bool _initialised;
     private int _row; // index into the combined row sequence (branches split around main)
@@ -82,10 +90,14 @@ internal sealed class MapOverlay : IStageContent
     public event Action? FinderRequested;
     /// <summary>The cog icon — open settings.</summary>
     public event Action? SettingsRequested;
+    /// <summary>v — flip the whole-app board style (board ↔ metro). App owns the setting: it persists the
+    /// change and pushes the new style back onto the stage, so every surface follows, not just this map.</summary>
+    public event Action? ViewStyleToggleRequested;
 
-    public MapOverlay(OverlayStage stage)
+    public MapOverlay(OverlayStage stage, MapCamera camera)
     {
         _stage = stage;
+        _camera = camera;
         // Drag-to-rearrange. The tiles' own handlers select/activate without marking the press handled, so
         // it bubbles up here and a press is both "select this" and "maybe start dragging it".
         _root.PointerPressed += OnPointerPressed;
@@ -106,6 +118,8 @@ internal sealed class MapOverlay : IStageContent
         _base = map;
         _initialised = false;
         _colOfRow.Clear(); // a fresh map session re-seeds each row from the model's resume points
+        // The camera is shared with the flash and persists deliberately, so opening doesn't reframe: it shows
+        // wherever navigation left it, with the current selection kept in view by the dead zone.
         _stage.Summon(this);
     }
 
@@ -176,6 +190,7 @@ internal sealed class MapOverlay : IStageContent
             case Key.Up: MoveRow(-1); e.Handled = true; break;
             case Key.Down: MoveRow(+1); e.Handled = true; break;
             case Key.F when e.KeyModifiers.HasFlag(KeyModifiers.Control): FinderRequested?.Invoke(); e.Handled = true; break;
+            case Key.V: ViewStyleToggleRequested?.Invoke(); e.Handled = true; break;
             case Key.R: RenameRequested?.Invoke(CurrentSelection()); e.Handled = true; break;
             case Key.N: NewDesktopRequested?.Invoke(); e.Handled = true; break;
             case Key.B: NewBranchRequested?.Invoke(); e.Handled = true; break;
@@ -524,8 +539,16 @@ internal sealed class MapOverlay : IStageContent
         double height = _stage.HostHeight > 0 ? _stage.HostHeight : 800;
 
         // The layout the render reports is what a drag hit-tests against, so it's refreshed with the board.
+        // Both renderers fill it in the same scheme, so click/select and drag-rearrange work identically
+        // whichever style is showing. Metro takes no delete callbacks (no × badges — Del still deletes) and
+        // pulses the train only when the OS allows motion.
+        // A theme switch changes the metrics; App reframes the shared camera when it flips the style.
+        MapStyle style = _stage.MapStyle;
+
         var layout = new BoardLayout();
-        Control board = BoardView.Render(BuildDisplayMap(), width, height, 1.0,
+        NavMap display = BuildDisplayMap();
+        IScenePainter painter = ScenePainters.For(style, WindowFx.SystemAnimationsEnabled());
+        Control board = SceneRenderer.Render(painter, display, width, height, 1.0, _camera,
             onTopClick: SelectTop,
             onBranchClick: SelectBranch,
             onTopDelete: i => DeleteDesktopRequested?.Invoke(new DesktopSelection(true, -1, i)),
@@ -566,15 +589,14 @@ internal sealed class MapOverlay : IStageContent
         _col = Math.Clamp(_col, 0, Math.Max(0, TilesInRow(_row) - 1));
     }
 
-    // Recolour the base map so the *selection* is the blue focus tile and the desktop you're actually on
-    // keeps the green "here" marker. BoardView centres on the IsCurrent row, so the selection stays
-    // centred as it moves. (Mirrors the former RenameContent.)
+    // Recolour the base map so the *selection* is the blue focus cell (IsCurrent) and the desktop you're
+    // actually on keeps the green "here" marker (IsHere). The shared renderer reads those to place the blue
+    // ring and the green train; the camera keeps the selection in view as it moves.
     //
-    // Every row's cursor is also re-pointed at the column the selection has in it — the live one for the row
-    // the selection is in, the remembered one for the rest — because BoardView centres each row on its own
-    // cursor. Left on the model's cursors, a row the selection had just walked along would snap back to the
-    // desktop you're actually on the instant the selection stepped off it: step from main's 4th desktop into
-    // a branch and main would slide sideways, leaving the branch apparently hung under main's 1st desktop.
+    // The per-row cursor fields are also re-pointed at the selection's column, but that is now belt-and-braces:
+    // the shared layout aligns every row at its first desktop (column 0), so a row's cursor no longer affects
+    // where it's drawn. It's kept only so the display map stays internally consistent (and a good selection
+    // fallback). See docs/design/scene-camera.md.
     private NavMap BuildDisplayMap()
     {
         bool selMain = RowIsMain(_row);
@@ -606,9 +628,9 @@ internal sealed class MapOverlay : IStageContent
         };
     }
 
-    // The column a row that doesn't hold the selection is drawn centred on: where the selection last sat in
-    // it, else the model's own cursor. Clamped, since a remembered column can outlive a row that has since
-    // lost desktops.
+    // The column the selection resumes at when it steps into a row that doesn't currently hold it: where the
+    // selection last sat in that row, else the model's own cursor. Clamped, since a remembered column can
+    // outlive a row that has since lost desktops.
     private int ColumnIn(int key, int modelCursor, int count)
         => Math.Clamp(_colOfRow.TryGetValue(key, out int col) ? col : modelCursor, 0, Math.Max(0, count - 1));
 
@@ -634,6 +656,12 @@ internal sealed class MapOverlay : IStageContent
         rows.Children.Add(LegendRow("b", "new branch"));
         rows.Children.Add(LegendRow("m", "move windows"));
         rows.Children.Add(LegendRow("Ctrl+F", "find a desktop"));
+        rows.Children.Add(LegendRow("v", _stage.MapStyle switch
+        {
+            MapStyle.Board => "metro view",
+            MapStyle.Metro => "ascii view",
+            _ => "board view",
+        }));
         rows.Children.Add(LegendRow("Esc", "close"));
         rows.Children.Add(new TextBlock
         {

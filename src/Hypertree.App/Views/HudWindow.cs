@@ -5,8 +5,10 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using Hypertree.Layout;
 using Hypertree.Platform;
 using Hypertree.Scopes;
+using Hypertree.Settings;
 
 namespace Hypertree.App.Views;
 
@@ -42,15 +44,21 @@ internal sealed class HudWindow : Window
     private const int SlideTickMs = 15;  // ~66fps tween step
 
     // The dim backdrop, held as a field so the transition can fade it in (0→full) rather than snap it on —
-    // the snap was the most visible part of the motion. Kept a touch lighter than the old flat backdrop so
-    // the gradient wipe reads as a reveal rather than a second slab of dark.
-    private readonly SolidColorBrush _dim = new(Color.FromArgb(0x59, 0x10, 0x10, 0x10));
+    // the snap was the most visible part of the motion. Shares the interactive map's vignette (StageWindow's
+    // DimBg) so the transient flash and the full map read at the same weight — the board keeps its contrast
+    // over a busy desktop either way. Its own instance, since the fade-in mutates Opacity.
+    private readonly RadialGradientBrush _dim = StageWindow.BuildDim();
 
     // Peak darkness of the sweeping wipe band, over #101010. Tunable: this is the "how strong is the wipe".
     private const byte BandAlpha = 0x6E;
 
-    public HudWindow()
+    // The shared map camera (owned by App, also driving the interactive map). Flashing navigates it, so
+    // opening the map lands on the same framing, and the flash pans by the same dead-zone rules.
+    private readonly MapCamera _camera;
+
+    public HudWindow(MapCamera camera)
     {
+        _camera = camera;
         WindowDecorations = WindowDecorations.None;
         WindowStartupLocation = WindowStartupLocation.Manual;
         Background = _dim; // dim backdrop
@@ -89,13 +97,15 @@ internal sealed class HudWindow : Window
     /// animates. The caller gates <paramref name="animate"/> on the user setting and the OS "show animations"
     /// preference.</summary>
     public void Flash(NavMap map, HotkeyModifiers holdMods, NavAction? move = null, bool animate = false,
-                      bool fromLeadingEdge = true)
+                      bool fromLeadingEdge = true, MapStyle style = MapStyle.Board)
     {
         _holdMods = holdMods;
         if (!IsVisible) Show();   // realizes the handle so Screens is available
         CoverPrimary();           // sets Width/Height to the primary screen (DIPs)
 
-        Control board = BoardView.Render(map, Width, Height); // board centres itself within the full screen
+        // The flash is transient, so the metro train doesn't pulse here (animate:false) — the wipe below is
+        // the only motion. board centres itself within the full screen.
+        Control board = MapSurface.Render(map, Width, Height, style, camera: _camera);
 
         // A directional move gets a soft gradient wipe: a dark band that begins on the edge opposite the
         // arrow and sweeps across toward the way you pressed, uncovering the (already-switched) desktop as

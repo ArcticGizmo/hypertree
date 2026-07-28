@@ -14,7 +14,7 @@ namespace Hypertree.App;
 internal static class PlatformServices
 {
 #if WINDOWS
-    public static IDesktopController CreateDesktopController() => new Impl.VirtualDesktopController();
+    public static IDesktopController CreateDesktopController() => new Impl.VirtualDesktopController(new Impl.ForegroundActivator());
     public static IGlobalHotkey CreateGlobalHotkey() => new Impl.GlobalHotkey();
     public static IForegroundActivator CreateForegroundActivator() => new Impl.ForegroundActivator();
     public static IStartupManager CreateStartupManager() => new Impl.StartupManager();

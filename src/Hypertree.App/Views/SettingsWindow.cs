@@ -1,6 +1,7 @@
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
@@ -19,7 +20,8 @@ namespace Hypertree.App.Views;
 /// The settings window. A normal (focusable, opaque) window rendered in Fluent <b>dark</b> so it
 /// matches the board/palette look, summoned from the tray, the map's cog, or the command palette.
 /// Because a tray/hotkey process is a background process, it force-foregrounds on open via
-/// <see cref="IForegroundActivator"/> so it takes input immediately. Edits apply on Save.
+/// <see cref="IForegroundActivator"/> so it takes input immediately. There's no Save button — every edit
+/// applies and persists at once (see <see cref="ApplyLive"/>); closing the window (or Esc) just dismisses it.
 ///
 /// Startup is the first option (a right-aligned toggle), the desktop label and "show the board before
 /// moving" are matching toggles, and every global hotkey can be rebound: click a chord and press the new
@@ -40,6 +42,7 @@ internal sealed class SettingsWindow : Window
 
     private readonly ToggleSwitch _startOnLogin;
     private readonly ToggleSwitch _showTaskbarLabel;
+    private readonly ComboBox _mapStyle;
     private readonly ToggleSwitch _displayBeforeMoving;
     private readonly ToggleSwitch _animateNavigation;
     private readonly ToggleSwitch _sweepFromLeadingEdge;
@@ -50,6 +53,8 @@ internal sealed class SettingsWindow : Window
     private readonly Dictionary<HotkeyCommand, Button> _chordButtons = new();
     private readonly TextBlock _hotkeyHint;
     private HotkeyCommand? _capturing; // the command awaiting a new chord, or null when not capturing
+    private bool _ready;               // set once the ctor has built everything; gates live-apply against
+                                       // any change event that fires while the controls are still wiring up
 
     // Updates section: a status line, the check button, and an install button revealed only once a newer
     // release has been found (holding the Velopack handles needed to apply it).
@@ -71,16 +76,17 @@ internal sealed class SettingsWindow : Window
         try { Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://hypertree/Assets/icon.ico"))); } catch { }
         RequestedThemeVariant = ThemeVariant.Dark;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        // Height follows the content; width is fixed. Sizing to content in BOTH directions fights the
-        // explicit Width below — the window would collapse back to whatever the widest row happens to
-        // measure, which is how it stayed narrow regardless of what Width said.
-        SizeToContent = SizeToContent.Height;
+        // Fixed size; the options scroll inside (see below) once they outgrow the height. Sizing to content
+        // fought the explicit Width, and — now that there are enough options to run past a shorter screen —
+        // would overflow a window that can't be resized. 600 fits comfortably even on a 1080p/150% laptop.
         CanResize = false;
         Width = 720;
+        Height = 600;
         Background = new SolidColorBrush(Color.Parse("#12161F"));
 
         _startOnLogin = Toggle(startOnLogin);
         _showTaskbarLabel = Toggle(settings.ShowTaskbarLabel);
+        _mapStyle = MapStyleSelector(settings.MapStyle);
         _displayBeforeMoving = Toggle(settings.DisplayBeforeMoving);
         _animateNavigation = Toggle(settings.AnimateNavigation);
         _sweepFromLeadingEdge = Toggle(settings.SweepFromLeadingEdge);
@@ -105,19 +111,18 @@ internal sealed class SettingsWindow : Window
         };
         _installUpdate.Click += (_, _) => _ = InstallUpdateAsync();
 
-        var save = new Button { Content = "Save", IsDefault = true, HorizontalAlignment = HorizontalAlignment.Right };
-        save.Click += (_, _) => Commit();
-        var cancel = new Button { Content = "Cancel", IsCancel = true };
-        cancel.Click += (_, _) => Close();
+        // No Save/Cancel — each control applies (and persists) the moment it changes; see ApplyLive.
+        foreach (ToggleSwitch t in new[]
+                 { _startOnLogin, _showTaskbarLabel, _displayBeforeMoving,
+                   _animateNavigation, _sweepFromLeadingEdge, _showChangelog })
+            t.IsCheckedChanged += (_, _) => ApplyLive();
+        _mapStyle.SelectionChanged += (_, _) => ApplyLive();
 
-        Content = new Border
+        var options = new StackPanel
         {
-            Padding = new Thickness(22),
-            Child = new StackPanel
+            Spacing = 10,
+            Children =
             {
-                Spacing = 10,
-                Children =
-                {
                     Title2("Startup"),
                     ToggleRow("Start Hypertree when I log in", _startOnLogin),
 
@@ -126,10 +131,18 @@ internal sealed class SettingsWindow : Window
                     ToggleRow("Show the current desktop name over the taskbar", _showTaskbarLabel),
 
                     Divider(),
+                    Title2("Appearance"),
+                    SelectRow("Map style", _mapStyle),
+                    Hint("How every board is drawn — the flash, the map, previews and the move flow. "
+                         + "“Board” is the screen-tile view, “Metro” a transit diagram (coloured lines and "
+                         + "stations), “ASCII” a monospace terminal look. Cycle it with “v” on the map."),
+
+                    Divider(),
                     Title2("Navigation"),
-                    ToggleRow("Show the board before moving", _displayBeforeMoving),
-                    Hint("The first navigation chord only brings the board up so you can see where you are. "
-                         + "Keep the modifiers held and press again to move."),
+                    ToggleRow("Show the board before diving or surfacing", _displayBeforeMoving),
+                    Hint("The first dive or surface (up/down between branches) only brings the board up so you "
+                         + "can see where you are — keep the modifiers held and press again to move. Moving "
+                         + "left/right within a row goes straight away."),
                     ToggleRow("Animate navigation moves", _animateNavigation),
                     Hint("Sweeps a soft gradient across in the direction you moved, echoing the traditional "
                          + "desktop-switch animation. Follows the Windows “Show animations” setting — "
@@ -152,21 +165,37 @@ internal sealed class SettingsWindow : Window
                     Title2("Updates"),
                     UpdatesRow(),
 
-                    new StackPanel
+                    new TextBlock
                     {
-                        Orientation = Orientation.Horizontal, Spacing = 8,
-                        HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0),
-                        Children = { cancel, save },
+                        Text = "Changes apply and save automatically. Press Esc to close.",
+                        Foreground = Muted, FontSize = 11, Margin = new Thickness(0, 14, 0, 2),
                     },
-                },
             },
         };
 
-        // Tunnel so we intercept the chord before any button/default-button handling swallows it.
+        // The options can outgrow the fixed-height window, so they scroll. There's no pinned button row —
+        // changes apply immediately, so there's nothing to confirm.
+        Content = new Border
+        {
+            Padding = new Thickness(22),
+            Child = new ScrollViewer
+            {
+                Content = options,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Padding = new Thickness(0, 0, 8, 0), // keep the scrollbar off the option rows
+            },
+        };
+
+        // Tunnel so we intercept the chord before anything else swallows it (and Esc-to-close, since there's
+        // no Cancel button to carry IsCancel).
         AddHandler(KeyDownEvent, OnPreviewKeyDown, RoutingStrategies.Tunnel);
+        _ready = true;
     }
 
-    private void Commit()
+    // Build the settings from the current control state — the rebound chords overlaid on the defaults (like
+    // ResolveHotkeys), plus the fields this window doesn't edit, carried through untouched.
+    private AppSettings CurrentSettings()
     {
         // Persist only the chords that differ from the built-in defaults, so future default changes still
         // reach commands the user never touched (mirrors how ResolveHotkeys overlays them).
@@ -178,9 +207,10 @@ internal sealed class SettingsWindow : Window
                 overrides.Add(new HotkeyBinding(cmd, chord.Modifiers, chord.Key));
         }
 
-        var settings = new AppSettings
+        return new AppSettings
         {
             ShowTaskbarLabel = _showTaskbarLabel.IsChecked ?? true,
+            MapStyle = (MapStyle)Math.Max(0, _mapStyle.SelectedIndex),
             DisplayBeforeMoving = _displayBeforeMoving.IsChecked ?? true,
             AnimateNavigation = _animateNavigation.IsChecked ?? true,
             SweepFromLeadingEdge = _sweepFromLeadingEdge.IsChecked ?? true,
@@ -189,8 +219,15 @@ internal sealed class SettingsWindow : Window
             BranchTemplates = _initial.BranchTemplates, // not edited here — carry through untouched
             HotkeyBindings = overrides,
         };
-        _onSave(settings, _startOnLogin.IsChecked ?? false);
-        Close();
+    }
+
+    // Apply-and-persist on every change. With no Save button, each toggle or rebind takes effect at once:
+    // App's save handler writes settings.json and re-applies everything (taskbar label, map style, startup),
+    // so calling it per change keeps the running app in lockstep with the panel. Gated until the ctor is done.
+    private void ApplyLive()
+    {
+        if (!_ready) return;
+        _onSave(CurrentSettings(), _startOnLogin.IsChecked ?? false);
     }
 
     // ── Hotkey rebinding ────────────────────────────────────────────────────────────
@@ -245,8 +282,13 @@ internal sealed class SettingsWindow : Window
 
     private void OnPreviewKeyDown(object? sender, KeyEventArgs e)
     {
-        if (_capturing is not HotkeyCommand cmd) return;
-        e.Handled = true; // swallow the chord so Save/Cancel defaults don't fire mid-capture
+        if (_capturing is not HotkeyCommand cmd)
+        {
+            // No Cancel button to carry IsCancel, so Esc closes the (already-applied) window here.
+            if (e.Key == Key.Escape) { e.Handled = true; Close(); }
+            return;
+        }
+        e.Handled = true; // swallow the chord so it doesn't leak to the window (or close it) mid-capture
 
         if (e.Key == Key.Escape) { RestoreLabel(cmd); EndCapture(reset: true); return; }
         if (IsModifierKey(e.Key)) return; // wait for the non-modifier that completes the chord
@@ -274,6 +316,7 @@ internal sealed class SettingsWindow : Window
         _chords[cmd] = chord;
         _chordButtons[cmd].Content = chord.Display();
         EndCapture(reset: true);
+        ApplyLive(); // rebinding takes effect at once, like every other setting
     }
 
     private void ResetHotkeys()
@@ -286,6 +329,7 @@ internal sealed class SettingsWindow : Window
             _chordButtons[cmd].Content = _chords[cmd].Display();
         }
         SetHint("Shortcuts reset to defaults.", Muted);
+        ApplyLive();
     }
 
     private void RestoreLabel(HotkeyCommand cmd) => _chordButtons[cmd].Content = _chords[cmd].Display();
@@ -457,6 +501,30 @@ internal sealed class SettingsWindow : Window
     {
         IsChecked = value, HorizontalAlignment = HorizontalAlignment.Right,
     };
+
+    // The map-style dropdown. Item order matches the MapStyle enum (Board, Metro, ASCII), so the selected
+    // index is the enum value — see SnapshotSettings.
+    private static ComboBox MapStyleSelector(MapStyle style) => new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Right, MinWidth = 132,
+        ItemsSource = new[] { "Board", "Metro", "ASCII" },
+        SelectedIndex = (int)style,
+    };
+
+    // A label on the left, its selector pinned right — the ToggleRow shape for a non-toggle control.
+    private static Control SelectRow(string label, Control control)
+    {
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(24, 0, 0, 0) };
+        var text = new TextBlock
+        {
+            Text = label, Foreground = Ink, FontSize = 12, VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(text, 0);
+        Grid.SetColumn(control, 1);
+        grid.Children.Add(text);
+        grid.Children.Add(control);
+        return grid;
+    }
 
     // A label on the left, its toggle pinned right — the shared shape for the on/off options.
     private static Control ToggleRow(string label, ToggleSwitch toggle)

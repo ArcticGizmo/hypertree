@@ -10,6 +10,7 @@ using Hypertree.App.Views;
 using Hypertree.Changelog;
 using Hypertree.Desktops;
 using Hypertree.Ipc;
+using Hypertree.Layout;
 using Hypertree.Platform;
 using Hypertree.Scopes;
 using Hypertree.Settings;
@@ -47,6 +48,10 @@ public sealed class App : Application
     private NavigationModel? _model;
     private HudWindow? _hud;
     private MapOverlay? _overlay;
+    // One camera shared by the flash and the interactive map, so navigating with the map closed leaves it
+    // framed where the map opens, and the two never disagree about where the map sits. Reframed on a theme
+    // switch (metrics change). See docs/design/scene-camera.md.
+    private readonly MapCamera _mapCamera = new();
     private DesktopId? _moveOrigin; // where the current move flow started, for cancel/restore
     private TaskbarLabel? _taskbarLabel;
     private TrayIcon? _tray;
@@ -140,7 +145,7 @@ public sealed class App : Application
             _settingsStore.Save(_settings);
         }
 
-        _hud = new HudWindow();
+        _hud = new HudWindow(_mapCamera);
 
         // Persistent desktop-name pill over the taskbar. It re-reads the current desktop itself, but we
         // also poke it on every navigation so it never lags a keystroke.
@@ -155,13 +160,17 @@ public sealed class App : Application
         // One shared, persistent presentation surface for every overlay (map, palettes, prompts, move).
         // Swapping between them is an in-place content change, not a window teardown — no flash. Card
         // content floats over the live map, which the stage pulls from here.
-        _stage = new OverlayStage(_desktops, _activator) { MapProvider = () => _model!.BuildMap() };
+        _stage = new OverlayStage(_desktops, _activator)
+        {
+            MapProvider = () => _model!.BuildMap(),
+            MapStyle = _settings.MapStyle, // board vs. metro, applied to every surface the stage draws
+        };
         // Park the taskbar pill while the overlay is up (the map already shows where you are) — this also
         // removes the topmost-z fight that made the pill flash in/out when a dialog opened.
         _stage.Shown += () => _taskbarLabel?.SetSuppressed(true);
         _stage.Hidden += () => _taskbarLabel?.SetSuppressed(false);
 
-        _overlay = new MapOverlay(_stage);
+        _overlay = new MapOverlay(_stage, _mapCamera);
         _overlay.JumpTopRequested += i => JumpFromMap(() => _model!.GoToTop(i));
         _overlay.JumpBranchRequested += (g, d) => JumpFromMap(() => _model!.GoToBranchDesktop(g, d));
         _overlay.RenameRequested += RenameSelected;
@@ -174,6 +183,7 @@ public sealed class App : Application
         _overlay.MoveWindowsRequested += ToggleMoveWindows; // m — start the move-windows flow (replaces the map)
         _overlay.FinderRequested += () => OpenSpotlight(); // Ctrl+F — finder pushed over the map; Esc pops back to it
         _overlay.SettingsRequested += OpenSettings;
+        _overlay.ViewStyleToggleRequested += ToggleMapStyle; // v — flip board ↔ metro (persisted, app-wide)
 
         _stage.Prewarm(); // size the overlay host now, so the first summon doesn't render at the top-left then jump
 
@@ -346,7 +356,8 @@ public sealed class App : Application
     private Action ActionFor(HotkeyCommand cmd, HotkeyModifiers mods) => cmd switch
     {
         HotkeyCommand.CommandPalette => ToggleCommandPalette,
-        HotkeyCommand.MoveWindows    => ToggleMoveWindows,
+        HotkeyCommand.OpenMap        => ToggleMap,
+        HotkeyCommand.MoveWindows    => ToggleMoveWindows, // no default chord; only a user's kept rebinding fires this
         HotkeyCommand.Peek           => () => Peek(mods),
         _ when NavCommands.TryGetValue(cmd, out NavAction action) => () => Navigate(action, mods),
         _ => () => { },
@@ -381,8 +392,9 @@ public sealed class App : Application
         _gestureFrom ??= _desktops.Current;
         _gestureMods = mods;
         // A cold press with "show before moving" on only raises the board — it doesn't move, so it gets a
-        // plain fade rather than a directional wipe (null move below).
-        bool revealOnly = RevealOnly();
+        // plain fade rather than a directional wipe (null move below). Only dive/surface reveal first (see
+        // RevealOnly); a left/right move within the current row goes straight away.
+        bool revealOnly = RevealOnly(action);
         // The wipe plays only when the user has it on AND Windows' "show animations" is on — the OS
         // reduce-motion preference wins.
         bool animate = _settings.AnimateNavigation && WindowFx.SystemAnimationsEnabled();
@@ -399,7 +411,7 @@ public sealed class App : Application
             // Reveal fades the board in; a real move wipes; a blocked move does neither.
             bool doAnimate = animate && (revealOnly || moved);
             _hud?.Flash(_model.BuildMap(_gestureFrom), mods, moved ? action : null, doAnimate,
-                        _settings.SweepFromLeadingEdge);
+                        _settings.SweepFromLeadingEdge, _settings.MapStyle);
         }
         StartGesturePoll();
     }
@@ -417,16 +429,22 @@ public sealed class App : Application
         if (_overlay is { IsOpen: true }) return;
         _model.AnchorToCurrent(); // show where we stand now, not our stale cursor
         bool animate = _settings.AnimateNavigation && WindowFx.SystemAnimationsEnabled();
-        _hud?.Flash(_model.BuildMap(), mods, move: null, animate: animate);
+        _hud?.Flash(_model.BuildMap(), mods, move: null, animate: animate, style: _settings.MapStyle);
     }
 
-    // "Show before moving": with the setting on, a nav chord that arrives while the flash is off screen
-    // spends itself raising the flash — you read where you are, then keep holding the modifiers and press
-    // again to actually move. Only the cold press is swallowed; once the board is up (which it stays for
-    // as long as the modifiers are held) every press navigates, so a held run of arrows is uninterrupted.
-    // The map is an always-visible surface of its own, so it never needs the reveal press.
-    private bool RevealOnly() =>
-        _settings.DisplayBeforeMoving && _overlay is not { IsOpen: true } && _hud is { IsVisible: false };
+    // "Show before moving": with the setting on, a dive/surface chord that arrives while the flash is off
+    // screen spends itself raising the flash — you read where you are, then keep holding the modifiers and
+    // press again to actually move. Only the cold press is swallowed; once the board is up (which it stays
+    // for as long as the modifiers are held) every press navigates, so a held run of arrows is uninterrupted.
+    //
+    // It applies only to the vertical moves — diving into a branch or surfacing out — because that's where
+    // the disorientation is: you land among a fresh set of lookalike desktops. Left/right stays within the
+    // row you can already see, so it's not worth the extra press and moves immediately. The map is an
+    // always-visible surface of its own, so it never needs the reveal press.
+    private bool RevealOnly(NavAction action) =>
+        _settings.DisplayBeforeMoving
+        && action is NavAction.Dive or NavAction.Surface
+        && _overlay is not { IsOpen: true } && _hud is { IsVisible: false };
 
     // A double-click / arrow-driven jump from the map: switch to the chosen desktop, record where we
     // came from, then re-home the selection onto it (green + blue rejoin), keeping the map open.
@@ -486,7 +504,7 @@ public sealed class App : Application
         if (_model is not null) _overlay?.SetBoard(_model.BuildMap());
     }
 
-    // ── Move windows to another desktop (Ctrl+Alt+M) ────────────────────────────────
+    // ── Move windows to another desktop (m on the map) ──────────────────────────────
 
     // Phase 1: snapshot the current desktop's windows and open the picker. Re-press toggles it closed.
     private void ToggleMoveWindows()
@@ -807,7 +825,7 @@ public sealed class App : Application
             new("Manage templates…", ManageTemplatesPrompt),
             // Delete-current-desktop / remove-current-branch are intentionally not commands — do them from the
             // map, where the target is visible (each tile / branch carries its own × control). Likewise
-            // move-windows is triggered from the map ("m") or Ctrl+Alt+M, not from here.
+            // move-windows is triggered from the map ("m"), not from here.
             // Save / restore / reset the whole desktop+branch arrangement — one manager for all three.
             new("Layouts…", LayoutsPrompt),
             // Quit Hypertree — behind a confirm (see ExitHypertree), since it's easy to land on while
@@ -1033,19 +1051,55 @@ public sealed class App : Application
             if (_shuttingDown) return; // teardown already unregistered; don't resurrect the hotkey threads
             RegisterHotkeys();
             _stage?.Reassert();
+            // A map-style change made while settings was open was deferred (see ApplyMapStyle) to avoid a
+            // z-order fight; repaint the map now it's gone so it reflects the current style.
+            if (_overlay is { IsOpen: true } && _model is not null) _overlay.SetBoard(_model.BuildMap());
         };
         _settingsWindow.Show();
         _settingsWindow.TakeFocus();
     }
 
-    // Save applies the settings but leaves re-registration to the window's Closed handler (which fires for
-    // both Save and Cancel), so the hotkeys are suspended for exactly as long as the window is open.
+    // Called live on every change in the settings window (there's no Save button). Persists and re-applies
+    // each time; hotkey re-registration is still left to the window's Closed handler, so the global hotkeys
+    // stay suspended for exactly as long as the window is open (and a rebind lands cleanly on close).
     private void SaveSettings(AppSettings settings, bool startOnLogin)
     {
         _settings = settings;
         _settingsStore?.Save(settings);
         ApplyTaskbarLabel();
+        ApplyMapStyle();
         _startup?.SetEnabled(startOnLogin);
+    }
+
+    // v on the map (or the Settings selector) cycles the board style board → metro → ascii → board. It's a
+    // persisted, app-wide choice, so we update the setting, save it, and push it onto the stage — every
+    // surface that draws a board follows.
+    private void ToggleMapStyle()
+    {
+        _settings.MapStyle = _settings.MapStyle switch
+        {
+            MapStyle.Board => MapStyle.Metro,
+            MapStyle.Metro => MapStyle.Ascii,
+            _ => MapStyle.Board,
+        };
+        _settingsStore?.Save(_settings);
+        ApplyMapStyle();
+    }
+
+    // Push the current style onto the stage and repaint whatever it's showing, so the switch is immediate
+    // (the interactive map re-renders; a card's backdrop refreshes behind it). A no-op when the style hasn't
+    // actually changed, so live-apply toggling an unrelated setting doesn't churn the board.
+    private void ApplyMapStyle()
+    {
+        if (_stage is null || _stage.MapStyle == _settings.MapStyle) return;
+        _stage.MapStyle = _settings.MapStyle;
+        _mapCamera.Reframe(); // the new theme's metrics invalidate the carried pixel offset — reframe the selection
+        // While the Settings window is open it sits above the stage; re-rendering the map here would end in
+        // _stage.BringToFront() and steal the top of the z-order from it. Defer the map repaint to the
+        // Settings Closed handler; refreshing a card backdrop (no z-order change) is safe either way.
+        if (_settingsWindow is null && _overlay is { IsOpen: true } && _model is not null)
+            _overlay.SetBoard(_model.BuildMap());
+        _stage.RefreshBackdrop();
     }
 
     // Show or hide the persistent taskbar label to match the setting.
@@ -1145,7 +1199,7 @@ public sealed class App : Application
         if (_model is null) return;
         NavMap map = _model.BuildMap();
         if (_stage is not null && _stage.HasDurableBase) _overlay?.SetBoard(map);
-        else _hud?.Flash(map, HotkeyModifiers.None); // a result flash, not a gesture — just times out
+        else _hud?.Flash(map, HotkeyModifiers.None, style: _settings.MapStyle); // a result flash, not a gesture — just times out
     }
 
     // The product version for the tray header, read from the assembly (set by <Version> in the csproj) so

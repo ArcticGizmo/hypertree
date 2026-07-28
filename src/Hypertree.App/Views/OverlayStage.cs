@@ -10,6 +10,7 @@ using Avalonia.Threading;
 using Hypertree.Desktops;
 using Hypertree.Platform;
 using Hypertree.Scopes;
+using Hypertree.Settings;
 
 namespace Hypertree.App.Views;
 
@@ -56,6 +57,11 @@ internal sealed class OverlayStage
 
     /// <summary>Supplies the live board rendered behind Card content (App: <c>() =&gt; _model.BuildMap()</c>).</summary>
     public Func<NavMap>? MapProvider;
+
+    /// <summary>The board style for every surface the stage draws (card backdrops here; the map and move
+    /// flow read it off the stage too). App keeps this in sync with the persisted setting, so choosing the
+    /// metro map applies everywhere at once.</summary>
+    public MapStyle MapStyle { get; set; } = MapStyle.Board;
 
     /// <summary>Raised when the stage becomes visible (first content shown) and when it hides (stack
     /// emptied). App uses these to park the taskbar pill while the overlay is up.</summary>
@@ -217,7 +223,7 @@ internal sealed class OverlayStage
         NavMap? map = content.BackdropBoard() ?? MapProvider?.Invoke();
         if (map is null) return null;
         double w = HostWidth > 0 ? HostWidth : 1280, h = HostHeight > 0 ? HostHeight : 800;
-        return BoardView.Render(map, w, h, 1.0);
+        return MapSurface.Render(map, w, h, MapStyle);
     }
 
     /// <summary>Re-render the current card's backdrop board — after its selection moved (palette preview).</summary>
@@ -397,7 +403,26 @@ internal sealed class StageWindow : Window
     public event Action? BackgroundPressed;
     public event Action? HostDeactivated;
 
-    private static readonly IBrush DimBg = new SolidColorBrush(Color.FromArgb(0x9E, 0x0E, 0x0E, 0x12));
+    private static readonly IBrush DimBg = BuildDim();
+
+    // The backdrop the board draws over. A soft vignette rather than a flat slab: darker in the centre —
+    // where the board (and especially the metro map's thin coloured lines) sits — fading out to the same
+    // dim it always was at the edges. Since the host is semi-transparent over the live desktop, a busy or
+    // light screen behind used to wash the centre out; pooling the dark under the content fixes the contrast
+    // without making the whole overlay heavier. Radii reach past the corners so the outer field is flat.
+    internal static RadialGradientBrush BuildDim() => new RadialGradientBrush
+    {
+        Center = new RelativePoint(0.5, 0.5, RelativeUnit.Relative),
+        GradientOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative),
+        RadiusX = new RelativeScalar(0.9, RelativeUnit.Relative),
+        RadiusY = new RelativeScalar(0.9, RelativeUnit.Relative),
+        GradientStops =
+        {
+            new GradientStop(Color.FromArgb(0xDD, 0x07, 0x08, 0x0C), 0.0),  // darker pool under the content
+            new GradientStop(Color.FromArgb(0xBE, 0x0B, 0x0C, 0x10), 0.55),
+            new GradientStop(Color.FromArgb(0x9E, 0x0E, 0x0E, 0x12), 1.0),  // = the previous flat dim, at the edges
+        },
+    };
 
     // Two persistent layers: the map backdrop below, the content view above. They're ContentControls so
     // swapping a layer detaches the previous child cleanly — no double-parenting when a card is re-presented.
