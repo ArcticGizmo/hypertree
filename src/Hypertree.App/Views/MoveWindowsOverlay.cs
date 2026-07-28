@@ -13,7 +13,7 @@ namespace Hypertree.App.Views;
 /// <summary>
 /// The two-phase "move windows" flow, hosted on the shared <see cref="OverlayStage"/>. Phase 1 is a
 /// Task-View-style grid of the current desktop's windows (live DWM thumbnails) with keyboard/mouse
-/// multi-select; phase 2 reuses <see cref="BoardView"/> to show the map while the user navigates to a
+/// multi-select; phase 2 reuses <see cref="MapSurface"/> to show the map while the user navigates to a
 /// destination, then drops the selected windows there. Both phases mutate one persistent root, so the
 /// summon and the phase-1→phase-2 change are content swaps on the already-shown stage — no flash.
 ///

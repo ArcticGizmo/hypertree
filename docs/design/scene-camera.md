@@ -113,14 +113,14 @@ is unchanged.
 
 ## Phasing
 
-0. This doc.
-1. Core: `Scene`, `SceneMetrics`, `SceneLayout` + tests.
-2. Core: `MapCamera` + tests (the hysteresis).
-3. App: `ISceneRenderer` + `BoardPainter`, board + flash through the driver.
-4. App: `MetroPainter`, metro through the driver.
-5. Wire the shared `MapCamera` into `MapOverlay` + `HudWindow`.
+0. ✅ This doc.
+1. ✅ Core: `Scene`, `SceneMetrics`, `SceneLayout` + tests.
+2. ✅ Core: `MapCamera` + tests (the hysteresis).
+3. ✅ App: `IScenePainter` + `BoardPainter`, board through the driver.
+4. ✅ App: `MetroPainter`, metro through the driver.
+5. ✅ Wire the shared `MapCamera` into `MapOverlay` + `HudWindow`.
 6. Visual reconciliation across themes.
-7. Remove dead code; update README/CHANGELOG and metro-map.md.
+7. ✅ Remove dead code (`BoardView`/`MetroView`); update README/CHANGELOG and metro-map.md.
 
 ## Files
 

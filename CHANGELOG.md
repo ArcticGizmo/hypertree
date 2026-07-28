@@ -17,6 +17,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **The map no longer slides under you as you move.** Both map themes (board and metro) now
+  render through one shared layout + camera, so they behave identically: navigating or
+  moving the selection walks the cursor across a **stationary** map, and the map only pans —
+  by the minimum needed, leaving a marker of context — when the selection reaches a screen
+  edge. Move back and it holds still. The board and metro views now align the same way (each
+  timeline starts at its first desktop, joined by a spine on the left), and the transient
+  flash shares the same camera, so opening the map lands exactly where navigation left it.
+  (Design: `docs/design/scene-camera.md`.)
 - **`Ctrl+Alt+M` now opens the map** instead of starting the move-windows flow. The map is the surface you reach for far more often, so it gets the dedicated hotkey; move-windows stays a keystroke away as **`m`** on the map. (A rebind you'd set for move-windows in an earlier version is preserved.)
 - **Settings apply immediately.** The Save/Cancel buttons are gone — every toggle and rebind takes effect and persists the moment you make it. Close the window (or press Esc) when you're done.
 - The overlay's dimmed backdrop now carries a soft **vignette** — darker under the centred board, fading to the usual dim at the edges — so the board (and especially the metro map's thin coloured lines) keeps its contrast over a bright or busy desktop behind it. The transient navigation flash now shares this same backdrop, so it reads at the same weight as the full map.

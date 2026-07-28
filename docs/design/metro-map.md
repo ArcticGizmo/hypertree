@@ -7,6 +7,12 @@ a pure visual alternative, not a new data model.
 > **Status:** working, on the `metro-map` branch. It's now a persisted, whole-app
 > appearance setting with full interactive parity on the map — see **Settling in** for
 > what changed from the first prototype, and **Open questions** for what's still open.
+>
+> **Superseded in part:** layout and movement now come from the shared scene/camera
+> pipeline (**docs/design/scene-camera.md**). Both themes align at column 0 with the trunk
+> as a left spine, and a dead-zone camera moves the cursor over a stationary map — so the
+> "centred on the cursor" / "whole-stack, fixed" decisions below no longer describe how the
+> map moves; the *visual language* (lines, stations, chips, colours) still stands.
 
 ## See it
 
@@ -107,14 +113,16 @@ theme. So now:
    stay coral. Options: persist a colour (or palette slot) per branch id; or derive a
    stable colour by hashing the branch id. Also: palette only has 8 entries — what past
    that, and is it colourblind-safe? Should main ever get a colour?
-2. **The trunk's meaning.** It runs vertically through each line's *resume* station,
-   matching the board's spine. Reads as "one central interchange corridor." Is that the
-   right story, or should a branch visibly connect at a specific *anchor* station on main?
-   (The data model has no per-branch anchor column today — branches hang off the centre.)
+2. ~~**The trunk's meaning.**~~ **Resolved** by the scene/camera overhaul
+   (docs/design/scene-camera.md): rows now align at their **first desktop**, so the trunk
+   is a left-side spine through every line's column-0 station rather than a centre corridor
+   through the (moving) cursor. A true per-branch *anchor* column is still not in the data
+   model — branches still start at column 0 — but the trunk no longer implies a central
+   interchange.
 3. **Long names & big trees.** Station chips can collide at the 156px station pitch if
-   names are long (truncate? stagger above/below?), and a very tall tree can overflow
-   vertically. The board now scrolls to keep the current row on screen when it overflows;
-   the metro view still just centres the whole stack (no overflow handling yet).
+   names are long (truncate? stagger above/below?). Vertical (and horizontal) overflow is
+   now **handled for both themes** by the shared dead-zone camera (docs/design/scene-camera.md):
+   the map holds still and pans to keep the selection in view only when it nears an edge.
 4. **A command-palette entry?** You can reach the style from Settings and `v`; a "Switch
    to metro / board map" palette command would be a third door. Worth it, or clutter?
 
