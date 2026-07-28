@@ -34,7 +34,10 @@ public interface IDesktopController
     /// </summary>
     IReadOnlyList<WindowInfo> WindowsOn(DesktopId id);
 
-    /// <summary>Switch the whole monitor array to <paramref name="id"/>. No-op if already there.</summary>
+    /// <summary>Switch the whole monitor array to <paramref name="id"/>. No-op if already there. Also
+    /// hands the foreground to a window on the destination, the way the OS's own switcher does — a bare
+    /// desktop switch leaves the previous desktop's focused window as an unreachable, cloaked foreground
+    /// window (see docs/design/foreground-handover-on-switch.md), which this prevents.</summary>
     void SwitchTo(DesktopId id);
 
     /// <summary>Create a new desktop, name it, and return its id.</summary>

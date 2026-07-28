@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Hypertree.Desktops;
+using Hypertree.Platform;
 
 namespace Hypertree.Platform.Windows;
 
@@ -18,9 +19,12 @@ public sealed class VirtualDesktopController : IDesktopController
     private readonly IApplicationViewCollection _views;
     private readonly IVirtualDesktopPinnedApps _pinned;
     private readonly IVirtualDesktopManager _publicVdm; // documented API — window→desktop lookup only
+    private readonly IForegroundActivator _foreground;  // hands foreground to a destination window on switch
 
-    public VirtualDesktopController()
+    public VirtualDesktopController(IForegroundActivator foreground)
     {
+        _foreground = foreground;
+
         Type shellType = Type.GetTypeFromCLSID(Guids.CLSID_ImmersiveShell)
                          ?? throw new PlatformNotSupportedException("ImmersiveShell CLSID unavailable.");
         var shell = (IServiceProvider10)Activator.CreateInstance(shellType)!;
@@ -147,6 +151,9 @@ public sealed class VirtualDesktopController : IDesktopController
     private delegate bool EnumWindowsProc(nint hwnd, nint lparam);
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc cb, nint lparam);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint hwnd);
+    [DllImport("user32.dll")] private static extern bool IsIconic(nint hwnd);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern nint GetShellWindow();
     [DllImport("user32.dll")] private static extern int GetWindowTextLength(nint hwnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetWindowTextW")] private static extern int GetWindowText(nint hwnd, System.Text.StringBuilder buf, int max);
     [DllImport("user32.dll")] private static extern nint GetAncestor(nint hwnd, int flags);
@@ -160,7 +167,48 @@ public sealed class VirtualDesktopController : IDesktopController
     // navigation model reconciles the stale record separately.
     public void SwitchTo(DesktopId id)
     {
-        if (TryResolve(id) is { } vd) _vdm.SwitchDesktop(vd);
+        if (TryResolve(id) is not { } vd) return;
+        _vdm.SwitchDesktop(vd);
+        HandoffForeground();
+    }
+
+    // A bare SwitchDesktop moves the desktop but not the foreground window. If the window that was
+    // foreground lived on the desktop we left, it stays foreground — now DWM-cloaked on another desktop —
+    // and once cloaked, no process can move the foreground off it (proven externally; see
+    // docs/design/foreground-handover-on-switch.md). Every later "focus my window" call is then dead until
+    // the user clicks something, and keystrokes go to an invisible window. The shell's own switcher
+    // (Win+Ctrl+Arrow) avoids this by activating a window on the destination; do the same, inline, so the
+    // stranded state never outlives the switch.
+    private void HandoffForeground()
+    {
+        nint fg = GetForegroundWindow();
+        if (fg != 0 && _publicVdm.IsWindowOnCurrentVirtualDesktop(fg, out int onCurrent) == 0 && onCurrent != 0)
+            return; // the foreground already belongs to the desktop we switched to — nothing is stranded
+
+        // Prefer the top-most ordinary window on the destination; fall back to the shell (desktop) window,
+        // which clears the anomaly on an empty desktop rather than leaving focus on the cloaked window.
+        nint target = TopWindowOnCurrentDesktop();
+        if (target == 0) target = GetShellWindow();
+        if (target != 0) _foreground.ForceForeground(target);
+    }
+
+    // The top-most (Z-order-first) ordinary, non-minimised window on the desktop now shown — EnumWindows
+    // yields front-to-back, so the first match wins. Same filter as the window counts, narrowed to the
+    // current desktop; 0 when the destination has no such window (e.g. an empty desktop, or one holding
+    // only minimised windows — activating those would un-minimise them, which the shell switcher doesn't).
+    private nint TopWindowOnCurrentDesktop()
+    {
+        Guid current = _vdm.GetCurrentDesktop().GetId();
+        uint own = GetCurrentProcessId();
+        nint found = 0;
+        EnumWindows((hwnd, _) =>
+        {
+            if (!IsCountableWindow(hwnd, own) || IsIconic(hwnd)) return true;
+            if (_publicVdm.GetWindowDesktopId(hwnd, out Guid g) != 0 || g != current) return true;
+            found = hwnd;
+            return false; // stop at the first (top-most) match
+        }, 0);
+        return found;
     }
 
     public DesktopId Create(string name)

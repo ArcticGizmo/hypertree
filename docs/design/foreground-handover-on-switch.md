@@ -1,5 +1,17 @@
 # Foreground handover on desktop switch
 
+> **Resolution (implemented).** The handover lives in `VirtualDesktopController.SwitchTo`
+> (`src/Hypertree.Platform.Windows/VirtualDesktopController.cs`), *not* in `NavigationModel.Commit`
+> as suggested below — `Commit` is in `Hypertree.Core`, which is deliberately Win32-free and unit-tested
+> against a fake, so it can't call `GetForegroundWindow`. Putting it in the single Windows seam also fixes
+> the identical problem for the other four `SwitchTo` callers (desktop removal, snapshot restore, …) for
+> free. After `SwitchDesktop`, if the foreground window is no longer on the current desktop, it activates
+> the top-most ordinary, non-minimised window on the destination (via `ForegroundActivator.ForceForeground`),
+> falling back to the shell window. Per-desktop focus memory (option 1) is not done; this is options 2→3.
+> **The open question below is now answered — confirmed live** (see that section): a controlled A/B on this
+> machine (build 26200) reproduced the stuck state 5/5 on a pre-fix tray and cleared it 5/5 (twice) with
+> the fix, using the same probe.
+>
 > Findings from an external investigation (July 2026). Hypertree's `SwitchDesktop` moves the
 > desktop without moving the foreground window, leaving the window you were on as a **cloaked
 > foreground window** on the desktop you left. That state cannot be cleared by any other process,
@@ -148,12 +160,30 @@ likely more robust than repairing it afterwards.
 `src/Hypertree.Platform.Windows/ComInterop.cs:78`) is not this. It drags the foreground window
 *onto* the destination desktop, which is exactly what a branch manager must never do.
 
-## Open question — needs verifying when implemented
+## Open question — RESOLVED (verified live, July 2026)
 
-It is **proven** that the state cannot be cleared from outside the process. It is **not proven**
-that Hypertree can clear it from inside; that could not be tested without running code in the tray.
-It is very likely — acting at switch time, before the window is cloaked, in a process that just
-handled user input — but confirm it rather than assume it.
+It was **proven** that the state cannot be cleared from outside the process, but **not** that Hypertree
+could clear it from inside — that needed code running in the tray. Now verified on this machine
+(Windows 11 build 26200), driving the real tray via `htree goto` across two branches that each host
+ordinary windows, with an external probe reading `GetForegroundWindow` / the documented
+`IsWindowOnCurrentVirtualDesktop` / `DWMWA_CLOAKED` after each jump. To rule out a probe artefact the
+harness waits for the switch to actually complete (the focused source window becomes shell-cloaked,
+`== 2`) before measuring, so a "stuck" reading is real rather than premature.
+
+Result of the controlled A/B (5 warm trials each; the very first trial is a cold-start jitter in the
+external probe, not the product, and is excluded):
+
+| Tray build | Foreground after the jump | Handover |
+|---|---|---|
+| **Pre-fix** (`SwitchDesktop` only) | still the source window — now shell-cloaked (`DWMWA_CLOAKED == 2`) on the desktop we left, `IsWindowOnCurrentVirtualDesktop == false`, yet still `GetForegroundWindow()` | **0/5** |
+| **With fix** (handover in `SwitchTo`) | a real, uncloaked window on the destination desktop; the source window is cloaked but no longer foreground | **5/5** (repeated twice, different branch pairs) |
+
+The pre-fix column reproduces the exact anomaly this document reported. The fix eliminates it acting at
+switch time, from inside the tray — confirming the "very likely" hypothesis.
+
+The probe is kept at `docs/design/foreground-handover-repro.ps1`: it discovers which desktops host
+ordinary windows, picks two on different rows, drives `htree goto` between them, and reports the
+foreground state after each jump. Re-run it (against a running tray) to regression-check the handover.
 
 ## Reproduction
 
