@@ -20,7 +20,8 @@ namespace Hypertree.App.Views;
 /// The settings window. A normal (focusable, opaque) window rendered in Fluent <b>dark</b> so it
 /// matches the board/palette look, summoned from the tray, the map's cog, or the command palette.
 /// Because a tray/hotkey process is a background process, it force-foregrounds on open via
-/// <see cref="IForegroundActivator"/> so it takes input immediately. Edits apply on Save.
+/// <see cref="IForegroundActivator"/> so it takes input immediately. There's no Save button — every edit
+/// applies and persists at once (see <see cref="ApplyLive"/>); closing the window (or Esc) just dismisses it.
 ///
 /// Startup is the first option (a right-aligned toggle), the desktop label and "show the board before
 /// moving" are matching toggles, and every global hotkey can be rebound: click a chord and press the new
@@ -52,6 +53,8 @@ internal sealed class SettingsWindow : Window
     private readonly Dictionary<HotkeyCommand, Button> _chordButtons = new();
     private readonly TextBlock _hotkeyHint;
     private HotkeyCommand? _capturing; // the command awaiting a new chord, or null when not capturing
+    private bool _ready;               // set once the ctor has built everything; gates live-apply against
+                                       // any change event that fires while the controls are still wiring up
 
     // Updates section: a status line, the check button, and an install button revealed only once a newer
     // release has been found (holding the Velopack handles needed to apply it).
@@ -108,10 +111,11 @@ internal sealed class SettingsWindow : Window
         };
         _installUpdate.Click += (_, _) => _ = InstallUpdateAsync();
 
-        var save = new Button { Content = "Save", IsDefault = true, HorizontalAlignment = HorizontalAlignment.Right };
-        save.Click += (_, _) => Commit();
-        var cancel = new Button { Content = "Cancel", IsCancel = true };
-        cancel.Click += (_, _) => Close();
+        // No Save/Cancel — each control applies (and persists) the moment it changes; see ApplyLive.
+        foreach (ToggleSwitch t in new[]
+                 { _startOnLogin, _showTaskbarLabel, _metroMapStyle, _displayBeforeMoving,
+                   _animateNavigation, _sweepFromLeadingEdge, _showChangelog })
+            t.IsCheckedChanged += (_, _) => ApplyLive();
 
         var options = new StackPanel
         {
@@ -159,40 +163,38 @@ internal sealed class SettingsWindow : Window
                     Divider(),
                     Title2("Updates"),
                     UpdatesRow(),
+
+                    new TextBlock
+                    {
+                        Text = "Changes apply and save automatically. Press Esc to close.",
+                        Foreground = Muted, FontSize = 11, Margin = new Thickness(0, 14, 0, 2),
+                    },
             },
         };
 
-        // The options can outgrow the window, so they scroll while Save/Cancel stay pinned below it.
-        var scroller = new ScrollViewer
-        {
-            Content = options,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Padding = new Thickness(0, 0, 8, 0), // keep the scrollbar off the option rows
-        };
-        var actions = new StackPanel
-        {
-            Orientation = Orientation.Horizontal, Spacing = 8,
-            HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0),
-            Children = { cancel, save },
-        };
-        Grid.SetRow(scroller, 0);
-        Grid.SetRow(actions, 1);
+        // The options can outgrow the fixed-height window, so they scroll. There's no pinned button row —
+        // changes apply immediately, so there's nothing to confirm.
         Content = new Border
         {
             Padding = new Thickness(22),
-            Child = new Grid
+            Child = new ScrollViewer
             {
-                RowDefinitions = new RowDefinitions("*,Auto"),
-                Children = { scroller, actions },
+                Content = options,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Padding = new Thickness(0, 0, 8, 0), // keep the scrollbar off the option rows
             },
         };
 
-        // Tunnel so we intercept the chord before any button/default-button handling swallows it.
+        // Tunnel so we intercept the chord before anything else swallows it (and Esc-to-close, since there's
+        // no Cancel button to carry IsCancel).
         AddHandler(KeyDownEvent, OnPreviewKeyDown, RoutingStrategies.Tunnel);
+        _ready = true;
     }
 
-    private void Commit()
+    // Build the settings from the current control state — the rebound chords overlaid on the defaults (like
+    // ResolveHotkeys), plus the fields this window doesn't edit, carried through untouched.
+    private AppSettings CurrentSettings()
     {
         // Persist only the chords that differ from the built-in defaults, so future default changes still
         // reach commands the user never touched (mirrors how ResolveHotkeys overlays them).
@@ -204,7 +206,7 @@ internal sealed class SettingsWindow : Window
                 overrides.Add(new HotkeyBinding(cmd, chord.Modifiers, chord.Key));
         }
 
-        var settings = new AppSettings
+        return new AppSettings
         {
             ShowTaskbarLabel = _showTaskbarLabel.IsChecked ?? true,
             MapStyle = (_metroMapStyle.IsChecked ?? false) ? MapStyle.Metro : MapStyle.Board,
@@ -216,8 +218,15 @@ internal sealed class SettingsWindow : Window
             BranchTemplates = _initial.BranchTemplates, // not edited here — carry through untouched
             HotkeyBindings = overrides,
         };
-        _onSave(settings, _startOnLogin.IsChecked ?? false);
-        Close();
+    }
+
+    // Apply-and-persist on every change. With no Save button, each toggle or rebind takes effect at once:
+    // App's save handler writes settings.json and re-applies everything (taskbar label, map style, startup),
+    // so calling it per change keeps the running app in lockstep with the panel. Gated until the ctor is done.
+    private void ApplyLive()
+    {
+        if (!_ready) return;
+        _onSave(CurrentSettings(), _startOnLogin.IsChecked ?? false);
     }
 
     // ── Hotkey rebinding ────────────────────────────────────────────────────────────
@@ -272,8 +281,13 @@ internal sealed class SettingsWindow : Window
 
     private void OnPreviewKeyDown(object? sender, KeyEventArgs e)
     {
-        if (_capturing is not HotkeyCommand cmd) return;
-        e.Handled = true; // swallow the chord so Save/Cancel defaults don't fire mid-capture
+        if (_capturing is not HotkeyCommand cmd)
+        {
+            // No Cancel button to carry IsCancel, so Esc closes the (already-applied) window here.
+            if (e.Key == Key.Escape) { e.Handled = true; Close(); }
+            return;
+        }
+        e.Handled = true; // swallow the chord so it doesn't leak to the window (or close it) mid-capture
 
         if (e.Key == Key.Escape) { RestoreLabel(cmd); EndCapture(reset: true); return; }
         if (IsModifierKey(e.Key)) return; // wait for the non-modifier that completes the chord
@@ -301,6 +315,7 @@ internal sealed class SettingsWindow : Window
         _chords[cmd] = chord;
         _chordButtons[cmd].Content = chord.Display();
         EndCapture(reset: true);
+        ApplyLive(); // rebinding takes effect at once, like every other setting
     }
 
     private void ResetHotkeys()
@@ -313,6 +328,7 @@ internal sealed class SettingsWindow : Window
             _chordButtons[cmd].Content = _chords[cmd].Display();
         }
         SetHint("Shortcuts reset to defaults.", Muted);
+        ApplyLive();
     }
 
     private void RestoreLabel(HotkeyCommand cmd) => _chordButtons[cmd].Content = _chords[cmd].Display();

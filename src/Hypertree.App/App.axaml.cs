@@ -1045,13 +1045,17 @@ public sealed class App : Application
             if (_shuttingDown) return; // teardown already unregistered; don't resurrect the hotkey threads
             RegisterHotkeys();
             _stage?.Reassert();
+            // A map-style change made while settings was open was deferred (see ApplyMapStyle) to avoid a
+            // z-order fight; repaint the map now it's gone so it reflects the current style.
+            if (_overlay is { IsOpen: true } && _model is not null) _overlay.SetBoard(_model.BuildMap());
         };
         _settingsWindow.Show();
         _settingsWindow.TakeFocus();
     }
 
-    // Save applies the settings but leaves re-registration to the window's Closed handler (which fires for
-    // both Save and Cancel), so the hotkeys are suspended for exactly as long as the window is open.
+    // Called live on every change in the settings window (there's no Save button). Persists and re-applies
+    // each time; hotkey re-registration is still left to the window's Closed handler, so the global hotkeys
+    // stay suspended for exactly as long as the window is open (and a rebind lands cleanly on close).
     private void SaveSettings(AppSettings settings, bool startOnLogin)
     {
         _settings = settings;
@@ -1071,12 +1075,17 @@ public sealed class App : Application
     }
 
     // Push the current style onto the stage and repaint whatever it's showing, so the switch is immediate
-    // (the interactive map re-renders; a card's backdrop refreshes behind it).
+    // (the interactive map re-renders; a card's backdrop refreshes behind it). A no-op when the style hasn't
+    // actually changed, so live-apply toggling an unrelated setting doesn't churn the board.
     private void ApplyMapStyle()
     {
-        if (_stage is null) return;
+        if (_stage is null || _stage.MapStyle == _settings.MapStyle) return;
         _stage.MapStyle = _settings.MapStyle;
-        if (_overlay is { IsOpen: true } && _model is not null) _overlay.SetBoard(_model.BuildMap());
+        // While the Settings window is open it sits above the stage; re-rendering the map here would end in
+        // _stage.BringToFront() and steal the top of the z-order from it. Defer the map repaint to the
+        // Settings Closed handler; refreshing a card backdrop (no z-order change) is safe either way.
+        if (_settingsWindow is null && _overlay is { IsOpen: true } && _model is not null)
+            _overlay.SetBoard(_model.BuildMap());
         _stage.RefreshBackdrop();
     }
 
