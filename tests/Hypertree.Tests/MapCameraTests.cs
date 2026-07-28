@@ -69,6 +69,16 @@ public class MapCameraTests
     }
 
     [Fact]
+    public void An_oversized_margin_is_capped_so_the_dead_zone_still_holds()
+    {
+        // Margin (300) larger than half the free space around a 60-tall selection in a 500 viewport would make
+        // the dead zone unsatisfiable. Capped to (500-60)/2 = 220, a centred selection still reads as "inside".
+        // Selection world [260,320], centred → offset -40 puts it at screen [220,280], exactly 220 from each edge.
+        double centred = MapCamera.Axis(offset: -40, framed: true, selLo: 260, selHi: 320, contentLo: Lo, contentHi: Hi, view: View, margin: 300);
+        Assert.Equal(-40, centred, precision: 6); // held: neither edge is closer than the capped margin
+    }
+
+    [Fact]
     public void First_framing_centres_the_selection()
     {
         double result = MapCamera.Axis(offset: 0, framed: false, selLo: 400, selHi: 460, contentLo: Lo, contentHi: Hi, view: View, margin: Margin);

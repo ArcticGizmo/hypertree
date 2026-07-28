@@ -3,13 +3,18 @@ namespace Hypertree.Layout;
 /// <summary>
 /// The shared map camera: a world→screen <b>offset</b> per axis (<c>screen = world + offset</c>) that keeps
 /// the selection in view without moving unless it must. Navigating moves the cursor over a stationary map;
-/// the camera pans — by the minimum needed, leaving one marker of context — only when the selection reaches
-/// the edge, and holds still (a dead zone) while it's comfortably on screen. When the whole map fits an
+/// the camera pans — by the minimum needed, leaving a marker and a half of context — only when the selection
+/// reaches the edge, and holds still (a dead zone) while it's comfortably on screen. When the whole map fits an
 /// axis, that axis is centred and pinned, so the cursor moves within a fixed frame. One instance is shared
 /// by the interactive map and the transient flash, so the two stay in step. See docs/design/scene-camera.md.
 /// </summary>
 public sealed class MapCamera
 {
+    // How much context to keep beyond the selection before the map follows it, in markers (a cell stride
+    // horizontally, a row pitch vertically). Capped per axis to the room around the selection so the dead
+    // zone is always satisfiable — see Axis.
+    private const double EdgeMarginMarkers = 1.5;
+
     private double _offX, _offY;
     private bool _framed;
 
@@ -29,8 +34,8 @@ public sealed class MapCamera
         (double xLo, double xHi) = layout.WorldX();
         (double yLo, double yHi) = layout.WorldY();
 
-        _offX = Axis(_offX, _framed, sel.Left, sel.Right, xLo, xHi, viewW, layout.Metrics.CellStride);
-        _offY = Axis(_offY, _framed, sel.Top, sel.Bottom, yLo, yHi, viewH, layout.Metrics.RowPitch);
+        _offX = Axis(_offX, _framed, sel.Left, sel.Right, xLo, xHi, viewW, layout.Metrics.CellStride * EdgeMarginMarkers);
+        _offY = Axis(_offY, _framed, sel.Top, sel.Bottom, yLo, yHi, viewH, layout.Metrics.RowPitch * EdgeMarginMarkers);
         _framed = true;
     }
 
@@ -38,8 +43,8 @@ public sealed class MapCamera
     /// The per-axis camera maths, pure so it can be reasoned about and tested in isolation. Returns the new
     /// offset given the current one, the selection's span <c>[selLo, selHi]</c>, the content span
     /// <c>[contentLo, contentHi]</c>, the viewport length <paramref name="view"/>, and the follow
-    /// <paramref name="margin"/> (one marker). <paramref name="framed"/> is false only for the first framing
-    /// after a <see cref="Reframe"/>.
+    /// <paramref name="margin"/> (capped here to the room around the selection). <paramref name="framed"/> is
+    /// false only for the first framing after a <see cref="Reframe"/>.
     /// </summary>
     public static double Axis(double offset, bool framed, double selLo, double selHi,
                               double contentLo, double contentHi, double view, double margin)
@@ -50,6 +55,13 @@ public sealed class MapCamera
         // walks it across a stationary, centred map — never a pan.
         if (contentSpan <= view)
             return (view - contentSpan) / 2 - contentLo;
+
+        // Cap the follow margin to the room around the selection. A margin wider than half the free space
+        // would make "keep the selection in view with this much margin either side" impossible, and the
+        // camera would chase the cursor every step instead of holding still; capping degrades it gracefully
+        // to centring the selection when the viewport is that tight.
+        double selSpan = selHi - selLo;
+        margin = Math.Min(margin, Math.Max(0, (view - selSpan) / 2));
 
         // The offset range that keeps the content covering the viewport with no blank gutter at either end.
         // contentSpan > view here, so minOffset < maxOffset.

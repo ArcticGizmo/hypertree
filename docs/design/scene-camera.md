@@ -22,8 +22,8 @@ shared pipeline that replaces all three, so both themes move identically and onl
 - **Moving the selection moves the cursor, not the map.** Arrow-select (or Ctrl+Alt+Arrow
   navigation) walks the blue cursor across a *stationary* map.
 - **The map follows only when it must.** If the selection would land off the screen — or
-  within one marker of the edge — the map pans just enough to keep it in view with a
-  marker of context beyond it. Moving *back* the other way does **not** pan while the
+  within a marker and a half of the edge — the map pans just enough to keep it in view
+  with that much context beyond it. Moving *back* the other way does **not** pan while the
   selection is still comfortably on screen. (A dead-zone / scrolloff camera, with
   hysteresis — the map doesn't lurch back and forth.)
 - **Both axes.** Horizontal (along a timeline) and vertical (dive/surface between
@@ -78,13 +78,15 @@ The painter supplies the numbers the layout needs; the *algorithm* is shared.
 
 State: a world **offset** per axis (`screen = world + offset`). One update rule per axis,
 given the selection's world span `[lo, hi]`, the viewport length `view`, the content span,
-and a `margin` (one marker):
+and a `margin`:
 
 - **Fits:** if the whole content span ≤ `view`, centre it and pin — never follow.
 - **Follow:** otherwise keep `[lo − margin, hi + margin]` inside the viewport by panning the
   *minimum* needed; if it's already inside, **don't move** (the dead zone).
 
-`margin` = `CellStride` horizontally, `RowPitch` vertically. The camera is created once and
+`margin` = **1.5 markers** — `1.5 · CellStride` horizontally, `1.5 · RowPitch` vertically —
+capped per axis to `(view − selectionSpan) / 2` so the dead zone stays satisfiable on a tight
+viewport (beyond that it degrades to centring the selection). The camera is created once and
 updated in place, so the "don't move unless needed" state persists between renders — that's
 the hysteresis.
 

@@ -20,7 +20,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The map no longer slides under you as you move.** Both map themes (board and metro) now
   render through one shared layout + camera, so they behave identically: navigating or
   moving the selection walks the cursor across a **stationary** map, and the map only pans —
-  by the minimum needed, leaving a marker of context — when the selection reaches a screen
+  by the minimum needed, leaving a marker and a half of context — when the selection reaches a screen
   edge. Move back and it holds still. The board and metro views now align the same way (each
   timeline starts at its first desktop, joined by a spine on the left), and the transient
   flash shares the same camera, so opening the map lands exactly where navigation left it.
