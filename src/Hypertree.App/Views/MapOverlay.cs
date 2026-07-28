@@ -592,15 +592,14 @@ internal sealed class MapOverlay : IStageContent
         _col = Math.Clamp(_col, 0, Math.Max(0, TilesInRow(_row) - 1));
     }
 
-    // Recolour the base map so the *selection* is the blue focus tile and the desktop you're actually on
-    // keeps the green "here" marker. BoardView centres on the IsCurrent row, so the selection stays
-    // centred as it moves. (Mirrors the former RenameContent.)
+    // Recolour the base map so the *selection* is the blue focus cell (IsCurrent) and the desktop you're
+    // actually on keeps the green "here" marker (IsHere). The shared renderer reads those to place the blue
+    // ring and the green train; the camera keeps the selection in view as it moves.
     //
-    // Every row's cursor is also re-pointed at the column the selection has in it — the live one for the row
-    // the selection is in, the remembered one for the rest — because BoardView centres each row on its own
-    // cursor. Left on the model's cursors, a row the selection had just walked along would snap back to the
-    // desktop you're actually on the instant the selection stepped off it: step from main's 4th desktop into
-    // a branch and main would slide sideways, leaving the branch apparently hung under main's 1st desktop.
+    // The per-row cursor fields are also re-pointed at the selection's column, but that is now belt-and-braces:
+    // the shared layout aligns every row at its first desktop (column 0), so a row's cursor no longer affects
+    // where it's drawn. It's kept only so the display map stays internally consistent (and a good selection
+    // fallback). See docs/design/scene-camera.md.
     private NavMap BuildDisplayMap()
     {
         bool selMain = RowIsMain(_row);
@@ -632,9 +631,9 @@ internal sealed class MapOverlay : IStageContent
         };
     }
 
-    // The column a row that doesn't hold the selection is drawn centred on: where the selection last sat in
-    // it, else the model's own cursor. Clamped, since a remembered column can outlive a row that has since
-    // lost desktops.
+    // The column the selection resumes at when it steps into a row that doesn't currently hold it: where the
+    // selection last sat in that row, else the model's own cursor. Clamped, since a remembered column can
+    // outlive a row that has since lost desktops.
     private int ColumnIn(int key, int modelCursor, int count)
         => Math.Clamp(_colOfRow.TryGetValue(key, out int col) ? col : modelCursor, 0, Math.Max(0, count - 1));
 
