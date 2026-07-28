@@ -73,6 +73,12 @@ internal static class DesignShot
         SaveMetroLayoutCheck(new NavMap(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1),
                              Path.Combine(outDir, "metro-drag-layout.png"));
 
+        // Metro over a bright, busy fake desktop — the flat dim vs. the shipped centre-weighted vignette, so
+        // the contrast gain under the coloured lines is visible side by side.
+        NavMap backdropMap = new(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1);
+        SaveMetroBackdrop(backdropMap, Path.Combine(outDir, "metro-backdrop-flat.png"), vignette: false);
+        SaveMetroBackdrop(backdropMap, Path.Combine(outDir, "metro-backdrop-vignette.png"), vignette: true);
+
         SaveCards(outDir);
     }
 
@@ -221,6 +227,55 @@ internal static class DesignShot
     // Render the metro-map view of a board to PNG, over the same dark ground the real overlay uses.
     private static void SaveMetro(NavMap map, string path)
         => Save(MetroView.Render(map, ScreenW, ScreenH, 1.0), path);
+
+    // The overlay is semi-transparent over the live desktop, so how the board reads depends on the screen
+    // behind it. This shot fakes a bright, busy desktop, lays the real stage dim (the centre-weighted
+    // vignette) over it, then the metro board — the only way to eyeball that contrast without the tray.
+    private static void SaveMetroBackdrop(NavMap map, string path, bool vignette)
+    {
+        var desktop = new Panel { Width = ScreenW, Height = ScreenH };
+        desktop.Children.Add(new Border
+        {
+            Width = ScreenW, Height = ScreenH,
+            Background = new LinearGradientBrush
+            {
+                StartPoint = RelativePoint.TopLeft, EndPoint = RelativePoint.BottomRight,
+                GradientStops =
+                {
+                    new GradientStop(Color.Parse("#BFD6EE"), 0), new GradientStop(Color.Parse("#F4F7FB"), 0.5),
+                    new GradientStop(Color.Parse("#DAE2EC"), 1),
+                },
+            },
+        });
+        // A scatter of bright "windows", so the board is judged against varied high-luminance content.
+        (double x, double y, double w, double h, string c)[] wins =
+        {
+            (120, 90, 520, 360, "#FFFFFF"), (900, 120, 380, 300, "#EAF2FF"),
+            (300, 520, 560, 300, "#FFF6E6"), (980, 520, 340, 280, "#F0FFF4"),
+            (60, 470, 200, 360, "#FDE8EF"),
+        };
+        var winCanvas = new Canvas { Width = ScreenW, Height = ScreenH };
+        foreach ((double x, double y, double w, double h, string c) in wins)
+        {
+            var win = new Border
+            {
+                Width = w, Height = h, Background = new SolidColorBrush(Color.Parse(c)),
+                CornerRadius = new CornerRadius(8),
+            };
+            Canvas.SetLeft(win, x);
+            Canvas.SetTop(win, y);
+            winCanvas.Children.Add(win);
+        }
+        desktop.Children.Add(winCanvas);
+
+        var dim = new Border
+        {
+            Width = ScreenW, Height = ScreenH,
+            Background = vignette ? StageWindow.BuildDim() : new SolidColorBrush(Color.FromArgb(0x9E, 0x0E, 0x0E, 0x12)),
+        };
+        Control board = MetroView.Render(map, ScreenW, ScreenH, 1.0);
+        Save(new Panel { Children = { desktop, dim, board } }, path);
+    }
 
     private static void Save(NavMap map, string path)
         // Pass delete callbacks so the × badges render in the verification shot.

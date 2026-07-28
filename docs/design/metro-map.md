@@ -81,6 +81,11 @@ theme. So now:
   the stage, map, and move flow all read). The flash takes the style as a `Flash` argument.
 - The interactive map gained **full click/drag parity** (see above), so metro is safe to
   live in as a default, not just a peek.
+- The overlay dim became a **centre-weighted vignette** (`StageWindow.BuildDim`) — darker
+  under the board, fading to the old flat dim at the edges. The host is semi-transparent
+  over the live desktop, and a bright screen behind was washing out the thin metro lines;
+  pooling the dark under the content restores contrast without making the overlay heavier.
+  `metro-backdrop-{flat,vignette}.png` (`--shot`) show it over a faked busy desktop.
 
 ## Open questions (still open)
 

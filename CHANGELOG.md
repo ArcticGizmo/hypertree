@@ -11,6 +11,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Metro-map style**: draw the whole desktop tree as a transit diagram — each timeline a coloured line, each desktop a station, a green "you are here" train marking where you stand. Turn it on in **Settings → Appearance** or flip it with **`v`** on the map; it's a whole-app choice that applies everywhere a board is drawn (the flash, the map, previews, the move flow), and the map stays fully interactive in it (click, switch, drag-rearrange). (See `docs/design/metro-map.md`.)
 
+### Changed
+
+- The overlay's dimmed backdrop now carries a soft **vignette** — darker under the centred board, fading to the usual dim at the edges — so the board (and especially the metro map's thin coloured lines) keeps its contrast over a bright or busy desktop behind it.
+
 ---
 
 ## [v0.2.2] - 2026-07-27

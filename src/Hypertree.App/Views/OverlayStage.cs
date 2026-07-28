@@ -403,7 +403,26 @@ internal sealed class StageWindow : Window
     public event Action? BackgroundPressed;
     public event Action? HostDeactivated;
 
-    private static readonly IBrush DimBg = new SolidColorBrush(Color.FromArgb(0x9E, 0x0E, 0x0E, 0x12));
+    private static readonly IBrush DimBg = BuildDim();
+
+    // The backdrop the board draws over. A soft vignette rather than a flat slab: darker in the centre —
+    // where the board (and especially the metro map's thin coloured lines) sits — fading out to the same
+    // dim it always was at the edges. Since the host is semi-transparent over the live desktop, a busy or
+    // light screen behind used to wash the centre out; pooling the dark under the content fixes the contrast
+    // without making the whole overlay heavier. Radii reach past the corners so the outer field is flat.
+    internal static IBrush BuildDim() => new RadialGradientBrush
+    {
+        Center = new RelativePoint(0.5, 0.5, RelativeUnit.Relative),
+        GradientOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative),
+        RadiusX = new RelativeScalar(0.9, RelativeUnit.Relative),
+        RadiusY = new RelativeScalar(0.9, RelativeUnit.Relative),
+        GradientStops =
+        {
+            new GradientStop(Color.FromArgb(0xDD, 0x07, 0x08, 0x0C), 0.0),  // darker pool under the content
+            new GradientStop(Color.FromArgb(0xBE, 0x0B, 0x0C, 0x10), 0.55),
+            new GradientStop(Color.FromArgb(0x9E, 0x0E, 0x0E, 0x12), 1.0),  // = the previous flat dim, at the edges
+        },
+    };
 
     // Two persistent layers: the map backdrop below, the content view above. They're ContentControls so
     // swapping a layer detaches the previous child cleanly — no double-parenting when a card is re-presented.
