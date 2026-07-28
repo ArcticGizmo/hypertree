@@ -19,6 +19,7 @@ namespace Hypertree.Tests;
 /// <para>Skipped when the executable isn't built (e.g. a Core-only build), rather than failing: the CLI is
 /// Windows-facing and this suite also runs where it may not have been produced.</para>
 /// </remarks>
+[Collection(StatusFileCollection.Name)] // shares the process-global StatusFile.OverrideDirectory — run serially
 public sealed class CliEndToEndTests : IDisposable
 {
     private readonly string _dir;

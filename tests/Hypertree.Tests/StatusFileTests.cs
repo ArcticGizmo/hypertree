@@ -12,6 +12,7 @@ namespace Hypertree.Tests;
 /// Redirected to a temp directory (see <c>StatusFile.OverrideDirectory</c>) so the suite never touches the
 /// real <c>%APPDATA%</c> file, which a running tray owns.
 /// </remarks>
+[Collection(StatusFileCollection.Name)] // shares the process-global StatusFile.OverrideDirectory — run serially
 public sealed class StatusFileTests : IDisposable
 {
     private readonly string _dir;
