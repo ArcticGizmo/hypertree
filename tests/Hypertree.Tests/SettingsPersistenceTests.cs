@@ -58,7 +58,7 @@ public class SettingsPersistenceTests
     [Fact]
     public void Missing_file_yields_defaults()
     {
-        // A fresh store with no file loads defaults rather than throwing (MapStyle defaults to Board).
-        Assert.Equal(MapStyle.Board, StoreInTempDir().Load().MapStyle);
+        // A fresh store with no file loads defaults rather than throwing (MapStyle defaults to ASCII).
+        Assert.Equal(MapStyle.Ascii, StoreInTempDir().Load().MapStyle);
     }
 }

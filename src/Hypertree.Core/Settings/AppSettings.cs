@@ -42,10 +42,11 @@ public sealed class AppSettings
     public bool SweepFromLeadingEdge { get; set; } = true;
 
     /// <summary>How the board is drawn wherever it appears — the flash, the map, card backdrops, previews,
-    /// the move flow. <see cref="MapStyle.Board"/> (default) is the screen-tile layout; <see cref="MapStyle.Metro"/>
-    /// is the transit-diagram "metro map". A whole-app appearance choice, set in Settings → Appearance or by
+    /// the move flow. <see cref="MapStyle.Ascii"/> (default) is the monospace terminal look;
+    /// <see cref="MapStyle.Board"/> is the screen-tile layout and <see cref="MapStyle.Metro"/> the
+    /// transit-diagram "metro map". A whole-app appearance choice, set in Settings → Appearance or by
     /// pressing <c>v</c> on the map.</summary>
-    public MapStyle MapStyle { get; set; } = MapStyle.Board;
+    public MapStyle MapStyle { get; set; } = MapStyle.Ascii;
 
     /// <summary>Reusable branch recipes, offered via the branch card's "Load from template" button so you
     /// don't retype the desktop set each time. Empty by default — you build and delete them in the
