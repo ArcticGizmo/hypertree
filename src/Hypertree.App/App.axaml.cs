@@ -181,7 +181,8 @@ public sealed class App : Application
         _overlay.NewDesktopRequested += PromptNewDesktop;
         _overlay.NewBranchRequested += () => OpenNewBranchDialog(null); // branch card over the map (with in-card "Load from template" when any exist)
         _overlay.MoveWindowsRequested += ToggleMoveWindows; // m — start the move-windows flow (replaces the map)
-        _overlay.FinderRequested += () => OpenSpotlight(); // Ctrl+F — finder pushed over the map; Esc pops back to it
+        _overlay.FinderRequested += () => OpenSpotlight(); // f / Ctrl+F — finder pushed over the map; Esc pops back to it
+        _overlay.CommandPaletteRequested += () => ShowCommandPalette(overCurrent: true); // p — palette over the map; Esc pops back to it
         _overlay.SettingsRequested += OpenSettings;
         _overlay.ViewStyleToggleRequested += ToggleMapStyle; // v — flip board ↔ metro (persisted, app-wide)
 
@@ -776,28 +777,41 @@ public sealed class App : Application
     private void ToggleCommandPalette()
     {
         if (_stage?.Current is MoveContent) return; // don't stack the palette over an active move
-        if (_stage?.Current is PaletteContent) { _stage.Dismiss(); return; } // re-press toggles closed
-        OpenCommandPalette();
+        // Re-press toggles the palette closed — back to the surface it opened over (the map) if there is one,
+        // matching what Esc does, rather than tearing the whole chain down from under it.
+        if (_stage?.Current is PaletteContent)
+        {
+            if (_stage.HasDurableBase) _stage.Back(); else _stage.Dismiss();
+            return;
+        }
+        // Pressed while the map is up, the chord means the same as the map's own "p": push the palette over
+        // the map so back returns there, instead of replacing the map with a fresh root.
+        ShowCommandPalette(overCurrent: _overlay?.IsOpen == true);
     }
 
-    private void OpenCommandPalette()
+    private void OpenCommandPalette() => ShowCommandPalette(overCurrent: false);
+
+    /// <param name="overCurrent">true: push the palette over the current surface (the map), so Esc/back and a
+    /// completed command return to it. false: a fresh root, so a re-press over a half-open chain resets to a
+    /// clean command palette rather than stacking deeper.</param>
+    private void ShowCommandPalette(bool overCurrent)
     {
         if (_model is null) return;
 
         _model.Reconcile(); // drop any externally-deleted desktops so the context board is accurate
 
         // Show the live map behind each command ("blue = you are here"); commands with a distinct target
-        // supply their own board that highlights what they'll act on (green). A fresh root (Summon), so a
-        // re-press over a half-open chain resets to a clean command palette rather than stacking deeper.
+        // supply their own board that highlights what they'll act on (green).
         var items = BuildCommands()
             .Select(c => new PaletteItem(c.Name, c.DisabledReason,
                                          c.DisabledReason is null ? "▸" : null, c.Run,
                                          Preview: c.Preview ?? (() => _model!.BuildMap()),
                                          DisabledReason: c.DisabledReason))
             .ToList();
-        _stage?.Summon(new PaletteContent("Run a command…",
+        var palette = new PaletteContent("Run a command…",
             "↑↓ move · ↵ run · Esc back · blue = you are here", items,
-            clearSearchOnShow: true)); // popping back here (Esc from a command's sub-surface) lands on the full list
+            clearSearchOnShow: true); // popping back here (Esc from a command's sub-surface) lands on the full list
+        if (overCurrent) _stage?.Present(palette); else _stage?.Summon(palette);
     }
 
     // The command registry — real commands reusing existing handlers.

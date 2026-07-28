@@ -9,6 +9,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.3.1] - 2026-07-28
+
+### Added
+
+- **`p` on the map opens the command palette** and **`f`** the finder — bare letters alongside `r`/`n`/`b`/`m`/`v`. Both open over the map, so `Esc` pops back to it.
+
+### Changed
+
+- **`Ctrl+Alt+P` while the map is open now works like `p`**: the palette opens over the map instead of replacing it, so backing out returns you to the map. A second press closes it the way `Esc` does.
+
+---
+
 ## [v0.3.0] - 2026-07-28
 
 ### Added

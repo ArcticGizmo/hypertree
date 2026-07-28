@@ -26,7 +26,8 @@ namespace Hypertree.App.Views;
 /// A shortcut legend in the top-left lists the management actions, each raised as an event for <c>App</c>
 /// (which owns the <see cref="NavigationModel"/> and desktop controller): <b>r</b> rename, <b>Del</b>
 /// delete desktop, <b>Shift+Del</b> delete branch, <b>n</b> new desktop, <b>b</b> new branch, <b>m</b>
-/// move this desktop's windows elsewhere. Because it lives on the persistent stage it survives the desktop
+/// move this desktop's windows elsewhere, <b>f</b> the finder, <b>p</b> the command palette. The last two
+/// open <em>over</em> the map, so Esc pops back to it. Because it lives on the persistent stage it survives the desktop
 /// switches of navigation (the stage is pinned to every desktop). Closes on Esc, a backdrop click on
 /// another monitor, or toggling it off.
 ///
@@ -86,8 +87,10 @@ internal sealed class MapOverlay : IStageContent
     public event Action? NewBranchRequested;
     /// <summary>Start the move-windows flow (m) — relocate this desktop's windows to another.</summary>
     public event Action? MoveWindowsRequested;
-    /// <summary>Ctrl+F — open the finder (jump/create spotlight) from the map.</summary>
+    /// <summary>f / Ctrl+F — open the finder (jump/create spotlight) from the map.</summary>
     public event Action? FinderRequested;
+    /// <summary>p — open the command palette over the map, so Esc pops back here.</summary>
+    public event Action? CommandPaletteRequested;
     /// <summary>The cog icon — open settings.</summary>
     public event Action? SettingsRequested;
     /// <summary>v — flip the whole-app board style (board ↔ metro). App owns the setting: it persists the
@@ -189,7 +192,11 @@ internal sealed class MapOverlay : IStageContent
             case Key.Right: MoveCol(+1); e.Handled = true; break;
             case Key.Up: MoveRow(-1); e.Handled = true; break;
             case Key.Down: MoveRow(+1); e.Handled = true; break;
-            case Key.F when e.KeyModifiers.HasFlag(KeyModifiers.Control): FinderRequested?.Invoke(); e.Handled = true; break;
+            // The management actions are all bare letters while the map has focus, so the two surfaces you
+            // can open from here get one too: f is Ctrl+F, p is the command palette (which Ctrl+Alt+P also
+            // routes here while the map is up, so Esc pops back to the map rather than closing it).
+            case Key.F: FinderRequested?.Invoke(); e.Handled = true; break;
+            case Key.P: CommandPaletteRequested?.Invoke(); e.Handled = true; break;
             case Key.V: ViewStyleToggleRequested?.Invoke(); e.Handled = true; break;
             case Key.R: RenameRequested?.Invoke(CurrentSelection()); e.Handled = true; break;
             case Key.N: NewDesktopRequested?.Invoke(); e.Handled = true; break;
@@ -655,7 +662,8 @@ internal sealed class MapOverlay : IStageContent
         rows.Children.Add(LegendRow("n", "new desktop"));
         rows.Children.Add(LegendRow("b", "new branch"));
         rows.Children.Add(LegendRow("m", "move windows"));
-        rows.Children.Add(LegendRow("Ctrl+F", "find a desktop"));
+        rows.Children.Add(LegendRow("f", "find a desktop"));
+        rows.Children.Add(LegendRow("p", "command palette"));
         rows.Children.Add(LegendRow("v", _stage.MapStyle switch
         {
             MapStyle.Board => "metro view",

@@ -61,8 +61,9 @@ reserves for its own desktop switch.)
 
 ### Finder & command palette
 
-- **`Ctrl+F`** (from the map) opens the finder: type to jump to any desktop, or create one named your query.
+- **`f`** or **`Ctrl+F`** (from the map) opens the finder: type to jump to any desktop, or create one named your query.
 - The command palette (`Ctrl+Alt+P`) gathers everything — jump to a desktop, open the map, manage templates and layouts, reach settings, or quit — each with the live map behind it.
+- **`p`** opens it from the map, and `Ctrl+Alt+P` does the same while the map is up: the palette opens *over* the map, so `Esc` (or another `Ctrl+Alt+P`) pops back to the map rather than closing it.
 
 ### Move windows
 
