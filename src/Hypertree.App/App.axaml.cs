@@ -386,8 +386,9 @@ public sealed class App : Application
         _gestureFrom ??= _desktops.Current;
         _gestureMods = mods;
         // A cold press with "show before moving" on only raises the board — it doesn't move, so it gets a
-        // plain fade rather than a directional wipe (null move below).
-        bool revealOnly = RevealOnly();
+        // plain fade rather than a directional wipe (null move below). Only dive/surface reveal first (see
+        // RevealOnly); a left/right move within the current row goes straight away.
+        bool revealOnly = RevealOnly(action);
         // The wipe plays only when the user has it on AND Windows' "show animations" is on — the OS
         // reduce-motion preference wins.
         bool animate = _settings.AnimateNavigation && WindowFx.SystemAnimationsEnabled();
@@ -425,13 +426,19 @@ public sealed class App : Application
         _hud?.Flash(_model.BuildMap(), mods, move: null, animate: animate, style: _settings.MapStyle);
     }
 
-    // "Show before moving": with the setting on, a nav chord that arrives while the flash is off screen
-    // spends itself raising the flash — you read where you are, then keep holding the modifiers and press
-    // again to actually move. Only the cold press is swallowed; once the board is up (which it stays for
-    // as long as the modifiers are held) every press navigates, so a held run of arrows is uninterrupted.
-    // The map is an always-visible surface of its own, so it never needs the reveal press.
-    private bool RevealOnly() =>
-        _settings.DisplayBeforeMoving && _overlay is not { IsOpen: true } && _hud is { IsVisible: false };
+    // "Show before moving": with the setting on, a dive/surface chord that arrives while the flash is off
+    // screen spends itself raising the flash — you read where you are, then keep holding the modifiers and
+    // press again to actually move. Only the cold press is swallowed; once the board is up (which it stays
+    // for as long as the modifiers are held) every press navigates, so a held run of arrows is uninterrupted.
+    //
+    // It applies only to the vertical moves — diving into a branch or surfacing out — because that's where
+    // the disorientation is: you land among a fresh set of lookalike desktops. Left/right stays within the
+    // row you can already see, so it's not worth the extra press and moves immediately. The map is an
+    // always-visible surface of its own, so it never needs the reveal press.
+    private bool RevealOnly(NavAction action) =>
+        _settings.DisplayBeforeMoving
+        && action is NavAction.Dive or NavAction.Surface
+        && _overlay is not { IsOpen: true } && _hud is { IsVisible: false };
 
     // A double-click / arrow-driven jump from the map: switch to the chosen desktop, record where we
     // came from, then re-home the selection onto it (green + blue rejoin), keeping the map open.

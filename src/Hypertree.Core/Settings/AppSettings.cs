@@ -19,11 +19,12 @@ public sealed class AppSettings
     /// It auto-hides while the cursor is near it so the taskbar underneath stays clickable.</summary>
     public bool ShowTaskbarLabel { get; set; } = true;
 
-    /// <summary>When true, a navigation chord pressed while the flash is <i>not</i> on screen only raises
-    /// the flash — it shows you where you are without moving. The next press (still holding the modifiers,
-    /// so the flash is still up) navigates for real. Off means every press moves immediately. On by
-    /// default: landing somewhere first and reading the board afterwards makes it harder to tell where you
-    /// went. See <c>App.Navigate</c>.</summary>
+    /// <summary>When true, a <b>dive or surface</b> chord (the vertical, branch-changing moves) pressed
+    /// while the flash is <i>not</i> on screen only raises the flash — it shows you where you are without
+    /// moving. The next press (still holding the modifiers, so the flash is still up) navigates for real.
+    /// Left/right moves within a row are unaffected: they always move immediately, since you stay on a row
+    /// you can already see. Off means every press moves immediately. On by default — the disorientation is
+    /// in the vertical jump, where you land among a fresh set of lookalike desktops. See <c>App.RevealOnly</c>.</summary>
     public bool DisplayBeforeMoving { get; set; } = true;
 
     /// <summary>When true, a navigation move slides the flash board in from the direction of travel

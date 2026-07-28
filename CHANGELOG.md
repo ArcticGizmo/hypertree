@@ -14,6 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - The overlay's dimmed backdrop now carries a soft **vignette** — darker under the centred board, fading to the usual dim at the edges — so the board (and especially the metro map's thin coloured lines) keeps its contrast over a bright or busy desktop behind it.
+- **"Show the board before moving" now applies only to diving and surfacing** (the up/down moves between branches), where landing among a fresh set of desktops is disorienting. Moving left/right within a row — which stays in view — now moves immediately instead of costing a reveal press.
 
 ---
 

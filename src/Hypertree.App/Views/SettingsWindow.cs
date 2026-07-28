@@ -134,9 +134,10 @@ internal sealed class SettingsWindow : Window
 
                     Divider(),
                     Title2("Navigation"),
-                    ToggleRow("Show the board before moving", _displayBeforeMoving),
-                    Hint("The first navigation chord only brings the board up so you can see where you are. "
-                         + "Keep the modifiers held and press again to move."),
+                    ToggleRow("Show the board before diving or surfacing", _displayBeforeMoving),
+                    Hint("The first dive or surface (up/down between branches) only brings the board up so you "
+                         + "can see where you are — keep the modifiers held and press again to move. Moving "
+                         + "left/right within a row goes straight away."),
                     ToggleRow("Animate navigation moves", _animateNavigation),
                     Hint("Sweeps a soft gradient across in the direction you moved, echoing the traditional "
                          + "desktop-switch animation. Follows the Windows “Show animations” setting — "

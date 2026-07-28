@@ -37,7 +37,7 @@ them structure and a fast way to move between them.
 - **`Ctrl+Alt+↓` / `Ctrl+Alt+↑`** dive into and surface out of the branch below where you are.
 - **`Ctrl+Alt+←` / `Ctrl+Alt+→`** move along the current row.
 - Each jump **flashes the map** and holds it while you keep the chord down, so you see the move before it fades. Hypertree remembers where you came from and floats it to the top of the jump list, so hopping back is one keystroke.
-- By default the **first press just brings the board up** — you look before you leap. Keep the modifiers held and press again to move. Turn it off in **Settings → Navigation**.
+- By default the **first dive or surface just brings the board up** — you look before you leap into another branch. Keep the modifiers held and press again to move. (Left/right within a row moves straight away — you can already see the row.) Turn it off in **Settings → Navigation**.
 
 (Every shortcut is rebindable — the defaults avoid `Win+Ctrl+Arrow`, which Windows
 reserves for its own desktop switch.)
@@ -48,7 +48,7 @@ reserves for its own desktop switch.)
 
 - Dive / surface / move-left / move-right on `Ctrl+Alt+Arrow`, driving the whole desktop tree from the keyboard.
 - The board flashes on every jump and stays up while the chord is held — a hold-to-keep preview, not a blink.
-- **Show before moving** (on by default): the press that raises the board doesn't also move you, so you get your bearings first; every press after it, while the board is still up, navigates as usual.
+- **Show before moving** (on by default): the dive/surface press that raises the board doesn't also move you, so you get your bearings first before changing branches; every press after it, while the board is still up, navigates as usual. Left/right moves within a row are never delayed.
 - The desktop you came from is remembered and offered first, so returning is instant.
 
 ### The map
