@@ -318,8 +318,11 @@ internal static class MetroView
         bool empty = st.WindowCount == 0;
         bool marked = st.Focused || st.Here;
 
-        Color fill = st.Focused ? Focus : st.Here ? Here : Lerp(ChipBase, lineColour, 0.16);
-        Color textColour = marked ? ChipInk : empty ? Lerp(lineColour, ChipBase, 0.45) : lineColour;
+        // Resting chips are held well back so the bright selected/here chips carry the eye: the text is
+        // darkened most of the way toward the chip base (a hint of the line hue remains) and the count is
+        // dimmer still. The fill stays opaque, so "quiet" never means "hard to read".
+        Color fill = st.Focused ? Focus : st.Here ? Here : Lerp(ChipBase, lineColour, 0.13);
+        Color textColour = marked ? ChipInk : Lerp(lineColour, ChipBase, empty ? 0.64 : 0.48);
 
         var content = new StackPanel
         {
@@ -336,7 +339,7 @@ internal static class MetroView
             {
                 Text = st.WindowCount.ToString(), FontFamily = Mono, FontSize = 10 * s, FontWeight = FontWeight.SemiBold,
                 Foreground = new SolidColorBrush(marked ? Color.FromArgb(0xB4, ChipInk.R, ChipInk.G, ChipInk.B)
-                                                        : Lerp(lineColour, ChipBase, 0.4)),
+                                                        : Lerp(lineColour, ChipBase, 0.58)),
                 VerticalAlignment = VerticalAlignment.Center,
             });
 
@@ -345,9 +348,9 @@ internal static class MetroView
             Background = new SolidColorBrush(fill),
             CornerRadius = new CornerRadius(9 * s), Padding = new Thickness(9 * s, 3 * s), Child = content,
         };
-        if (!marked) // a subtle coloured edge keeps the line identity on the dark resting chip
+        if (!marked) // a faint coloured edge just defines the chip on varied backdrops, without pulling focus
         {
-            chip.BorderBrush = new SolidColorBrush(lineColour) { Opacity = empty ? 0.35 : 0.6 };
+            chip.BorderBrush = new SolidColorBrush(lineColour) { Opacity = empty ? 0.18 : 0.3 };
             chip.BorderThickness = new Thickness(Math.Max(1, s));
         }
         chip.Measure(Size.Infinity);
