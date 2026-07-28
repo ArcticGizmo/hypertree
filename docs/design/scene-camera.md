@@ -125,6 +125,6 @@ is unchanged.
 ## Files
 
 - `src/Hypertree.Core/Layout/{LayoutRect,Scene,SceneMetrics,SceneLayout,MapCamera}.cs` — new.
-- `src/Hypertree.App/Views/Scene/{ISceneRenderer,SceneRenderer,BoardPainter,MetroPainter}.cs` — new.
+- `src/Hypertree.App/Views/Scene/{IScenePainter,SceneRenderer,BoardPainter,MetroPainter,BoardLayout}.cs` — new (BoardLayout moved here from the deleted BoardView).
 - `src/Hypertree.App/Views/{BoardView,MetroView,MapSurface,MapOverlay,HudWindow}.cs` — migrated.
 - `tests/Hypertree.Tests/{SceneLayoutTests,MapCameraTests}.cs` — new.
