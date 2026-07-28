@@ -9,6 +9,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.3.3] - 2026-07-28
+
+### Changed
+
+- **Navigating no longer flashes the desktop you're landing on** — the backdrop goes up before the switch instead of after it, so the destination is never presented uncovered.
+- **The navigation flash fades in and out** instead of snapping on and vanishing in one frame. Independent of "Animate navigation moves", which governs the directional wipe.
+- **Dismissing the board no longer punches the screen back to full brightness** — it eases away, which is what flashed even when you weren't changing desktops.
+- **A held run of moves no longer pulses the backdrop** — the dim stays put once the board is up.
+
+---
+
 ## [v0.3.2] - 2026-07-28
 
 ### Changed

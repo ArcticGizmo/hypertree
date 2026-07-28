@@ -34,6 +34,17 @@ internal sealed class HudWindow : Window
     private readonly DispatcherTimer _poll;
     private HotkeyModifiers _holdMods = HotkeyModifiers.Control | HotkeyModifiers.Alt;
     private int _remaining;
+    // Whether a board is currently on screen. Drives the board's fade: it rises from nothing the first time
+    // a board goes up, and never re-fades while one is already showing. Not the same as IsVisible — Cover()
+    // shows the window with only the dim in it, before there's any board to show.
+    private bool _hasBoard;
+    // Whether the dim is deliberately already up (Cover() raised it ahead of a desktop switch), so the fade
+    // must leave it alone. Tracked as intent rather than read back off _dim.Opacity: a tween can still be
+    // mid-write when the next press lands, and inferring "already covered" from a live animated value read
+    // a half-finished fade as a finished one — which silently disabled the fade on every later appearance.
+    private bool _covered;
+    // The fade-out tween is running (held in _slide like the others; this says which kind it is).
+    private bool _hiding;
 
     // The transition tween (the optional directional animation). At most one runs at a time: each flash
     // rebuilds the board control, so a press landing mid-wipe stops the previous tween before animating the
@@ -42,6 +53,14 @@ internal sealed class HudWindow : Window
     private DispatcherTimer? _slide;
     private const int SlideMs = 260;     // total wipe duration
     private const int SlideTickMs = 15;  // ~66fps tween step
+    // How long the flash takes to fade up when it appears from nothing (dim and board together). Shorter
+    // than the wipe: the point is to take the hard edge off the onset, not to keep you waiting to read the
+    // board. Independent of the wipe — see the two gates on Flash.
+    private const int FadeMs = 170;
+    // And how long it takes to fade back out. Longer than the way in, because this is the transition that
+    // hurts: the board is a dark sheet over the desktop, so dropping it in one frame is a punch of light
+    // straight back to full brightness — the more so the lighter the wallpaper behind it.
+    private const int FadeOutMs = 220;
 
     // The dim backdrop, held as a field so the transition can fade it in (0→full) rather than snap it on —
     // the snap was the most visible part of the motion. Shares the interactive map's vignette (StageWindow's
@@ -62,6 +81,7 @@ internal sealed class HudWindow : Window
         WindowDecorations = WindowDecorations.None;
         WindowStartupLocation = WindowStartupLocation.Manual;
         Background = _dim; // dim backdrop
+        _dim.Opacity = 0;  // resting state: nothing showing (a brush is born opaque, which would snap)
         TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
         CanResize = false;
         ShowInTaskbar = false;
@@ -80,7 +100,80 @@ internal sealed class HudWindow : Window
     private void Poll()
     {
         if (ModifierKeys.ModifiersHeld(_holdMods)) { _remaining = GraceTicks; return; }
-        if (--_remaining <= 0) { _poll.Stop(); IsVisible = false; }
+        if (--_remaining > 0) return;
+        _poll.Stop();
+        FadeOutAndHide();
+    }
+
+    // Ease the whole flash away rather than cutting it. Dropping a dark full-screen sheet in one frame
+    // returns the desktop to full brightness instantly, which reads as a flash every bit as much as a hard
+    // arrival does — and it fires on every disappearance, whether or not a desktop switch was involved.
+    private void FadeOutAndHide()
+    {
+        // Whatever else was animating (a fade-in that hadn't finished, a wipe still travelling) must stop
+        // here: a tween that outlives the hide goes on writing opacities afterwards, and the values it
+        // leaves behind are what the next appearance starts from.
+        _slide?.Stop();
+
+        var content = Content as Control;
+        double dimFrom = _dim.Opacity;
+        double contentFrom = content?.Opacity ?? 1;
+        int total = Math.Max(1, FadeOutMs / SlideTickMs);
+        int tick = 0;
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(SlideTickMs) };
+        timer.Tick += (_, _) =>
+        {
+            double e = EaseOutCubic(Math.Min(1.0, (double)++tick / total));
+            _dim.Opacity = dimFrom * (1 - e);
+            if (content is not null) content.Opacity = contentFrom * (1 - e);
+            if (tick < total) return;
+            timer.Stop();
+            Settle();
+        };
+        _slide = timer;
+        _hiding = true;
+        timer.Start();
+    }
+
+    // Off screen and back to the resting state, so the next appearance starts from nothing.
+    private void Settle()
+    {
+        IsVisible = false;
+        _hasBoard = false;
+        _covered = false;
+        _hiding = false;
+        _dim.Opacity = 0;
+        if (Content is Control c) c.Opacity = 1;
+        _slide = null;
+    }
+
+    /// <summary>
+    /// Put the dim up <b>now</b>, at full strength, without touching the board.
+    /// </summary>
+    /// <remarks>
+    /// Called immediately before a desktop switch. Without it, the switch completes — and Windows presents
+    /// the destination desktop, foreground handover and all — while nothing of ours is covering the screen;
+    /// the flash only went up afterwards. Measured at ~68ms of fully-lit destination desktop per move, which
+    /// is the punch of light people read as "the overlay flashed". Covering first means the switch happens
+    /// behind the dim instead, and all that changes on screen is the (already dimmed) content behind it.
+    ///
+    /// The dim snaps rather than fades here on purpose: a fade that hasn't finished isn't covering anything,
+    /// and waiting for one would put ~150ms of latency on every navigation keystroke. The board still fades
+    /// in behind it — see <see cref="Flash"/> — so the thing you actually read arrives softly.
+    /// </remarks>
+    public void Cover()
+    {
+        // A fade-out caught mid-flight would keep dimming us back down behind the switch.
+        if (_hiding) { _slide?.Stop(); _hiding = false; if (Content is Control c) c.Opacity = 1; }
+        if (!IsVisible) Show();  // realizes the handle so Screens is available
+        CoverPrimary();
+        _dim.Opacity = 1;
+        _covered = true;
+        Topmost = true;
+        BringToTop();
+        // Keep it alive across the switch; Flash re-arms this properly a moment later.
+        if (_remaining <= 0) _remaining = GraceTicks;
+        if (!_poll.IsEnabled) _poll.Start();
     }
 
     protected override void OnOpened(EventArgs e)
@@ -90,17 +183,30 @@ internal sealed class HudWindow : Window
     }
 
     /// <summary>Show the board centred on the primary screen; it stays up while <paramref name="holdMods"/>
-    /// are held (pass <see cref="HotkeyModifiers.None"/> for a non-gesture flash that just times out).
-    /// When <paramref name="animate"/> is set, a directional move plays a soft gradient wipe for
-    /// <paramref name="move"/>; <paramref name="fromLeadingEdge"/> picks which edge it starts on (the edge you
-    /// moved toward, or the opposite one). The board itself is shown at once — only the background (dim + wipe)
-    /// animates. The caller gates <paramref name="animate"/> on the user setting and the OS "show animations"
-    /// preference.</summary>
+    /// are held (pass <see cref="HotkeyModifiers.None"/> for a non-gesture flash that just times out).</summary>
+    /// <remarks>
+    /// Two independent pieces of motion, because they answer different complaints:
+    /// <list type="bullet">
+    /// <item><paramref name="fade"/> — the <b>onset</b>. A board going up where there wasn't one fades in
+    /// rather than snapping to full strength. A press landing on a board that's already showing never
+    /// re-fades (that would pulse the screen once per keystroke of a held run). The dim comes up with it,
+    /// starting from wherever it already is — so a <see cref="Cover"/> that has already raised it for a
+    /// desktop switch is left alone, and a flash with no switch to cover still fades up from nothing.</item>
+    /// <item><paramref name="animate"/> — the <b>travel</b>. A directional <paramref name="move"/> plays a soft
+    /// gradient wipe, starting on the edge <paramref name="fromLeadingEdge"/> selects. This is what the
+    /// "Animate navigation moves" setting governs.</item>
+    /// </list>
+    /// The board only ever fades, never moves. Callers gate both on the OS "show animations" preference, so
+    /// reduce-motion still snaps.
+    /// </remarks>
     public void Flash(NavMap map, HotkeyModifiers holdMods, NavAction? move = null, bool animate = false,
-                      bool fromLeadingEdge = true, MapStyle style = MapStyle.Board)
+                      bool fromLeadingEdge = true, MapStyle style = MapStyle.Board, bool fade = false)
     {
         _holdMods = holdMods;
-        if (!IsVisible) Show();   // realizes the handle so Screens is available
+        // Whether this press puts a board up where there wasn't one, as opposed to updating one that's
+        // already showing. Read before _hasBoard is set below.
+        bool cold = !_hasBoard;
+        if (!IsVisible) Show();   // realizes the handle so Screens is available (Cover may have done this)
         CoverPrimary();           // sets Width/Height to the primary screen (DIPs)
 
         // The flash is transient, so the metro train doesn't pulse here (animate:false) — the wipe below is
@@ -119,9 +225,14 @@ internal sealed class HudWindow : Window
 
         // A press landing mid-wipe replaces the content, so retire the previous tween before it writes
         // stale values onto the now-orphaned controls.
-        _slide?.Stop();
-        if (animate) AnimateIn(board, veil, move, fromLeadingEdge);
-        else _dim.Opacity = 1; // snap: full dim, matching the pre-animation look
+        // Fade only when a board is arriving; wipe only when there's a direction to carry. Either one needs
+        // the tween — with neither, the flash snaps in as it always did.
+        bool fadeIn = fade && cold;
+        _slide?.Stop();  // retires a fade-out as well as a previous fade-in / wipe
+        _hiding = false;
+        if (fadeIn || veil is not null) AnimateIn(board, veil, move, fromLeadingEdge, fadeIn);
+        else { _dim.Opacity = 1; board.Opacity = 1; } // snap: full dim, matching the pre-animation look
+        _hasBoard = true;
         Topmost = true;
         BringToTop();             // the desktop switch can briefly surface the target window over us
 
@@ -129,14 +240,25 @@ internal sealed class HudWindow : Window
         if (!_poll.IsEnabled) _poll.Start();
     }
 
-    // Drive the transition off one tween: the board is shown at once (no fade), the dim fades in behind it,
-    // and the wipe band — when the move has a direction — sweeps from the edge opposite the arrow off the
-    // pressed edge, so the desktop is uncovered in the direction you moved. The background carries the motion;
-    // the map/board does not. A null move (reveal / result flash) just fades the dim up.
-    private void AnimateIn(Control board, Border? veil, NavAction? move, bool fromLeadingEdge)
+    // One tween drives both effects, so they can't drift apart on screen.
+    //
+    // <paramref name="fade"/> — the onset: dim and board rise together from nothing on one ease-out curve, so
+    // the flash arrives as a single soft swell. They share a curve deliberately: fading the board while the dim
+    // was still easing up (or worse, snapping the board in over an undimmed desktop) is what read as a hard
+    // punch of light. Off for a press landing on a flash that's already up — re-fading then would drop the
+    // backdrop to clear and darken it again once per keystroke of a held run, pulsing the whole screen.
+    //
+    // The wipe band, when the move has a direction, sweeps from one edge off the other on its own ease-in-out
+    // curve, uncovering the (already-switched) desktop in the direction you moved. The background carries all
+    // the travel; the board only ever fades, never moves.
+    private void AnimateIn(Control board, Border? veil, NavAction? move, bool fromLeadingEdge, bool fade)
     {
-        board.Opacity = 1; // the board itself no longer animates — it's shown at once; only the background moves
-        _dim.Opacity = 0;
+        board.Opacity = fade ? 0 : 1;
+        // Where the dim starts. Cover() has already put it up for a desktop switch (_covered), so it holds
+        // still and only the board fades; with no switch behind it the dim swells up from nothing alongside
+        // the board. Keyed off intent, never off _dim.Opacity — see the _covered field.
+        double dimFrom = fade && !_covered ? 0 : 1;
+        _dim.Opacity = dimFrom;
 
         TranslateTransform? veilT = null;
         bool horizontal = true;
@@ -149,15 +271,25 @@ internal sealed class HudWindow : Window
             veil.Opacity = 1;
         }
 
-        int total = Math.Max(1, SlideMs / SlideTickMs);
+        int fadeTotal = Math.Max(1, FadeMs / SlideTickMs);
+        int wipeTotal = Math.Max(1, SlideMs / SlideTickMs);
+        // Run for as long as the longer effect needs. The fade is always the shorter of the two, so a wipe
+        // decides the length whenever there is one.
+        int total = veilT is not null ? wipeTotal : fadeTotal;
         int tick = 0;
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(SlideTickMs) };
         timer.Tick += (_, _) =>
         {
-            double e = EaseInOutCubic(Math.Min(1.0, (double)++tick / total));
-            _dim.Opacity = e;
+            ++tick;
+            if (fade)
+            {
+                double rise = EaseOutCubic(Math.Min(1.0, (double)tick / fadeTotal));
+                _dim.Opacity = dimFrom + (1 - dimFrom) * rise; // a covered dim (dimFrom == 1) holds still
+                board.Opacity = rise;
+            }
             if (veilT is not null)
             {
+                double e = EaseInOutCubic(Math.Min(1.0, (double)tick / wipeTotal));
                 double p = start + (end - start) * e;
                 veilT.X = horizontal ? p : 0;
                 veilT.Y = horizontal ? 0 : p;
@@ -165,7 +297,10 @@ internal sealed class HudWindow : Window
             }
             if (tick < total) return;
             timer.Stop();
-            _dim.Opacity = 1; // the veil has swept off-screen; next flash rebuilds content
+            // Settle on the resting values (the next flash rebuilds the content anyway, but a stopped tween
+            // must never leave the board part-faded).
+            _dim.Opacity = 1;
+            board.Opacity = 1;
             if (ReferenceEquals(_slide, timer)) _slide = null;
         };
         _slide = timer;
@@ -224,6 +359,10 @@ internal sealed class HudWindow : Window
     // Ease in and out: slow at both ends, quickest in the middle, so the wipe doesn't lurch off the mark.
     private static double EaseInOutCubic(double t)
         => t < 0.5 ? 4 * t * t * t : 1 - Math.Pow(-2 * t + 2, 3) / 2;
+
+    // Ease out: fastest at the start, settling at the end. Right for the board's fade-up — most of the
+    // opacity arrives early (so the board reads as soon as it's there) without a hard onset.
+    private static double EaseOutCubic(double t) => 1 - Math.Pow(1 - t, 3);
 
     // Re-lift to the top of the always-on-top band. Non-activating, so the flash keeps its
     // no-focus-steal contract even while re-asserting z-order after a desktop switch.

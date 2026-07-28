@@ -402,12 +402,25 @@ public sealed class App : Application
         // plain fade rather than a directional wipe (null move below). Only dive/surface reveal first (see
         // RevealOnly); a left/right move within the current row goes straight away.
         bool revealOnly = RevealOnly(action);
-        // The wipe plays only when the user has it on AND Windows' "show animations" is on — the OS
-        // reduce-motion preference wins.
-        bool animate = _settings.AnimateNavigation && WindowFx.SystemAnimationsEnabled();
+        // Two separate gates. The board fades up whenever the flash appears from nothing — that's about not
+        // punching a lit board onto the desktop, so it isn't the "Animate navigation moves" setting's business
+        // (that setting is the directional wipe, per its own hint). Both still answer to Windows' "show
+        // animations": the OS reduce-motion preference wins either way.
+        bool softMotion = WindowFx.SystemAnimationsEnabled();
+        bool animate = _settings.AnimateNavigation && softMotion;
         bool inMap = _overlay is { IsOpen: true };
+
+        // Cover the screen BEFORE switching. The switch presents the destination desktop the moment it
+        // completes — foreground handover included — so raising the flash afterwards left the desktop fully
+        // lit and uncovered for ~68ms, which is the punch of light that reads as the overlay flashing. With
+        // the dim already up, the switch happens behind it. (The map is its own always-up surface, and a
+        // reveal press doesn't switch at all, so neither needs covering — and a reveal keeps its soft fade.)
+        if (!inMap && !revealOnly) _hud?.Cover();
+
         // Apply reports whether the desktop actually changed: false at a row's edge or when already there.
-        // A move that goes nowhere must not animate — no wipe, just leave the board as is.
+        // A move that goes nowhere must not animate — no wipe, just leave the board as is. (We can't know
+        // that before covering, so a blocked move at a row edge raises the dim without the fade. Harmless:
+        // it's the same board arriving, a beat sooner.)
         bool moved = !revealOnly && _model.Apply(action);
         // In the map, the nav chord switches for real, so the selection follows onto the new desktop
         // (green "here" and blue selection rejoin); in the transient flash, the green outline marks the
@@ -415,10 +428,11 @@ public sealed class App : Application
         if (inMap) _overlay!.SyncToCurrent(_model.BuildMap());
         else
         {
-            // Reveal fades the board in; a real move wipes; a blocked move does neither.
-            bool doAnimate = animate && (revealOnly || moved);
+            // Only a move that actually went somewhere wipes; a reveal press or a blocked move (row edge,
+            // already there) has no direction to carry. The fade is unconditional — every appearance softens.
+            bool doAnimate = animate && moved;
             _hud?.Flash(_model.BuildMap(_gestureFrom), mods, moved ? action : null, doAnimate,
-                        _settings.SweepFromLeadingEdge, _settings.MapStyle);
+                        _settings.SweepFromLeadingEdge, _settings.MapStyle, fade: softMotion);
         }
         StartGesturePoll();
     }
@@ -435,8 +449,9 @@ public sealed class App : Application
         if (_stage?.Current is MoveContent) return;
         if (_overlay is { IsOpen: true }) return;
         _model.AnchorToCurrent(); // show where we stand now, not our stale cursor
-        bool animate = _settings.AnimateNavigation && WindowFx.SystemAnimationsEnabled();
-        _hud?.Flash(_model.BuildMap(), mods, move: null, animate: animate, style: _settings.MapStyle);
+        // A peek has no direction, so there's nothing to wipe — it's pure appearance, and fades up.
+        _hud?.Flash(_model.BuildMap(), mods, move: null, style: _settings.MapStyle,
+                    fade: WindowFx.SystemAnimationsEnabled());
     }
 
     // "Show before moving": with the setting on, a dive/surface chord that arrives while the flash is off
@@ -1258,7 +1273,9 @@ public sealed class App : Application
         if (_model is null) return;
         NavMap map = _model.BuildMap();
         if (_stage is not null && _stage.HasDurableBase) _overlay?.SetBoard(map);
-        else _hud?.Flash(map, HotkeyModifiers.None, style: _settings.MapStyle); // a result flash, not a gesture — just times out
+        // A result flash, not a gesture — just times out. It appears over a bare desktop, so it fades up too.
+        else _hud?.Flash(map, HotkeyModifiers.None, style: _settings.MapStyle,
+                         fade: WindowFx.SystemAnimationsEnabled());
     }
 
     // The product version for the tray header, read from the assembly (set by <Version> in the csproj) so
