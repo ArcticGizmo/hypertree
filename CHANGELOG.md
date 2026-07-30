@@ -9,6 +9,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.3.4] - 2026-07-30
+
+### Changed
+
+- **`n` on the map creates the desktop in the selected row** — the branch you're looking at, not always the main timeline.
+- The new tile lands at the end of that branch, and the selection homes onto it ready to rename.
+- A branch desktop takes the branch's `branch · name` prefix in Windows; its tile keeps the bare name.
+
+---
+
 ## [v0.3.3] - 2026-07-28
 
 ### Changed

@@ -296,6 +296,44 @@ public class NavigationModelTests
         Assert.Equal(new[] { "feat-1", "hotfix", "feat-2" }, map.Branches.Select(g => g.Name));
     }
 
+    // ── AddDesktopToBranch: "new desktop" lands in the row you're looking at ─────────
+
+    [Fact]
+    public void AddDesktopToBranch_appends_to_that_branch_and_keeps_it_off_main()
+    {
+        var (m, c) = Pivot();          // feat-1 = a,b,c (above main); feat-2 = x,y (below)
+        int mainBefore = m.BuildMap().TopRow.Count;
+
+        DesktopId id = c.Create("feat-2 · z"); // App creates the OS desktop, then records where it belongs
+        Assert.Equal(2, m.AddDesktopToBranch(1, new DesktopRef(id, "z")));
+
+        NavMap map = m.BuildMap();
+        Assert.Equal(new[] { "x", "y", "z" }, map.Branches[1].Desktops.Select(d => d.Label));
+        Assert.Equal(mainBefore, map.TopRow.Count); // claimed by a branch, so it never shows up on main
+        Assert.Equal(1, map.TopPosition);           // structure otherwise untouched
+    }
+
+    [Fact]
+    public void AddDesktopToBranch_does_not_switch_or_move_the_resume_point()
+    {
+        var (m, c) = Pivot();
+        m.Apply(NavAction.Dive);       // ↓ into feat-2, on x
+        c.Switches.Clear();
+
+        DesktopId id = c.Create("feat-2 · z");
+        m.AddDesktopToBranch(1, new DesktopRef(id, "z"));
+
+        Assert.Empty(c.Switches);                        // creating never takes you there
+        Assert.Equal((1, 0), m.CurrentBranchDesktop);    // still on x
+    }
+
+    [Fact]
+    public void AddDesktopToBranch_rejects_a_branch_that_is_gone()
+    {
+        var (m, c) = Pivot();
+        Assert.Null(m.AddDesktopToBranch(2, new DesktopRef(c.Create("orphan"), "z"))); // only 0 and 1 exist
+    }
+
     // ── Click-to-navigate ────────────────────────────────────────────────────────
 
     [Fact]

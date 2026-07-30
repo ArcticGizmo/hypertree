@@ -72,8 +72,16 @@ internal sealed class FakeDesktopController : IDesktopController
         for (int i = 0; i < _desktops.Count; i++) _desktops[i] = _desktops[i] with { Index = i };
     }
 
+    /// <summary>Append a desktop like the shell does. The model never creates (App does), but a test that
+    /// exercises "new desktop" needs the created desktop to be live in <see cref="List"/> afterwards.</summary>
+    public DesktopId Create(string name)
+    {
+        var id = new DesktopId(Guid.NewGuid());
+        _desktops.Add(new DesktopInfo(id, name, _desktops.Count));
+        return id;
+    }
+
     // Not exercised by the navigation model — the fake only needs Current + SwitchTo + Remove.
-    public DesktopId Create(string name) => throw new NotSupportedException();
     public void Rename(DesktopId id, string name) => throw new NotSupportedException();
     public string GetName(DesktopId id) => _desktops.First(d => d.Id == id).Name;
     public void MoveWindowToDesktop(nint hwnd, DesktopId id) => Moves.Add((hwnd, id));

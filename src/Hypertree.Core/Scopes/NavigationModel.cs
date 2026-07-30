@@ -358,6 +358,26 @@ public sealed class NavigationModel
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// Append a freshly created desktop to the branch at <paramref name="branchIndex"/> — "new desktop"
+    /// while the map's selection is inside a branch lands in <em>that</em> branch rather than on main. The
+    /// caller creates (and names) the OS desktop; this only records which branch claims it, and
+    /// <see cref="SyncTopRow"/> then keeps it off the main timeline, since main is every OS desktop no
+    /// branch has claimed. The branch's resume point stays where it was — creating doesn't switch.
+    /// Returns its index within the branch, or null when there's no such branch (it may have dissolved
+    /// while the prompt was open), in which case nothing was recorded and the desktop is still main's.
+    /// </summary>
+    public int? AddDesktopToBranch(int branchIndex, DesktopRef desktop)
+    {
+        if (branchIndex < 0 || branchIndex >= _branches.Count) return null;
+        Branch g = _branches[branchIndex];
+        g.InsertDesktop(g.Count, desktop);
+        SyncTopRow();
+        Save();
+        Changed?.Invoke();
+        return g.Count - 1;
+    }
+
     // ── Reordering (map: Shift+arrows / drag) ─────────────────────────────────────
 
     /// <summary>
@@ -560,6 +580,10 @@ public sealed class NavigationModel
            && desktopIndex >= 0 && desktopIndex < _branches[branchIndex].Count
             ? (_branches[branchIndex].Desktops[desktopIndex].Id, _branches[branchIndex].Desktops[desktopIndex].Label)
             : null;
+
+    /// <summary>The name of the branch at <paramref name="index"/>, or null when there's no such branch.</summary>
+    public string? BranchNameAt(int index)
+        => index >= 0 && index < _branches.Count ? _branches[index].Name : null;
 
     /// <summary>
     /// Detach a desktop from a branch so the caller can destroy it. Returns the id (null if invalid).

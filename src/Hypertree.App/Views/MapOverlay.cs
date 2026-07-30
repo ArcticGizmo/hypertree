@@ -25,7 +25,7 @@ namespace Hypertree.App.Views;
 ///
 /// A shortcut legend in the top-left lists the management actions, each raised as an event for <c>App</c>
 /// (which owns the <see cref="NavigationModel"/> and desktop controller): <b>r</b> rename, <b>Del</b>
-/// delete desktop, <b>Shift+Del</b> delete branch, <b>n</b> new desktop, <b>b</b> new branch, <b>m</b>
+/// delete desktop, <b>Shift+Del</b> delete branch, <b>n</b> new desktop in the selected row, <b>b</b> new branch, <b>m</b>
 /// move this desktop's windows elsewhere, <b>f</b> the finder, <b>p</b> the command palette. The last two
 /// open <em>over</em> the map, so Esc pops back to it. Because it lives on the persistent stage it survives the desktop
 /// switches of navigation (the stage is pinned to every desktop). Closes on Esc, a backdrop click on
@@ -82,8 +82,9 @@ internal sealed class MapOverlay : IStageContent
     public event Action<DesktopSelection, DesktopSelection>? MoveDesktopRequested;
     /// <summary>Rename the selected desktop (r).</summary>
     public event Action<DesktopSelection>? RenameRequested;
-    /// <summary>Create a new desktop (n) / a new branch (b).</summary>
-    public event Action? NewDesktopRequested;
+    /// <summary>Create a new desktop (n) — in the selected row, so it lands in the branch you're looking at
+    /// (or on main when that's what's selected) — / a new branch (b).</summary>
+    public event Action<DesktopSelection>? NewDesktopRequested;
     public event Action? NewBranchRequested;
     /// <summary>Start the move-windows flow (m) — relocate this desktop's windows to another.</summary>
     public event Action? MoveWindowsRequested;
@@ -199,7 +200,7 @@ internal sealed class MapOverlay : IStageContent
             case Key.P: CommandPaletteRequested?.Invoke(); e.Handled = true; break;
             case Key.V: ViewStyleToggleRequested?.Invoke(); e.Handled = true; break;
             case Key.R: RenameRequested?.Invoke(CurrentSelection()); e.Handled = true; break;
-            case Key.N: NewDesktopRequested?.Invoke(); e.Handled = true; break;
+            case Key.N: NewDesktopRequested?.Invoke(CurrentSelection()); e.Handled = true; break;
             case Key.B: NewBranchRequested?.Invoke(); e.Handled = true; break;
             case Key.M: MoveWindowsRequested?.Invoke(); e.Handled = true; break;
             case Key.Delete:
@@ -659,7 +660,7 @@ internal sealed class MapOverlay : IStageContent
         rows.Children.Add(LegendRow("r", "rename desktop"));
         rows.Children.Add(LegendRow("Del", "delete desktop"));
         rows.Children.Add(LegendRow("Shift+Del", "delete branch"));
-        rows.Children.Add(LegendRow("n", "new desktop"));
+        rows.Children.Add(LegendRow("n", "new desktop in row"));
         rows.Children.Add(LegendRow("b", "new branch"));
         rows.Children.Add(LegendRow("m", "move windows"));
         rows.Children.Add(LegendRow("f", "find a desktop"));

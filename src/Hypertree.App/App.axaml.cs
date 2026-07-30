@@ -658,22 +658,53 @@ public sealed class App : Application
         _overlay.Select(new DesktopSelection(slot.onMain, slot.branchIndex, slot.desktopIndex));
     }
 
-    // n on the map: prompt for a name, create a new main-timeline desktop (no switch — the manage surface
-    // stays where you are), then home the selection onto it so you can rename/act on it immediately.
-    private void PromptNewDesktop()
+    // n on the map: prompt for a name, create a new desktop at the end of the selected row (no switch — the
+    // manage surface stays where you are), then home the selection onto it so you can rename/act on it
+    // immediately. The row is the point: pressing n inside a branch grows *that* branch, which is where you
+    // were already looking, rather than dropping the desktop onto main for you to drag back up.
+    private void PromptNewDesktop(DesktopSelection sel)
     {
         if (_model is null || _desktops is null) return;
 
+        // Resolved before the prompt opens, so the card can say where the desktop will land.
+        string? branch = sel.OnMain ? null : _model.BranchNameAt(sel.BranchIndex);
+
         _stage?.Present(new PromptContent("New desktop",
-            "Create a new desktop on the main timeline. You stay on the current desktop.",
+            $"Create a new desktop on {(branch is null ? "the main timeline" : $"branch “{branch}”")}. " +
+            "You stay on the current desktop.",
             "desktop name (e.g. email)",
             name =>
             {
-                _desktops.Create(name); // a main-timeline desktop is the user's own — not tracked in _created
-                _model.SyncTopRow();    // picks up the new desktop (appended to the top row)
-                NavMap map = _model.BuildMap();
-                _overlay?.SetBoard(map);
-                _overlay?.Select(new DesktopSelection(true, -1, map.TopRow.Count - 1)); // home to the just-created desktop
+                if (branch is null)
+                {
+                    _desktops.Create(name); // a main-timeline desktop is the user's own — not tracked in _created
+                    _model.SyncTopRow();    // picks up the new desktop (appended to the top row)
+                    NavMap map = _model.BuildMap();
+                    _overlay?.SetBoard(map);
+                    _overlay?.Select(new DesktopSelection(true, -1, map.TopRow.Count - 1)); // home to the just-created desktop
+                    return;
+                }
+
+                // In a branch: the OS name carries the branch prefix (as branch creation does) while the tile
+                // keeps the bare label, and it's tracked in _created so teardown can clean it up with the rest
+                // of the branch.
+                DesktopId id = _desktops.Create($"{branch} · {name}");
+                _created.Add(id.Value);
+                if (_model.AddDesktopToBranch(sel.BranchIndex, new DesktopRef(id, name)) is { } at)
+                {
+                    _overlay?.SetBoard(_model.BuildMap());
+                    _overlay?.Select(new DesktopSelection(false, sel.BranchIndex, at));
+                }
+                else
+                {
+                    // The branch went away while the prompt was open (deleted, or dissolved when its last
+                    // desktop moved out). The desktop exists, so let it show up on main rather than stranding it.
+                    _created.Remove(id.Value);
+                    _model.SyncTopRow();
+                    NavMap map = _model.BuildMap();
+                    _overlay?.SetBoard(map);
+                    _overlay?.Select(new DesktopSelection(true, -1, map.TopRow.Count - 1));
+                }
             },
             confirmLabel: "Create"));
     }
