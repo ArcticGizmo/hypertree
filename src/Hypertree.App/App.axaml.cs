@@ -77,6 +77,10 @@ public sealed class App : Application
     // "Last visited" = the desktop you came from, committed when a navigation completes (Ctrl+Alt
     // released) or on a discrete jump. Surfaced first in the jump palette so you can hop back.
     private DesktopId? _lastVisited;
+    // The breadcrumb trail those same commits feed: one crumb per completed transaction, never the steps
+    // in between. Ctrl+Alt+A / Ctrl+Alt+S walk it back and forward (StepHistory), Ctrl+Alt+Q flips
+    // between its two newest entries (ToggleHistory); the map shows it top-right.
+    private readonly NavHistory _history = new();
     private DesktopId? _gestureFrom; // where the in-progress keyboard gesture started
     private HotkeyModifiers _gestureMods; // the modifiers of the in-progress gesture's chord (watched for release)
     private DispatcherTimer? _gesturePoll;
@@ -188,8 +192,8 @@ public sealed class App : Application
         _overlay.MoveWindowsRequested += ToggleMoveWindows; // m — start the move-windows flow (replaces the map)
         _overlay.FinderRequested += () => OpenSpotlight(); // f / Ctrl+F — finder pushed over the map; Esc pops back to it
         _overlay.CommandPaletteRequested += () => ShowCommandPalette(overCurrent: true); // p — palette over the map; Esc pops back to it
-        _overlay.SettingsRequested += OpenSettings;
         _overlay.ViewStyleToggleRequested += ToggleMapStyle; // v — flip board ↔ metro (persisted, app-wide)
+        _overlay.HistoryProvider = BuildHistoryCrumbs; // the top-right breadcrumb panel reads the trail live
 
         _stage.Prewarm(); // size the overlay host now, so the first summon doesn't render at the top-left then jump
 
@@ -307,7 +311,7 @@ public sealed class App : Application
 
         // Same bookkeeping a jump from the map does, so "last visited" and the pill stay honest about a
         // move that came from outside.
-        if (_desktops.Current != from) _lastVisited = from;
+        RecordVisit(from);
         _status?.PublishNow(); // the caller may read the file immediately; don't make it wait out the debounce
         return ControlResponse.Success(landed);
     }
@@ -366,6 +370,9 @@ public sealed class App : Application
         HotkeyCommand.OpenMap        => ToggleMap,
         HotkeyCommand.MoveWindows    => ToggleMoveWindows, // no default chord; only a user's kept rebinding fires this
         HotkeyCommand.Peek           => () => Peek(mods),
+        HotkeyCommand.UndoNav        => () => StepHistory(back: true, mods),
+        HotkeyCommand.RedoNav        => () => StepHistory(back: false, mods),
+        HotkeyCommand.ToggleNav      => () => ToggleHistory(mods),
         _ when NavCommands.TryGetValue(cmd, out NavAction action) => () => Navigate(action, mods),
         _ => () => { },
     };
@@ -475,7 +482,7 @@ public sealed class App : Application
         if (_desktops is null || _model is null) return;
         DesktopId from = _desktops.Current;
         doJump();
-        if (_desktops.Current != from) _lastVisited = from;
+        RecordVisit(from);
         if (_overlay is { IsOpen: true }) _overlay.SyncToCurrent(_model.BuildMap());
     }
 
@@ -490,13 +497,102 @@ public sealed class App : Application
     }
 
     // The gesture is over once Ctrl+Alt is released: if we actually moved, the desktop we started on
-    // becomes "last visited".
+    // becomes "last visited" and the whole gesture lands on the trail as one crumb — the transaction's
+    // end point, not every desktop it stepped through.
     private void CompleteGesture()
     {
         _gesturePoll?.Stop();
-        if (_gestureFrom is { } from && _desktops is not null && _desktops.Current != from)
-            _lastVisited = from;
+        if (_gestureFrom is { } from) RecordVisit(from);
         _gestureFrom = null;
+    }
+
+    // ── Navigation history (breadcrumb trail · Ctrl+Alt+A back / S forward / Q flip) ──
+
+    // One navigation transaction ended: we set out from `from` and settled wherever the OS now says.
+    // A no-op when we ended up back where we started. This is the ONLY place the trail is written, so
+    // every crumb is a transaction's end point — intermediate steps and undo/redo moves never land on it.
+    private void RecordVisit(DesktopId from)
+    {
+        if (_desktops is null || _desktops.Current == from) return;
+        _lastVisited = from;
+        _history.Record(from, _desktops.Current);
+        RefreshOverlay(); // the map's history panel shows the new crumb without waiting for the next render
+    }
+
+    // Walk the trail: back to the previous transaction's end point, or forward again. The trail itself is
+    // not rewritten — only a real navigation does that (truncating the forward tail; see NavHistory.Record).
+    // <paramref name="mods"/> is the chord's modifier layer, so the flash holds while it's held, exactly
+    // like a navigation keystroke.
+    private void StepHistory(bool back, HotkeyModifiers mods)
+    {
+        if (PrepareHistoryJump() is not { } cur) return;
+
+        DesktopId? target;
+        if (back && _history.Current is { } tip && tip != cur)
+        {
+            // We've wandered off the trail (an external switch, or a gesture still in flight) — "back"
+            // first returns to where the trail stands, without consuming an undo step.
+            target = tip;
+        }
+        else
+        {
+            target = back ? _history.Undo() : _history.Redo();
+            // Pruning can leave the neighbouring entry equal to where we already are — step past it.
+            while (target is { } same && same == cur) target = back ? _history.Undo() : _history.Redo();
+        }
+        JumpAlongTrail(target, cur, mods);
+    }
+
+    // Ctrl+Alt+Q — bounce between the trail's two newest entries (the alt-tab of desktops): press to hop
+    // to the other one, press again to hop back, for ever. NavHistory.Toggle picks the target and parks
+    // the cursor on it, so the map's panel follows and a real navigation branches from where the hop left you.
+    private void ToggleHistory(HotkeyModifiers mods)
+    {
+        if (PrepareHistoryJump() is not { } cur) return;
+        JumpAlongTrail(_history.Toggle(cur), cur, mods);
+    }
+
+    // Shared guard + freshen for every history jump. Work against the live layout: drop desktops deleted
+    // behind our back from both the model and the trail. Returns where we stand, or null when a history
+    // jump can't run right now (still starting up, or the move flow owns navigation).
+    private DesktopId? PrepareHistoryJump()
+    {
+        if (_model is null || _desktops is null) return null;
+        if (_stage?.Current is MoveContent) return null;
+        _model.Reconcile();
+        _history.Prune(id => _model.Locate(id) is not null);
+        return _desktops.Current;
+    }
+
+    // Switch to a desktop the trail picked, presenting it like a navigation: the open map follows the
+    // switch; otherwise the board flashes with the origin marked green. No wipe — a history jump has no
+    // row/column direction to carry. A null / untracked target is a quiet no-op.
+    private void JumpAlongTrail(DesktopId? target, DesktopId cur, HotkeyModifiers mods)
+    {
+        if (_model is null || target is not { } id || _model.Locate(id) is not { } at) return;
+
+        if (at.onMain) _model.GoToTop(at.desktopIndex);
+        else _model.GoToBranchDesktop(at.branchIndex, at.desktopIndex);
+
+        if (_overlay is { IsOpen: true }) _overlay.SyncToCurrent(_model.BuildMap());
+        else _hud?.Flash(_model.BuildMap(cur), mods, move: null, style: _settings.MapStyle,
+                         fade: WindowFx.SystemAnimationsEnabled());
+    }
+
+    // The history panel's rows (newest last): each crumb's display label — branch-qualified, resolved
+    // fresh so renames show — with the cursor's entry marked and the redo tail flagged.
+    private IReadOnlyList<HistoryCrumb> BuildHistoryCrumbs()
+    {
+        if (_model is null) return Array.Empty<HistoryCrumb>();
+        _history.Prune(id => _model.Locate(id) is not null); // never show ghosts of deleted desktops
+        var crumbs = new List<HistoryCrumb>(_history.Entries.Count);
+        for (int i = 0; i < _history.Entries.Count; i++)
+        {
+            (string? branch, string label) = _model.Describe(_history.Entries[i]);
+            crumbs.Add(new HistoryCrumb(branch is null ? label : $"{branch} · {label}",
+                                        IsCurrent: i == _history.Cursor, IsAhead: i > _history.Cursor));
+        }
+        return crumbs;
     }
 
     // A discrete jump from the spotlight palette: switch, record where we came from, then close the overlay
@@ -506,7 +602,7 @@ public sealed class App : Application
         if (_desktops is null) return;
         DesktopId from = _desktops.Current;
         doJump();
-        if (_desktops.Current != from) _lastVisited = from;
+        RecordVisit(from);
         _stage?.Dismiss();
     }
 
@@ -812,7 +908,7 @@ public sealed class App : Application
         _model.SyncTopRow();
         _desktops.SwitchTo(id);
         _model.Resync(); // land the model on the freshly-created desktop
-        if (_desktops.Current != from) _lastVisited = from;
+        RecordVisit(from);
         _stage?.Dismiss(); // decisive: you're now on the new desktop, so close the overlay
     }
 

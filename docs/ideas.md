@@ -46,12 +46,6 @@ The named-pipe protocol and exit codes are already there — lean into it.
 
 ## Fun / silly bucket 🎈
 
-- **Minimap "you are here" as a metro map.** Render the desktop tree like a subway
-  diagram — branches as coloured lines, your position a blinking train. Fits the "4D
-  chess" branding perfectly and would be genuinely gorgeous.
-  → **Built** on the `metro-map` branch: a persisted appearance setting (Settings →
-  Appearance, or `v` on the map) that applies to every board surface, with a fully
-  interactive map. See [`docs/design/metro-map.md`](design/metro-map.md).
 - **Sound design.** A subtle *dive* whoosh (descending) and *surface* pop (ascending)
   on the vertical axis. Optional, off by default, but spatial audio reinforces the
   depth metaphor better than any HUD.

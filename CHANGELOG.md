@@ -9,6 +9,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.3.6] - 2026-07-30
+
+### Added
+
+- **Navigation history** — `Ctrl+Alt+A` / `Ctrl+Alt+S` step back and forward through the desktops your navigation landed on. One crumb per completed gesture or jump, not every step in between.
+- `Ctrl+Alt+Q` bounces between your two most recent desktops — press to hop over, press again to hop back.
+- All three chords are rebindable in Settings.
+- The map shows the trail top-right as a small history queue: the entry you're standing on highlighted, entries you've stepped back past dimmed.
+
+### Removed
+
+- The settings cog on the map — settings stay reachable from the tray menu and the command palette.
+
+---
+
 ## [v0.3.5] - 2026-07-30
 
 ### Added

@@ -19,6 +19,12 @@ public enum HotkeyCommand
     // the map), but a user who deliberately rebound it still has that override in settings.json, so the
     // member must stay for those bindings to deserialize and register. See Hotkeys.Defaults / ActionFor.
     MoveWindows,
+    // Walk the navigation breadcrumb trail (see NavHistory): back to the previous desktop a completed
+    // navigation left you on, and forward again.
+    UndoNav,
+    RedoNav,
+    // Flip between the trail's two newest entries — the alt-tab of desktops. See NavHistory.Toggle.
+    ToggleNav,
 }
 
 /// <summary>A modifier combination plus a trigger key — the shape a global hotkey registers.</summary>
@@ -50,6 +56,7 @@ public static class Hotkeys
     public static readonly IReadOnlyList<HotkeyCommand> Order = new[]
     {
         HotkeyCommand.Dive, HotkeyCommand.Surface, HotkeyCommand.MoveLeft, HotkeyCommand.MoveRight,
+        HotkeyCommand.UndoNav, HotkeyCommand.RedoNav, HotkeyCommand.ToggleNav,
         HotkeyCommand.Peek, HotkeyCommand.CommandPalette, HotkeyCommand.OpenMap,
     };
 
@@ -63,6 +70,9 @@ public static class Hotkeys
             [HotkeyCommand.Surface]        = new(NavMods, HotkeyKey.ArrowUp),
             [HotkeyCommand.MoveLeft]       = new(NavMods, HotkeyKey.ArrowLeft),
             [HotkeyCommand.MoveRight]      = new(NavMods, HotkeyKey.ArrowRight),
+            [HotkeyCommand.UndoNav]        = new(NavMods, HotkeyKey.A),
+            [HotkeyCommand.RedoNav]        = new(NavMods, HotkeyKey.S),
+            [HotkeyCommand.ToggleNav]      = new(NavMods, HotkeyKey.Q),
             [HotkeyCommand.Peek]           = new(NavMods, HotkeyKey.Space),
             [HotkeyCommand.CommandPalette] = new(NavMods, HotkeyKey.P),
             [HotkeyCommand.OpenMap]        = new(NavMods, HotkeyKey.M),
@@ -76,6 +86,9 @@ public static class Hotkeys
         HotkeyCommand.Surface        => "Surface (up)",
         HotkeyCommand.MoveLeft       => "Move left",
         HotkeyCommand.MoveRight      => "Move right",
+        HotkeyCommand.UndoNav        => "Back (history)",
+        HotkeyCommand.RedoNav        => "Forward (history)",
+        HotkeyCommand.ToggleNav      => "Back & forth (history)",
         HotkeyCommand.Peek           => "Peek at the board",
         HotkeyCommand.CommandPalette => "Command palette",
         HotkeyCommand.OpenMap        => "Open map",

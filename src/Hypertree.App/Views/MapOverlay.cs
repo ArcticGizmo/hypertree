@@ -46,7 +46,6 @@ internal sealed class MapOverlay : IStageContent
     private static readonly IBrush Fg = new SolidColorBrush(Color.Parse("#E8EDF5"));
     private static readonly IBrush FgDim = new SolidColorBrush(Color.Parse("#9AA6B8"));
     private static readonly IBrush Accent = new SolidColorBrush(Color.Parse("#6EA8FF"));
-    private static readonly Color BtnBg = Color.Parse("#2A3444"), BtnBgHover = Color.Parse("#37455B"), BtnBorder = Color.Parse("#3C4A5E");
     private static readonly Color LegendBg = Color.FromArgb(0xC8, 0x14, 0x19, 0x22);
     private static readonly Color KeyCapBg = Color.FromArgb(0xFF, 0x22, 0x2C, 0x3A);
     private static readonly Color DragScrim = Color.FromArgb(0x9E, 0x0E, 0x12, 0x1A);
@@ -92,8 +91,6 @@ internal sealed class MapOverlay : IStageContent
     public event Action? FinderRequested;
     /// <summary>p — open the command palette over the map, so Esc pops back here.</summary>
     public event Action? CommandPaletteRequested;
-    /// <summary>The cog icon — open settings.</summary>
-    public event Action? SettingsRequested;
     /// <summary>v — flip the whole-app board style (board ↔ metro). App owns the setting: it persists the
     /// change and pushes the new style back onto the stage, so every surface follows, not just this map.</summary>
     public event Action? ViewStyleToggleRequested;
@@ -111,6 +108,10 @@ internal sealed class MapOverlay : IStageContent
     }
 
     public bool IsOpen => _stage.Current == this;
+
+    /// <summary>Supplies the breadcrumb trail for the top-right history panel (owned by App, which holds
+    /// the <c>NavHistory</c>). Null / empty hides the panel.</summary>
+    public Func<IReadOnlyList<HistoryCrumb>>? HistoryProvider { get; set; }
 
     /// <summary>The desktop the map currently has selected (for App: e.g. where a new branch should attach).</summary>
     public DesktopSelection Selection => CurrentSelection();
@@ -569,7 +570,7 @@ internal sealed class MapOverlay : IStageContent
         _root.Children.Clear();
         _root.Children.Add(board);
         _root.Children.Add(BuildLegend());
-        _root.Children.Add(BuildCog());
+        if (BuildHistory() is { } history) _root.Children.Add(history);
         _root.Children.Add(_dragLayer); // topmost: drag feedback draws over the board and the legend
         RenderDragLayer();
 
@@ -721,27 +722,76 @@ internal sealed class MapOverlay : IStageContent
         return grid;
     }
 
-    private Control BuildCog()
+    // ── History queue (top-right) ──────────────────────────────────────────────────
+
+    private const int HistoryShown = 8; // the trail can be long; the panel shows its newest end
+
+    // The breadcrumb trail, newest at the bottom: where navigation has taken you, with the cursor's
+    // entry accented (that's where undo/redo currently stands) and the redo tail — entries undone past —
+    // dimmed. Purely informative: the history chords drive it (Ctrl+Alt + A/S/Q), the panel never
+    // navigates. Null (panel hidden) until there's a trail to show.
+    private Control? BuildHistory()
     {
-        var cog = new Border
+        IReadOnlyList<HistoryCrumb> crumbs = HistoryProvider?.Invoke() ?? Array.Empty<HistoryCrumb>();
+        if (crumbs.Count == 0) return null;
+
+        var rows = new StackPanel { Spacing = 5 };
+        rows.Children.Add(new TextBlock
         {
-            Width = 34, Height = 34, CornerRadius = new CornerRadius(17),
-            Background = new SolidColorBrush(BtnBg), BorderBrush = new SolidColorBrush(BtnBorder),
-            BorderThickness = new Thickness(1), Cursor = new Cursor(StandardCursorType.Hand),
-            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(0, 20, 24, 0),
-            Child = new TextBlock
+            Text = "History", FontSize = 13, FontWeight = FontWeight.SemiBold, Foreground = Fg,
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+
+        int first = Math.Max(0, crumbs.Count - HistoryShown);
+        if (first > 0)
+            rows.Children.Add(new TextBlock { Text = $"… {first} earlier", FontSize = 10, Foreground = FgDim });
+        for (int i = first; i < crumbs.Count; i++)
+        {
+            HistoryCrumb c = crumbs[i];
+            var marker = new TextBlock
             {
-                Text = "⚙", FontSize = 17, Foreground = Fg,
-                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-            },
+                Text = c.IsCurrent ? "●" : "○", FontSize = 9,
+                Foreground = c.IsCurrent ? Accent : FgDim,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            var label = new TextBlock
+            {
+                Text = c.Label, FontSize = 12,
+                Foreground = c.IsCurrent ? Fg : FgDim,
+                FontWeight = c.IsCurrent ? FontWeight.SemiBold : FontWeight.Normal,
+                // The redo tail (entries undone past) reads as "ahead of you" — faded, not just dim.
+                Opacity = c.IsAhead ? 0.55 : 1.0,
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0),
+            };
+            var line = new StackPanel { Orientation = Orientation.Horizontal, Opacity = c.IsAhead ? 0.7 : 1.0 };
+            line.Children.Add(marker);
+            line.Children.Add(label);
+            rows.Children.Add(line);
+        }
+
+        rows.Children.Add(new TextBlock
+        {
+            Text = "Ctrl+Alt + A back · S forward · Q flip", FontSize = 10, Foreground = FgDim,
+            Margin = new Thickness(0, 5, 0, 0),
+        });
+
+        var panel = new Border
+        {
+            Background = new SolidColorBrush(LegendBg),
+            CornerRadius = new CornerRadius(12), Padding = new Thickness(14, 12),
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 24, 24, 0), MaxWidth = 260, Child = rows,
         };
-        cog.PointerEntered += (_, _) => cog.Background = new SolidColorBrush(BtnBgHover);
-        cog.PointerExited += (_, _) => cog.Background = new SolidColorBrush(BtnBg);
-        cog.PointerPressed += (_, e) => { e.Handled = true; SettingsRequested?.Invoke(); };
-        return cog;
+        // A row's band can run under the panel; swallow presses so reading it never grabs what's behind
+        // (mirrors the legend).
+        panel.PointerPressed += (_, e) => e.Handled = true;
+        return panel;
     }
 }
+
+/// <summary>One entry of the top-right history panel: the desktop's display label, whether the undo/redo
+/// cursor stands on it, and whether it sits ahead of the cursor (the redo tail).</summary>
+internal readonly record struct HistoryCrumb(string Label, bool IsCurrent, bool IsAhead);
 
 /// <summary>Which desktop the map has selected: a main-timeline desktop (<paramref name="OnMain"/> true,
 /// <paramref name="DesktopIndex"/> = its top-row index) or a branch desktop (<paramref name="BranchIndex"/>
