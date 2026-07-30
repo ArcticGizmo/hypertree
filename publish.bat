@@ -12,7 +12,7 @@ setlocal
 :: to exercise the parts that only exist inside an installer: the PATH entry going on at install and
 :: coming back off at uninstall, and htree landing beside hypertree.exe in the install folder.
 ::
-:: WARNING: --install installs over any existing Hypertree — same packId, same
+:: WARNING: --install installs over any existing Hypertree - same packId, same
 :: %LocalAppData%\Hypertree. Uninstalling afterwards removes it. Reinstall a real build from the
 :: GitHub releases page when you're done testing.
 
@@ -118,7 +118,25 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo.
+echo === Writing checksums ===
+echo.
+
+:: Mirrors the SHA256SUMS.txt that release.yml publishes, so install.ps1 can be pointed at a local pack,
+:: tools\test-install.ps1 has a real manifest to check, and a hand-uploaded release still ships checksums.
+:: Written LF-terminated with lower-case hex in sha256sum's own format, so `sha256sum -c SHA256SUMS.txt`
+:: validates it as-is. The manifest itself is skipped with Where-Object, NOT -Exclude: Get-ChildItem
+:: silently IGNORES -Exclude when it is paired with -LiteralPath, so a re-run would otherwise hash the
+:: previous manifest into the new one.
+powershell -NoProfile -Command "$d = Resolve-Path 'releases'; $lines = Get-ChildItem -File -LiteralPath $d | Where-Object Name -ne 'SHA256SUMS.txt' | Sort-Object Name | ForEach-Object { '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name }; [System.IO.File]::WriteAllText((Join-Path $d 'SHA256SUMS.txt'), ($lines -join [char]10) + [char]10); Write-Host ('  ' + @($lines).Count + ' files hashed')"
+
+if %ERRORLEVEL% neq 0 (
+    echo Checksum generation failed.
+    exit /b %ERRORLEVEL%
+)
+
+echo.
 echo Artifacts in: releases\
+echo   Uploading a release by hand? Include SHA256SUMS.txt - install.ps1 refuses a release without it.
 echo.
 
 if not defined DOINSTALL (

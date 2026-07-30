@@ -9,6 +9,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.3.5] - 2026-07-30
+
+### Added
+
+- **One-line install** — a PowerShell one-liner from the README installs Hypertree without admin rights, and puts `htree` on your PATH.
+- Installing that way skips the **"Windows protected your PC"** SmartScreen dialog, since nothing tags the download with the mark-of-the-web.
+- The installer is verified against the release's `SHA256SUMS.txt` and deleted rather than run on any mismatch.
+- Every release now publishes a `SHA256SUMS.txt` manifest covering its assets, so a download can be checked by hand.
+
+---
+
 ## [v0.3.4] - 2026-07-30
 
 ### Changed

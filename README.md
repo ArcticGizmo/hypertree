@@ -27,6 +27,46 @@ So switching context stops meaning "hunt through a wall of lookalike windows."
 - **Your desktops stay yours** — Hypertree only ever tears down desktops it created; the ones you made by hand are never touched.
 - **Stays out of the way** — lives in the tray, remembers your branches across restarts, and can start when you log in.
 
+## Installing
+
+```powershell
+irm https://raw.githubusercontent.com/ArcticGizmo/hypertree/main/install.ps1 | iex
+```
+
+That's the whole install. No admin rights (it lands in `%LocalAppData%\Hypertree\`), a Start Menu shortcut
+and a normal uninstaller in Settings → Apps, and Hypertree starts in the tray when it's done. The install
+folder goes on your **per-user PATH**, so `htree` resolves in any *new* terminal — already-open ones need
+restarting. Every update after this is in-app: right-click the tray icon → **Check for updates**.
+
+What the script does, in order: resolves the latest release, fetches `SHA256SUMS.txt` and
+`Hypertree-win-Setup.exe`, **checks the installer against the manifest and deletes it rather than run it on
+any mismatch**, then hands off to the installer. It's [`install.ps1`](install.ps1) in this repo — read it
+before piping it into your shell, the same as you should with any installer.
+
+Because PowerShell rather than a browser does the downloading, nothing is tagged with the mark-of-the-web —
+so this route never hits the **"Windows protected your PC"** SmartScreen wall.
+
+Pin a version instead of taking the latest:
+
+```powershell
+$env:HYPERTREE_VERSION = '0.3.4'; irm https://raw.githubusercontent.com/ArcticGizmo/hypertree/main/install.ps1 | iex
+```
+
+### Installer by hand
+
+Prefer to click things: download `Hypertree-win-Setup.exe` from the
+[latest release](https://github.com/ArcticGizmo/hypertree/releases/latest) and run it. Identical install,
+identical self-updates.
+
+A browser download *is* tagged with the mark-of-the-web, so SmartScreen shows the blue **"Windows protected
+your PC"** dialog — click **More info → Run anyway**, or use the one-liner above and skip it. To check the
+download against the release's `SHA256SUMS.txt` yourself:
+
+```powershell
+$want = (Select-String -Path SHA256SUMS.txt -Pattern 'Hypertree-win-Setup.exe').Line.Split()[0]
+(Get-FileHash Hypertree-win-Setup.exe -Algorithm SHA256).Hash -eq $want   # True
+```
+
 ## How it works
 
 Windows already has virtual desktops in a single horizontal row. Hypertree adds a
@@ -120,16 +160,15 @@ htree watch             # stream your position as it changes
 
 ## Running it
 
-Hypertree is **Windows-only** and runs from source today (there's no installer yet).
-
-Requirements: **.NET 10 SDK**.
+Hypertree is **Windows-only**. Install it with the [one-liner above](#installing), or run it from source
+with the **.NET 10 SDK**:
 
 ```
 run.bat
 # or: dotnet run --project src/Hypertree.App/Hypertree.App.csproj
 ```
 
-It starts in the tray. Turn on **Settings → Startup → "Start Hypertree when I log in"**
+Either way it starts in the tray. Turn on **Settings → Startup → "Start Hypertree when I log in"**
 to have it come back with Windows.
 
 > **Note:** virtual-desktop control on Windows has no supported public API and shifts
@@ -166,6 +205,20 @@ publish.bat 0.2.0        # pack a specific version
 > **`publish.bat --install` installs over any existing Hypertree** — same `packId`, same
 > `%LocalAppData%\Hypertree`. Uninstalling afterwards removes it; reinstall from the GitHub releases
 > page when you're done. PATH changes don't reach terminals that are already open.
+
+`publish.bat` also writes the `SHA256SUMS.txt` that CI publishes beside each release — the manifest
+[`install.ps1`](install.ps1) verifies the installer against before running it. That script is the primary
+install path and isn't reachable from the xUnit suite, so it has its own harness; run it after any change
+to `install.ps1`, `publish.bat` or the release workflow:
+
+```
+powershell -NoProfile -File tools\test-install.ps1
+```
+
+It drives `install.ps1`'s own functions, serves a real packed artifact out of `releases\` over a loopback
+`HttpListener` (so run `publish.bat` first to cover the download path), and holds the whole release
+pipeline to **pure ASCII with no BOM** — a UTF-8 em dash in a `.ps1` decodes under Windows-1252 as a curly
+quote, which silently terminates the surrounding string and mis-parses everything after it.
 
 > **Publishing `htree`** needs the **Desktop development with C++** workload (native AOT uses the MSVC
 > linker). A plain `dotnet build` doesn't — only `dotnet publish -r win-x64`. CI's `windows-latest`
