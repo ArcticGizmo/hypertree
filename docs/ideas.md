@@ -44,6 +44,53 @@ The named-pipe protocol and exit codes are already there — lean into it.
 - **Focus mode** — diving into a branch optionally hides other desktops from Task View
   / suppresses notifications until you surface.
 
+## 4. Make branches carry their state (workspace, not geometry)
+
+Everything today is about **geometry** — where desktops sit and how you move
+between them. A workspace is **context**: the apps, the windows, the note-to-self,
+the git state. Templates/layouts snapshot names and arrangement; they don't snapshot
+the *work*. This is the highest-leverage direction — it turns a "desktop organiser"
+into a "workspace manager", and most of it builds on things already shipped (the
+launcher, custom commands).
+
+- **Session restore** — a branch remembers which apps/windows lived on each of its
+  desktops. Restart, dive back in, and Hypertree offers to relaunch them onto the
+  right desktops. The fusion of launcher + templates + layouts. *(Starting here.)*
+- **Launch recipes on templates** (see §2) — a template carries "apps to open", so
+  restoring builds the work, not empty rooms. Nearly free now the launcher exists.
+- **Per-branch scratchpad** — a tiny note tied to each branch, surfaced on dive:
+  "where was I / what's next." The pill already knows the branch; a one-line resume
+  note is cheap and disproportionately valuable against context-switch cost.
+- **Resume card on dive** — instead of only flashing the map, optionally show a small
+  card: branch note, last-active time, git branch, apps present. A "you are here,
+  here's what this was" beat.
+
+## 5. Finding & moving windows (the founding pain)
+
+The README opens with "hunt through a wall of lookalike windows", but the tools for
+*windows specifically* are thin — move-all-windows is the only one.
+
+- **Global window finder** — a chord listing every window across *all* desktops with
+  previews; pick one, jump to its desktop. Answers "where's my Figma window?" better
+  than anything Windows offers.
+- **Send a single window to a branch** — the granular counterpart to move-windows
+  (which grabs everything on a desktop). A "send this window to branch X" chord or
+  right-click people reach for constantly.
+- **Sticky / follow-me windows** — pin Slack, music, or a notes window so it's present
+  on every desktop, or follows you as you navigate. Windows can't do this well.
+
+## 6. Cheap, high-delight adjacencies
+
+- **Assignment rules** — "always open Slack on the comms desktop." New windows of an
+  app auto-route. Branches that maintain themselves.
+- **Number-jump** — `Ctrl+Alt+1..9` leaps straight to branch N, faster than the finder
+  for the 3–4 branches you touch daily.
+- **CLI event hooks** (pulled forward from §2) — `on-enter <branch> → run <cmd>`. Where
+  DND, timers and "mute Slack in deep-work branches" become user-scriptable rather than
+  features to build one by one.
+- **Sync-friendly state** — store branches/templates/layouts as a human-readable file
+  you can commit or drop in OneDrive: the same workspace on two machines.
+
 ## Fun / silly bucket 🎈
 
 - **Sound design.** A subtle *dive* whoosh (descending) and *surface* pop (ascending)

@@ -8,6 +8,13 @@ namespace Hypertree.Scopes;
 public sealed record DesktopRef(DesktopId Id, string Label);
 
 /// <summary>
+/// A read-only snapshot of a branch for session capture/restore: its stable <see cref="Branch.Id"/>, name,
+/// and its desktops' ids in order. Addressed by id so a reorder between capture and restore can't misdirect
+/// either. Handed out by <see cref="NavigationModel.CurrentBranchView"/>.
+/// </summary>
+public sealed record BranchView(Guid Id, string Name, IReadOnlyList<DesktopId> Desktops);
+
+/// <summary>
 /// A branch (a named stream of desktops) — a horizontal timeline in the vertical stack (F2). Branches
 /// hold their listed order as you navigate (nothing rotates under the cursor); only an explicit reorder
 /// from the map moves one (<see cref="NavigationModel.MoveBranchToRow"/>). The stack splits around the

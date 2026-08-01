@@ -78,6 +78,19 @@ public class NavigationModelTests
     }
 
     [Fact]
+    public void CurrentBranchView_is_null_on_main_and_names_the_branch_when_inside()
+    {
+        var (m, _) = Pivot();
+        Assert.Null(m.CurrentBranchView()); // starts on the main timeline — no branch to attach a session to
+
+        Assert.True(m.Apply(NavAction.Dive)); // dive into feat-2, the branch below main
+        BranchView? view = m.CurrentBranchView();
+        Assert.NotNull(view);
+        Assert.Equal("feat-2", view!.Name);
+        Assert.Equal(new[] { D(20), D(21) }, view.Desktops); // its desktops, in order, addressed by id
+    }
+
+    [Fact]
     public void Describe_names_main_desktops_and_branch_prefixes()
     {
         var (m, _) = Pivot();

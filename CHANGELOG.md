@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Session restore (per branch)** — the command palette can **Save session for this branch** (remembers which apps were open on each of the branch's desktops) and **Restore this branch's session** (relaunches them onto the right desktops, skipping anything already open). Both are greyed out on the main timeline, where there's no branch to attach a session to. Saved to `sessions.json` beside the rest of your state. (Design: [docs/design/session-restore.md](docs/design/session-restore.md).)
+
 ---
 
 ## [v0.3.7] - 2026-08-01

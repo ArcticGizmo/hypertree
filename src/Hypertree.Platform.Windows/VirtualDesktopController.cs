@@ -85,7 +85,7 @@ public sealed class VirtualDesktopController : IDesktopController
         var result = new List<WindowInfo>();
         foreach ((nint hwnd, Guid g) in EnumAppWindows())
             if (g == id.Value)
-                result.Add(new WindowInfo(hwnd, TitleOf(hwnd), ProcessOf(hwnd)));
+                result.Add(new WindowInfo(hwnd, TitleOf(hwnd), ProcessOf(hwnd), PathOf(hwnd)));
         return result;
     }
 
@@ -120,6 +120,26 @@ public sealed class VirtualDesktopController : IDesktopController
         GetWindowThreadProcessId(hwnd, out uint pid);
         try { return System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; }
         catch { return ""; } // process gone / access denied — advisory only
+    }
+
+    // The full executable path behind a window, for session capture (the key we relaunch by).
+    // QueryFullProcessImageName under PROCESS_QUERY_LIMITED_INFORMATION reads across integrity levels
+    // where the managed Process.MainModule would throw. Best-effort: a process we can't open (gone,
+    // protected) yields "" — the window is simply not capturable and drops out of the session.
+    private static string PathOf(nint hwnd)
+    {
+        GetWindowThreadProcessId(hwnd, out uint pid);
+        if (pid == 0) return "";
+        nint h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+        if (h == 0) return "";
+        try
+        {
+            var sb = new System.Text.StringBuilder(1024);
+            int cap = sb.Capacity;
+            return QueryFullProcessImageName(h, 0, sb, ref cap) ? sb.ToString() : "";
+        }
+        catch { return ""; }
+        finally { CloseHandle(h); }
     }
 
     // The alt-tab-ish filter: a visible, titled, top-level (un-owned) window that isn't a tool window,
@@ -161,6 +181,11 @@ public sealed class VirtualDesktopController : IDesktopController
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint hwnd, out uint pid);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetClassNameW")] private static extern int GetClassName(nint hwnd, System.Text.StringBuilder buf, int max);
     [DllImport("kernel32.dll")] private static extern uint GetCurrentProcessId();
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+    [DllImport("kernel32.dll")] private static extern nint OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll")] private static extern bool CloseHandle(nint handle);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "QueryFullProcessImageNameW")]
+    private static extern bool QueryFullProcessImageName(nint process, uint flags, System.Text.StringBuilder buf, ref int size);
 
     // Switch/rename/remove tolerate a desktop that no longer exists (e.g. the user deleted it from
     // Task View): the id is stale, so there's nothing to do — no-op rather than crash the tray. The

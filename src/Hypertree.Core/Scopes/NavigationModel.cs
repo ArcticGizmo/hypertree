@@ -85,6 +85,16 @@ public sealed class NavigationModel
 
     public IEnumerable<DesktopId> BranchDesktopIds() => _branches.SelectMany(g => g.Desktops).Select(d => d.Id);
 
+    /// <summary>The branch the cursor is currently inside — its id, name, and desktop ids in order — or
+    /// null when on the main timeline (there is no branch to capture/restore a session for). Gates and
+    /// drives the "Save / Restore this branch's session" commands.</summary>
+    public BranchView? CurrentBranchView()
+    {
+        if (_onMain || _branches.Count == 0) return null;
+        Branch g = _branches[_currentBranch];
+        return new BranchView(g.Id, g.Name, g.Desktops.Select(d => d.Id).ToList());
+    }
+
     /// <summary>Describe a desktop by its OS id for the persistent status label: its display label and
     /// the name of the branch it belongs to (null when it's a main-timeline desktop). Resolved by id so
     /// it stays correct even after a switch made outside Hypertree; falls back to the live OS name for
