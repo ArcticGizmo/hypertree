@@ -34,6 +34,21 @@ public interface IDesktopController
     /// </summary>
     IReadOnlyList<WindowInfo> WindowsOn(DesktopId id);
 
+    /// <summary>
+    /// Every application window across <em>all</em> desktops — the superset <see cref="WindowsOn"/> returns
+    /// per desktop — each with its handle, title, process name and executable path. Session restore
+    /// snapshots this before launching a recipe step and diffs it after, matching the window a launch
+    /// produced by executable path. Best-effort, enumeration order.
+    /// </summary>
+    IReadOnlyList<WindowInfo> AllWindows();
+
+    /// <summary>
+    /// Which desktop <paramref name="hwnd"/> is currently on, or null when it can't be attributed (a window
+    /// pinned to all desktops, unassigned, or a stale handle). Restore uses this to be <em>certain</em> a
+    /// window it launched is still on the staging desktop before it ever closes one during an abort.
+    /// </summary>
+    DesktopId? DesktopOf(nint hwnd);
+
     /// <summary>Switch the whole monitor array to <paramref name="id"/>. No-op if already there. Also
     /// hands the foreground to a window on the destination, the way the OS's own switcher does — a bare
     /// desktop switch leaves the previous desktop's focused window as an unreachable, cloaked foreground
@@ -67,6 +82,11 @@ public interface IDesktopController
     /// (terminals, editors) — the whole point of provisioning a scope's window set.
     /// </summary>
     void MoveWindowToDesktop(nint hwnd, DesktopId id);
+
+    /// <summary>Ask a window to close — a graceful <c>WM_CLOSE</c>, as if its ✕ were clicked. Best-effort: a
+    /// window that ignores it, or puts up a "save changes?" prompt, is left as-is. Restore uses this only to
+    /// clear windows it launched onto the <em>staging</em> desktop when a restore is aborted.</summary>
+    void CloseWindow(nint hwnd);
 
     /// <summary>
     /// Pin a window to all virtual desktops so it stays visible when the desktop switches. Used to

@@ -34,6 +34,18 @@ internal sealed class FakeDesktopController : IDesktopController
     public IReadOnlyList<WindowInfo> WindowsOn(DesktopId id)
         => Windows.TryGetValue(id, out var list) ? list : new List<WindowInfo>();
 
+    /// <summary>Session-restore seam: a test seeds the global window list and each window's desktop; closes
+    /// are recorded. Empty by default.</summary>
+    public List<WindowInfo> AllWindowsList { get; } = new();
+    public IReadOnlyList<WindowInfo> AllWindows() => AllWindowsList;
+
+    public Dictionary<nint, DesktopId> WindowDesktop { get; } = new();
+    public DesktopId? DesktopOf(nint hwnd) => WindowDesktop.TryGetValue(hwnd, out DesktopId d) ? d : null;
+
+    /// <summary>Every CloseWindow call, in order — so restore's abort cleanup is assertable.</summary>
+    public List<nint> Closed { get; } = new();
+    public void CloseWindow(nint hwnd) => Closed.Add(hwnd);
+
     /// <summary>Every MoveWindowToDesktop call, in order — so the move flow's output is assertable.</summary>
     public List<(nint hwnd, DesktopId to)> Moves { get; } = new();
 

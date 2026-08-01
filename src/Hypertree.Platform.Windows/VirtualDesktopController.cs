@@ -89,6 +89,27 @@ public sealed class VirtualDesktopController : IDesktopController
         return result;
     }
 
+    // Every app window across all desktops (not just one), each with its path — the snapshot session
+    // restore diffs before/after a launch to find the window that launch produced.
+    public IReadOnlyList<WindowInfo> AllWindows()
+    {
+        var result = new List<WindowInfo>();
+        foreach ((nint hwnd, Guid _) in EnumAppWindows())
+            result.Add(new WindowInfo(hwnd, TitleOf(hwnd), ProcessOf(hwnd), PathOf(hwnd)));
+        return result;
+    }
+
+    public DesktopId? DesktopOf(nint hwnd)
+    {
+        if (_publicVdm.GetWindowDesktopId(hwnd, out Guid g) != 0 || g == Guid.Empty) return null; // HR != S_OK / unassigned
+        return new DesktopId(g);
+    }
+
+    public void CloseWindow(nint hwnd)
+    {
+        if (hwnd != 0) PostMessage(hwnd, WM_CLOSE, 0, 0); // graceful; the window owns whether it honours it
+    }
+
     // Walk every top-level window once, keeping only the "real" app windows (IsCountableWindow) that
     // the documented API attributes to a concrete desktop. Shared by WindowCounts and WindowsOn.
     private List<(nint hwnd, Guid desktop)> EnumAppWindows()
@@ -186,6 +207,8 @@ public sealed class VirtualDesktopController : IDesktopController
     [DllImport("kernel32.dll")] private static extern bool CloseHandle(nint handle);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "QueryFullProcessImageNameW")]
     private static extern bool QueryFullProcessImageName(nint process, uint flags, System.Text.StringBuilder buf, ref int size);
+    private const uint WM_CLOSE = 0x0010;
+    [DllImport("user32.dll")] private static extern bool PostMessage(nint hwnd, uint msg, nint wParam, nint lParam);
 
     // Switch/rename/remove tolerate a desktop that no longer exists (e.g. the user deleted it from
     // Task View): the id is stale, so there's nothing to do — no-op rather than crash the tray. The
