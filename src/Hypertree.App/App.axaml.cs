@@ -12,6 +12,7 @@ using Hypertree.Desktops;
 using Hypertree.Ipc;
 using Hypertree.Layout;
 using Hypertree.Platform;
+using Hypertree.Recipes;
 using Hypertree.Scopes;
 using Hypertree.Settings;
 using Hypertree.Store;
@@ -136,7 +137,7 @@ public sealed partial class App : Application
         _appIcons = PlatformServices.CreateAppIconProvider();
         RefreshAppsInBackground(); // warm the (slow) app-discovery cache off-thread, so the first Ctrl+Alt+O is instant
         _model = new NavigationModel(_desktops, new FileStateStore());
-        _sessionStore = new FileSessionStore(); // per-branch "what was open" side-table (see App.Sessions.cs)
+        _recipeStore = new FileRecipeStore(); // saved workspace recipes (see App.Sessions.cs)
         // Desktops restored from persisted branches were created by Hypertree — track them so the
         // teardown guard still only ever destroys our own desktops.
         foreach (DesktopId id in _model.BranchDesktopIds()) _created.Add(id.Value);
@@ -988,10 +989,6 @@ public sealed partial class App : Application
             ? new Command($"Update now — v{_lastUpdate!.AvailableVersion}", ApplyLastUpdate)
             : new Command("Check for updates", CheckForUpdates);
 
-        // Sessions are per branch; on the main timeline there's no branch to attach one to, so the two
-        // session commands show greyed with this reason rather than disappearing.
-        string? sessionDisabled = _model!.CurrentBranchView() is null ? "dive into a branch first" : null;
-
         return new List<Command>
         {
             new("Jump to desktop…", OpenSpotlight), // pushed over the command palette; Esc pops back to it
@@ -1006,10 +1003,8 @@ public sealed partial class App : Application
             // move-windows is triggered from the map ("m"), not from here.
             // Save / restore / reset the whole desktop+branch arrangement — one manager for all three.
             new("Layouts…", LayoutsPrompt),
-            // Remember / put back the apps that were open on the current branch's desktops (session restore).
-            // Greyed out on the main timeline, where there's no branch to attach a session to.
-            new("Save session for this branch", SaveBranchSession, sessionDisabled),
-            new("Restore this branch’s session", RestoreBranchSession, sessionDisabled),
+            // Capture a branch as a recipe, inspect or delete saved recipes (session restore — Phase A).
+            new("Sessions…", () => ShowSessionsManager(refresh: false)),
             // Quit Hypertree — behind a confirm (see ExitHypertree), since it's easy to land on while
             // typing/navigating the palette (unlike the deliberate tray menu item).
             new("Exit Hypertree", ExitHypertree),

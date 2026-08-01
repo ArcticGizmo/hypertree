@@ -8,11 +8,11 @@ namespace Hypertree.Scopes;
 public sealed record DesktopRef(DesktopId Id, string Label);
 
 /// <summary>
-/// A read-only snapshot of a branch for session capture/restore: its stable <see cref="Branch.Id"/>, name,
-/// and its desktops' ids in order. Addressed by id so a reorder between capture and restore can't misdirect
-/// either. Handed out by <see cref="NavigationModel.CurrentBranchView"/>.
+/// A read-only snapshot of a branch for session capture: its stable <see cref="Branch.Id"/>, name, and its
+/// desktops (id + label) in order. Carries labels because a generated recipe names each desktop by its
+/// label, not its GUID. Handed out by <see cref="NavigationModel.CurrentBranchView"/>.
 /// </summary>
-public sealed record BranchView(Guid Id, string Name, IReadOnlyList<DesktopId> Desktops);
+public sealed record BranchView(Guid Id, string Name, IReadOnlyList<DesktopRef> Desktops);
 
 /// <summary>
 /// A branch (a named stream of desktops) — a horizontal timeline in the vertical stack (F2). Branches

@@ -92,7 +92,7 @@ public sealed class NavigationModel
     {
         if (_onMain || _branches.Count == 0) return null;
         Branch g = _branches[_currentBranch];
-        return new BranchView(g.Id, g.Name, g.Desktops.Select(d => d.Id).ToList());
+        return new BranchView(g.Id, g.Name, g.Desktops.ToList());
     }
 
     /// <summary>Describe a desktop by its OS id for the persistent status label: its display label and

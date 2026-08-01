@@ -87,7 +87,8 @@ public class NavigationModelTests
         BranchView? view = m.CurrentBranchView();
         Assert.NotNull(view);
         Assert.Equal("feat-2", view!.Name);
-        Assert.Equal(new[] { D(20), D(21) }, view.Desktops); // its desktops, in order, addressed by id
+        Assert.Equal(new[] { D(20), D(21) }, view.Desktops.Select(d => d.Id)); // its desktops, in order, by id
+        Assert.Equal(new[] { "x", "y" }, view.Desktops.Select(d => d.Label)); // …carrying their labels for the recipe
     }
 
     [Fact]

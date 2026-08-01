@@ -9,7 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **Session restore (per branch)** — the command palette can **Save session for this branch** (remembers which apps were open on each of the branch's desktops) and **Restore this branch's session** (relaunches them onto the right desktops, skipping anything already open). Both are greyed out on the main timeline, where there's no branch to attach a session to. Saved to `sessions.json` beside the rest of your state. (Design: [docs/design/session-restore.md](docs/design/session-restore.md).)
+- **Sessions as recipes** — the command palette's **Sessions…** manager captures the current branch into a named, inspectable **recipe**: an ordered set of desktops, each with the apps that were open on it. Inspect a recipe's desktops and apps, or delete it; saving again updates it in place. Recipes are keyed by desktop *label* (not GUID), so they survive reboots and are portable, and are stored in `recipes.json`. Restoring a recipe — relaunching its apps and placing each window — is the next step. (Design: [docs/design/session-restore.md](docs/design/session-restore.md).)
 
 ---
 
