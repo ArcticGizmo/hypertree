@@ -61,4 +61,32 @@ public class SettingsPersistenceTests
         // A fresh store with no file loads defaults rather than throwing (MapStyle defaults to ASCII).
         Assert.Equal(MapStyle.Ascii, StoreInTempDir().Load().MapStyle);
     }
+
+    [Fact]
+    public void Custom_commands_round_trip_including_optional_fields()
+    {
+        var store = StoreInTempDir();
+        var saved = new AppSettings
+        {
+            CustomCommands =
+            {
+                new CustomCommand("Open work email", "https://mail.example.com"),                 // optionals null
+                new CustomCommand("Build", @"C:\tools\build.exe", "--release", @"C:\projects\app"), // all fields set
+            },
+        };
+        store.Save(saved);
+
+        AppSettings loaded = store.Load();
+        Assert.Equal(2, loaded.CustomCommands.Count);
+
+        CustomCommand email = loaded.CustomCommands[0];
+        Assert.Equal("Open work email", email.Name);
+        Assert.Equal("https://mail.example.com", email.Target);
+        Assert.Null(email.Arguments);
+        Assert.Null(email.WorkingDirectory);
+
+        CustomCommand build = loaded.CustomCommands[1];
+        Assert.Equal("--release", build.Arguments);
+        Assert.Equal(@"C:\projects\app", build.WorkingDirectory);
+    }
 }

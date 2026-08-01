@@ -24,7 +24,7 @@ namespace Hypertree.App;
 /// and the Ctrl+Alt+P command palette, and flashes the board on navigation. Tray-only, outlives its
 /// windows (ShutdownMode.OnExplicitShutdown).
 /// </summary>
-public sealed class App : Application
+public sealed partial class App : Application
 {
     // Which NavAction each navigation command drives. The chords themselves are resolved from settings
     // (defaults: Ctrl+Alt+Arrow — the M0 layer, since Win+Ctrl+Arrow is the native desktop switch) and
@@ -45,6 +45,11 @@ public sealed class App : Application
     private IDesktopController? _desktops;
     private IForegroundActivator? _activator;
     private IStartupManager? _startup;
+    // App-launcher services (Ctrl+Alt+O): installed-app discovery, shell launching, and icon extraction.
+    // See App.Launcher.cs for the overlay that uses them.
+    private Hypertree.Launch.IAppCatalog? _appCatalog;
+    private Hypertree.Launch.IAppLauncher? _appLauncher;
+    private Hypertree.Launch.IAppIconProvider? _appIcons;
     private NavigationModel? _model;
     private HudWindow? _hud;
     private MapOverlay? _overlay;
@@ -126,6 +131,10 @@ public sealed class App : Application
         _desktops = PlatformServices.CreateDesktopController();
         _activator = PlatformServices.CreateForegroundActivator();
         _startup = PlatformServices.CreateStartupManager();
+        _appCatalog = PlatformServices.CreateAppCatalog();
+        _appLauncher = PlatformServices.CreateAppLauncher();
+        _appIcons = PlatformServices.CreateAppIconProvider();
+        RefreshAppsInBackground(); // warm the (slow) app-discovery cache off-thread, so the first Ctrl+Alt+O is instant
         _model = new NavigationModel(_desktops, new FileStateStore());
         // Desktops restored from persisted branches were created by Hypertree — track them so the
         // teardown guard still only ever destroys our own desktops.
@@ -192,6 +201,7 @@ public sealed class App : Application
         _overlay.MoveWindowsRequested += ToggleMoveWindows; // m — start the move-windows flow (replaces the map)
         _overlay.FinderRequested += () => OpenSpotlight(); // f / Ctrl+F — finder pushed over the map; Esc pops back to it
         _overlay.CommandPaletteRequested += () => ShowCommandPalette(overCurrent: true); // p — palette over the map; Esc pops back to it
+        _overlay.AppLauncherRequested += () => OpenAppLauncher(overCurrent: true); // o — launcher over the map; Esc pops back to it
         _overlay.ViewStyleToggleRequested += ToggleMapStyle; // v — flip board ↔ metro (persisted, app-wide)
         _overlay.HistoryProvider = BuildHistoryCrumbs; // the top-right breadcrumb panel reads the trail live
 
@@ -368,6 +378,7 @@ public sealed class App : Application
     {
         HotkeyCommand.CommandPalette => ToggleCommandPalette,
         HotkeyCommand.OpenMap        => ToggleMap,
+        HotkeyCommand.AppLauncher    => ToggleAppLauncher,
         HotkeyCommand.MoveWindows    => ToggleMoveWindows, // no default chord; only a user's kept rebinding fires this
         HotkeyCommand.Peek           => () => Peek(mods),
         HotkeyCommand.UndoNav        => () => StepHistory(back: true, mods),

@@ -25,6 +25,9 @@ public enum HotkeyCommand
     RedoNav,
     // Flip between the trail's two newest entries — the alt-tab of desktops. See NavHistory.Toggle.
     ToggleNav,
+    // Open the application launcher: a spotlight over installed apps plus the user's custom commands.
+    // Defaults to Ctrl+Alt+O. Appended last so existing settings.json bindings keep deserializing.
+    AppLauncher,
 }
 
 /// <summary>A modifier combination plus a trigger key — the shape a global hotkey registers.</summary>
@@ -58,6 +61,7 @@ public static class Hotkeys
         HotkeyCommand.Dive, HotkeyCommand.Surface, HotkeyCommand.MoveLeft, HotkeyCommand.MoveRight,
         HotkeyCommand.UndoNav, HotkeyCommand.RedoNav, HotkeyCommand.ToggleNav,
         HotkeyCommand.Peek, HotkeyCommand.CommandPalette, HotkeyCommand.OpenMap,
+        HotkeyCommand.AppLauncher,
     };
 
     /// <summary>The out-of-the-box chords. Ctrl+Alt+Arrow is the nav layer (M0: Win+Ctrl+Arrow is the
@@ -76,6 +80,7 @@ public static class Hotkeys
             [HotkeyCommand.Peek]           = new(NavMods, HotkeyKey.Space),
             [HotkeyCommand.CommandPalette] = new(NavMods, HotkeyKey.P),
             [HotkeyCommand.OpenMap]        = new(NavMods, HotkeyKey.M),
+            [HotkeyCommand.AppLauncher]    = new(NavMods, HotkeyKey.O),
         };
 
     private const HotkeyModifiers NavMods = HotkeyModifiers.Control | HotkeyModifiers.Alt;
@@ -92,6 +97,7 @@ public static class Hotkeys
         HotkeyCommand.Peek           => "Peek at the board",
         HotkeyCommand.CommandPalette => "Command palette",
         HotkeyCommand.OpenMap        => "Open map",
+        HotkeyCommand.AppLauncher    => "App launcher",
         HotkeyCommand.MoveWindows    => "Move windows",
         _ => command.ToString(),
     };

@@ -91,6 +91,8 @@ internal sealed class MapOverlay : IStageContent
     public event Action? FinderRequested;
     /// <summary>p — open the command palette over the map, so Esc pops back here.</summary>
     public event Action? CommandPaletteRequested;
+    /// <summary>o — open the application launcher over the map, so Esc pops back here.</summary>
+    public event Action? AppLauncherRequested;
     /// <summary>v — flip the whole-app board style (board ↔ metro). App owns the setting: it persists the
     /// change and pushes the new style back onto the stage, so every surface follows, not just this map.</summary>
     public event Action? ViewStyleToggleRequested;
@@ -199,6 +201,7 @@ internal sealed class MapOverlay : IStageContent
             // routes here while the map is up, so Esc pops back to the map rather than closing it).
             case Key.F: FinderRequested?.Invoke(); e.Handled = true; break;
             case Key.P: CommandPaletteRequested?.Invoke(); e.Handled = true; break;
+            case Key.O: AppLauncherRequested?.Invoke(); e.Handled = true; break;
             case Key.V: ViewStyleToggleRequested?.Invoke(); e.Handled = true; break;
             case Key.R: RenameRequested?.Invoke(CurrentSelection()); e.Handled = true; break;
             case Key.N: NewDesktopRequested?.Invoke(CurrentSelection()); e.Handled = true; break;

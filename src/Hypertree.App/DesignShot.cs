@@ -89,6 +89,69 @@ internal static class DesignShot
         SaveMetroBackdrop(backdropMap, Path.Combine(outDir, "metro-backdrop-vignette.png"), vignette: true);
 
         SaveCards(outDir);
+        SaveLauncher(outDir);
+    }
+
+    /// <summary>
+    /// The application launcher (Ctrl+Alt+O) card, rendered with the real Start-menu catalog and icon
+    /// provider so the shot exercises the whole pipeline — discovery, icon extraction, and the per-row icon
+    /// column — against this machine's actual apps. Like the map, the launcher can't otherwise be reached
+    /// without registering the global hotkey and driving the live tray.
+    /// </summary>
+    private static void SaveLauncher(string outDir)
+    {
+        var catalog = PlatformServices.CreateAppCatalog();
+        var icons = PlatformServices.CreateAppIconProvider();
+
+        var items = new List<PaletteItem>
+        {
+            new("Command…", "run a one-off command", ">", () => { }),
+            new("Custom commands…", "add, edit or remove", "⚙", () => { }),
+            new("Open work email", "https://mail.example.com", "⚡", () => { }),
+        };
+        // A slice of the real installed apps, each with its real icon resolved synchronously for the shot.
+        foreach (Launch.AppEntry app in catalog.Discover().Take(8))
+        {
+            Launch.AppEntry a = app;
+            items.Add(new PaletteItem(a.Name, null, null, () => { }, LoadIcon: () =>
+            {
+                byte[]? png = icons.GetIconPng(a.LaunchPath);
+                IImage? img = png is { Length: > 0 } ? new Bitmap(new MemoryStream(png)) : null;
+                return Task.FromResult(img);
+            }));
+        }
+
+        var content = new PaletteContent("Search apps and commands…", "↑↓ move · ↵ launch · Esc close", items);
+        SaveHostedControl(content.View, Path.Combine(outDir, "launcher.png"));
+    }
+
+    // Render a stage-content view (a card) the way it actually appears: inside a real, dark-themed, offscreen
+    // window sized to the screen. A real window root is what lets the card's templated controls — the search
+    // TextBox, any buttons — acquire their templates (a detached render silently drops them; see SaveCard).
+    private static void SaveHostedControl(Control view, string path)
+    {
+        var window = new Window
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            Position = new PixelPoint(-32000, -32000), // offscreen: no flash on the real desktop
+            Width = ScreenW, Height = ScreenH, ShowInTaskbar = false,
+            WindowDecorations = WindowDecorations.None,
+            RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Dark,
+            Background = new SolidColorBrush(Color.Parse("#0F131B")),
+            Content = view,
+        };
+        window.Show();
+        for (int i = 0; i < 6; i++) // let styles/templates apply, layout settle, and the sync icon loads pump
+        {
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+        }
+
+        var rtb = new RenderTargetBitmap(new PixelSize(ScreenW, ScreenH), new Vector(96, 96));
+        rtb.Render(window);
+        using (var fs = File.Create(path)) rtb.Save(fs);
+        Console.WriteLine($"wrote {path} ({ScreenW}x{ScreenH})");
+        window.Close();
     }
 
     /// <summary>

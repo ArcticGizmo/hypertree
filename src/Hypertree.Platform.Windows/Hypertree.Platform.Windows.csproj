@@ -15,6 +15,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Icon extraction for the app launcher: SHGetFileInfo hands back an HICON that Icon/Bitmap turn into
+         PNG bytes (see ShellIconProvider). The App head already pins 10.0.9 to override the vulnerable
+         transitive 4.7.0; match it here so the whole graph resolves to one safe version. -->
+    <PackageReference Include="System.Drawing.Common" Version="10.0.9" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Hypertree.Core\Hypertree.Core.csproj" />
   </ItemGroup>
 </Project>

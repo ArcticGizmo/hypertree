@@ -1,4 +1,5 @@
 using Hypertree.Desktops;
+using Hypertree.Launch;
 using Hypertree.Platform;
 #if WINDOWS
 using Impl = Hypertree.Platform.Windows;
@@ -19,6 +20,9 @@ internal static class PlatformServices
     public static IForegroundActivator CreateForegroundActivator() => new Impl.ForegroundActivator();
     public static IStartupManager CreateStartupManager() => new Impl.StartupManager();
     public static IPathInstaller CreatePathInstaller() => new Impl.PathInstaller();
+    public static IAppCatalog CreateAppCatalog() => new Impl.ShellAppCatalog();
+    public static IAppLauncher CreateAppLauncher() => new Impl.ShellAppLauncher();
+    public static IAppIconProvider CreateAppIconProvider() => new Impl.ShellIconProvider();
 #else
     public static IDesktopController CreateDesktopController()
         => throw new PlatformNotSupportedException("No desktop controller for this platform yet.");
@@ -30,5 +34,11 @@ internal static class PlatformServices
         => throw new PlatformNotSupportedException("No startup manager for this platform yet.");
     public static IPathInstaller CreatePathInstaller()
         => throw new PlatformNotSupportedException("No path installer for this platform yet.");
+    public static IAppCatalog CreateAppCatalog()
+        => throw new PlatformNotSupportedException("No app catalog for this platform yet.");
+    public static IAppLauncher CreateAppLauncher()
+        => throw new PlatformNotSupportedException("No app launcher for this platform yet.");
+    public static IAppIconProvider CreateAppIconProvider()
+        => throw new PlatformNotSupportedException("No app icon provider for this platform yet.");
 #endif
 }

@@ -57,6 +57,12 @@ public sealed class AppSettings
     /// everything else resolves to <see cref="Hotkeys.Defaults"/>. See <see cref="ResolveHotkeys"/>.</summary>
     public List<HotkeyBinding> HotkeyBindings { get; set; } = new();
 
+    /// <summary>User-defined launcher entries: a named target (an app, file, folder or URL) plus optional
+    /// arguments and working directory, all shell-executed. Surfaced in the application launcher
+    /// (Ctrl+Alt+O) above the discovered apps, and set up in its "Manage custom commands…" screen. Empty by
+    /// default. See <c>CustomCommand</c>.</summary>
+    public List<CustomCommand> CustomCommands { get; set; } = new();
+
     /// <summary>When true, the first launch after the version changes pops a "what's new" window listing
     /// only the changelog entries newer than <see cref="LastSeenVersion"/>. On by default; the window's
     /// "Don't show changelogs again" button (and the Settings toggle) flip it off. See <c>ChangelogWindow</c>
@@ -98,6 +104,16 @@ public enum MapStyle
 /// own instance name is still typed per-branch — the template only carries the desktops).
 /// </summary>
 public sealed record BranchTemplate(string Name, IReadOnlyList<string> Labels);
+
+/// <summary>
+/// A user-defined launcher entry. <paramref name="Name"/> is what you type to find it; the rest is handed
+/// to the shell, exactly as if you'd double-clicked it: <paramref name="Target"/> is the app / file /
+/// folder / URL to open, with optional <paramref name="Arguments"/> and <paramref name="WorkingDirectory"/>.
+/// Persisted in <c>settings.json</c> (see <see cref="AppSettings.CustomCommands"/>); the two optional
+/// fields are null when left blank.
+/// </summary>
+public sealed record CustomCommand(string Name, string Target,
+                                   string? Arguments = null, string? WorkingDirectory = null);
 
 /// <summary>Load/save the persisted settings. Behind an interface so tests use an in-memory fake.</summary>
 public interface ISettingsStore

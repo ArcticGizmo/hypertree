@@ -9,6 +9,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.3.7] - 2026-08-01
+
+### Added
+
+- **Application launcher** — `Ctrl+Alt+O` opens a spotlight over your installed apps, each with its real icon; type to filter, Enter to launch. Covers both classic desktop apps and packaged / Store apps (Windows Terminal, Calculator, …), the same set Windows Search shows.
+- `o` opens the launcher from the map — Esc pops back to it.
+- **Custom commands** — save your own launcher entries (an app, file, folder, or URL, with optional arguments and working directory) in the launcher's "Custom commands…" screen; they sit above the discovered apps.
+- `Command…` in the launcher runs a one-off shell command, like Win+R. Only this explicit entry runs typed text, so filtering the list never launches anything by accident.
+- The launcher chord is rebindable in Settings.
+
+---
+
 ## [v0.3.6] - 2026-07-30
 
 ### Added

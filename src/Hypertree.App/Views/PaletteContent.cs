@@ -12,10 +12,12 @@ namespace Hypertree.App.Views;
 /// <summary>One filterable row in a palette: a primary <paramref name="Label"/>, an optional dimmer
 /// <paramref name="Detail"/> (also folded into the match text, so e.g. a branch name filters its
 /// desktops), an optional trailing <paramref name="Glyph"/>, the action to run when it's chosen, and an
-/// optional <paramref name="Preview"/> board to show behind the palette while it's the selected row.</summary>
+/// optional <paramref name="Preview"/> board to show behind the palette while it's the selected row.
+/// <paramref name="LoadIcon"/>, when set, supplies a leading icon fetched asynchronously (the app
+/// launcher's app icons) — the row shows a blank slot until it resolves.</summary>
 internal sealed record PaletteItem(string Label, string? Detail, string? Glyph, Action Choose,
                                    Func<NavMap>? Preview = null, string? DisabledReason = null,
-                                   Action? OnDelete = null)
+                                   Action? OnDelete = null, Func<Task<IImage?>>? LoadIcon = null)
 {
     /// <summary>A greyed-out row: still shown and selectable (so the reason can be read), but inert.</summary>
     public bool Enabled => DisabledReason is null;
@@ -243,12 +245,23 @@ internal sealed class PaletteContent : IStageContent
     private Control BuildRow(PaletteItem item, int index)
     {
         bool enabled = item.Enabled;
+
+        // Leading icon slot (app launcher). The Auto column collapses to zero width for rows with no icon,
+        // so every other palette looks exactly as before. The image is filled in asynchronously.
+        var icon = new Image
+        {
+            Width = 20, Height = 20, Stretch = Stretch.Uniform,
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 8, 0),
+        };
+        if (item.LoadIcon is { } load) _ = FillIcon(icon, load); else icon.IsVisible = false;
+        Grid.SetColumn(icon, 0);
+
         var label = new TextBlock
         {
             Text = item.Label, Foreground = enabled ? Ink : Muted, FontSize = 14, FontWeight = FontWeight.SemiBold,
             VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis,
         };
-        Grid.SetColumn(label, 0);
+        Grid.SetColumn(label, 1);
 
         var detail = new TextBlock
         {
@@ -256,16 +269,17 @@ internal sealed class PaletteContent : IStageContent
             VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Right,
         };
-        Grid.SetColumn(detail, 1);
+        Grid.SetColumn(detail, 2);
 
         var glyph = new TextBlock
         {
             Text = item.Glyph ?? "", Foreground = Accent, FontSize = 14,
             VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 2, 0),
         };
-        Grid.SetColumn(glyph, 2);
+        Grid.SetColumn(glyph, 3);
 
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto") };
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto") };
+        grid.Children.Add(icon);
         grid.Children.Add(label);
         grid.Children.Add(detail);
         grid.Children.Add(glyph);
@@ -279,6 +293,19 @@ internal sealed class PaletteContent : IStageContent
         border.PointerEntered += (_, _) => { _selected = index; Highlight(); };
         border.PointerPressed += (_, _) => Choose(item); // no-op for disabled rows (guarded in Choose)
         return border;
+    }
+
+    // Resolve a row's icon off the UI thread (the loader caches, so re-filtering is cheap) and drop it in
+    // when it arrives. Fire-and-forget: a row that's been rebuilt away by then just harmlessly sets an
+    // orphaned Image. A null (unextractable icon) leaves the blank slot.
+    private static async Task FillIcon(Image target, Func<Task<IImage?>> load)
+    {
+        try
+        {
+            IImage? img = await load();
+            if (img is not null) target.Source = img;
+        }
+        catch { /* an icon that won't load just stays blank */ }
     }
 
     private void Highlight()
