@@ -40,12 +40,12 @@ public sealed partial class App
         {
             Recipe r = recipe; // capture per iteration
             items.Add(new PaletteItem(r.Name, DescribeRecipe(r), "▤",
-                () => InspectRecipe(r),                     // Enter inspects…
-                OnDelete: () => ConfirmDeleteRecipe(r)));    // …Del removes
+                () => ConfirmRestore(r),                     // Enter restores (a confirm lists what it'll create)…
+                OnDelete: () => ConfirmDeleteRecipe(r)));     // …Del removes
         }
 
         var palette = new PaletteContent("Sessions…",
-            "↑↓ move · ↵ inspect · ⌦ delete · Esc back", items);
+            "↑↓ move · ↵ restore · ⌦ delete · Esc back", items);
         if (refresh) _stage?.ReplaceTop(2, palette); else _stage?.Present(palette);
     }
 
@@ -78,23 +78,6 @@ public sealed partial class App
                steps > 0
                    ? $"“{recipe.Name}” — {steps} app{(steps == 1 ? "" : "s")} across {desks} desktop{(desks == 1 ? "" : "s")}."
                    : $"No open apps found on “{branch.Name}”. Saved an empty recipe you can fill by re-saving later.");
-    }
-
-    // Read-only view of a recipe: one row per desktop, its captured apps in the detail line. Pushed over the
-    // manager, so Esc — or Enter on any row — pops back to the list.
-    private void InspectRecipe(Recipe recipe)
-    {
-        var items = new List<PaletteItem>();
-        foreach (RecipeDesktop d in recipe.Desktops)
-        {
-            string apps = d.Steps.Count == 0 ? "(no apps)" : string.Join(", ", d.Steps.Select(s => s.Name));
-            items.Add(new PaletteItem(d.Label, apps, "▸", () => _stage?.Back()));
-        }
-        if (items.Count == 0)
-            items.Add(new PaletteItem("(empty recipe)", "nothing was captured", null, () => _stage?.Back()));
-
-        _stage?.Present(new PaletteContent($"Recipe · {recipe.Name}",
-            "↑↓ move · a desktop → its apps · ↵/Esc back", items));
     }
 
     private void ConfirmDeleteRecipe(Recipe recipe)
