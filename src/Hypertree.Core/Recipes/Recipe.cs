@@ -49,15 +49,41 @@ public sealed class RecipeDesktop
     public List<RecipeStep> Steps { get; set; } = new();
 }
 
+/// <summary>How a template variable is filled at apply time — a plain value, or a folder (which the fill
+/// prompt can offer a picker for). Persisted as a string; don't rename without a migration.</summary>
+public enum VariableKind
+{
+    Text,
+    Folder,
+}
+
+/// <summary>
+/// Declared metadata for a <c>{name}</c> token used in a recipe's commands: an optional <see cref="Default"/>
+/// prefilled at apply time and a <see cref="Kind"/> that lets the fill prompt be smart (a folder picker for
+/// <see cref="VariableKind.Folder"/>). Variables are <em>discovered</em> from the command text — this only
+/// enriches the ones you want a default or a kind for; a used token with no declaration still gets prompted.
+/// </summary>
+public sealed class RecipeVariable
+{
+    public string Name { get; set; } = "";
+    public string? Default { get; set; }
+    public VariableKind Kind { get; set; } = VariableKind.Text;
+}
+
 /// <summary>
 /// A whole-workspace recipe: a named, ordered set of desktops, each with its launch-and-place steps. Keyed
-/// by label throughout, so it's reboot-proof, inspectable and portable. Generated from a branch capture
-/// today; hand-authored as a template later — the same executor runs both (docs/design/session-restore.md).
+/// by label throughout, so it's reboot-proof, inspectable and portable. Commands may contain <c>{name}</c>
+/// tokens filled at apply time (see <see cref="RecipeVariables"/> / <see cref="RecipeSubstitution"/>), so one
+/// recipe outfits many projects. (docs/design/session-restore.md)
 /// </summary>
 public sealed class Recipe
 {
     public string Name { get; set; } = "";
     public List<RecipeDesktop> Desktops { get; set; } = new();
+
+    /// <summary>Declared metadata (defaults / kinds) for the recipe's variables. Optional — variables are
+    /// discovered from the commands; this only enriches the prompt for the ones listed here.</summary>
+    public List<RecipeVariable> Variables { get; set; } = new();
 
     /// <summary>Total steps across every desktop — for the inspector's summary line.</summary>
     public int StepCount => Desktops.Sum(d => d.Steps.Count);
