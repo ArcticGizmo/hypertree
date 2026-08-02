@@ -13,7 +13,7 @@ public interface IDesktopController
     /// <summary>Number of virtual desktops the OS currently has.</summary>
     int Count { get; }
 
-    /// <summary>Number of physical monitors attached — the number of per-desktop slots the recipe builder
+    /// <summary>Number of physical monitors attached — the number of per-desktop slots the loadout builder
     /// draws, and the range a step's <see cref="WindowInfo.Monitor"/> / placement index runs over. At least 1.</summary>
     int MonitorCount { get; }
 
@@ -41,7 +41,7 @@ public interface IDesktopController
     /// <summary>
     /// Every application window across <em>all</em> desktops — the superset <see cref="WindowsOn"/> returns
     /// per desktop — each with its handle, title, process name and executable path. Session restore
-    /// snapshots this before launching a recipe step and diffs it after, matching the window a launch
+    /// snapshots this before launching a loadout step and diffs it after, matching the window a launch
     /// produced by executable path. Best-effort, enumeration order.
     /// </summary>
     IReadOnlyList<WindowInfo> AllWindows();
@@ -95,7 +95,7 @@ public interface IDesktopController
     /// <summary>
     /// Move a window onto <paramref name="monitor"/> (1-based, matching the index <see cref="WindowsOn"/>
     /// records in <see cref="WindowInfo.Monitor"/>). Best-effort placement — keeps the window's size,
-    /// re-maximising it if it was maximised — used by recipe restore to put a window back on the screen it
+    /// re-maximising it if it was maximised — used by loadout restore to put a window back on the screen it
     /// was captured from. Exact position/size is a later phase. Out-of-range or a stale handle is a no-op.
     /// </summary>
     void MoveWindowToMonitor(nint hwnd, int monitor);

@@ -5,20 +5,20 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Hypertree.Launch;
-using Hypertree.Recipes;
+using Hypertree.Loadouts;
 
 namespace Hypertree.App.Views;
 
 /// <summary>
-/// The graphical recipe builder (docs/design/session-restore.md): a branch drawn as a stack of <b>desktop</b>
+/// The graphical loadout builder (docs/design/session-restore.md): a branch drawn as a stack of <b>desktop</b>
 /// rows, each split into a slot per physical <b>monitor</b>, and each slot holding an ordered list of
-/// <b>commands</b> to run there when the recipe is applied. Add / remove desktops, and add / edit / remove
+/// <b>commands</b> to run there when the loadout is applied. Add / remove desktops, and add / edit / remove
 /// commands per monitor. Everything is edited on an in-memory working copy; Save hands it back, Cancel drops it.
 ///
 /// It's a full-surface stage content that rebuilds its body on every (re)presentation, so returning from a
 /// pushed command form reflects the change without any manual refresh plumbing.
 /// </summary>
-internal sealed class RecipeBuilderContent : IStageContent
+internal sealed class LoadoutBuilderContent : IStageContent
 {
     private static readonly IBrush CardBg = new SolidColorBrush(Color.Parse("#12161F"));
     private static readonly IBrush Panel = new SolidColorBrush(Color.Parse("#171C27"));
@@ -30,25 +30,25 @@ internal sealed class RecipeBuilderContent : IStageContent
     private static readonly IBrush Red = new SolidColorBrush(Color.Parse("#E86A6A"));
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
 
-    private readonly Recipe _recipe;      // the working copy — mutated in place, handed back on Save
+    private readonly Loadout _loadout;      // the working copy — mutated in place, handed back on Save
     private readonly int _monitors;
-    private readonly Action<Recipe> _onSave;
+    private readonly Action<Loadout> _onSave;
 
     private readonly TextBox _name;
     private readonly StackPanel _body;
     private readonly Control _root;
     private OverlayStage? _stage;
 
-    public RecipeBuilderContent(Recipe working, int monitors, Action<Recipe> onSave)
+    public LoadoutBuilderContent(Loadout working, int monitors, Action<Loadout> onSave)
     {
-        _recipe = working;
+        _loadout = working;
         _monitors = Math.Max(1, monitors);
         _onSave = onSave;
 
-        _name = new TextBox { Text = _recipe.Name, Width = 320, FontFamily = Mono, FontSize = 14, PlaceholderText = "recipe name" };
+        _name = new TextBox { Text = _loadout.Name, Width = 320, FontFamily = Mono, FontSize = 14, PlaceholderText = "loadout name" };
         _body = new StackPanel { Spacing = 10 };
 
-        var save = Btn("Save recipe", Save, accent: true);
+        var save = Btn("Save loadout", Save, accent: true);
         var cancel = Btn("Cancel", () => _stage?.Back());
         var addDesktop = Btn("＋ Add desktop", AddDesktop);
 
@@ -63,9 +63,9 @@ internal sealed class RecipeBuilderContent : IStageContent
             Spacing = 12,
             Children =
             {
-                new TextBlock { Text = "Build recipe", Foreground = Ink, FontFamily = Mono, FontSize = 18, FontWeight = FontWeight.SemiBold },
+                new TextBlock { Text = "Build loadout", Foreground = Ink, FontFamily = Mono, FontSize = 18, FontWeight = FontWeight.SemiBold },
                 nameRow,
-                new TextBlock { Text = $"{_monitors} monitor{(_monitors == 1 ? "" : "s")} per desktop · commands run top-to-bottom when the recipe is applied", Foreground = Muted, FontFamily = Mono, FontSize = 12 },
+                new TextBlock { Text = $"{_monitors} monitor{(_monitors == 1 ? "" : "s")} per desktop · commands run top-to-bottom when the loadout is applied", Foreground = Muted, FontFamily = Mono, FontSize = 12 },
                 new ScrollViewer { Content = _body, MaxHeight = 440, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled },
                 addDesktop,
                 new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, HorizontalAlignment = HorizontalAlignment.Right, Children = { cancel, save } },
@@ -107,25 +107,25 @@ internal sealed class RecipeBuilderContent : IStageContent
     private void BuildBody()
     {
         _body.Children.Clear();
-        if (_recipe.Desktops.Count == 0)
+        if (_loadout.Desktops.Count == 0)
             _body.Children.Add(new TextBlock { Text = "No desktops yet — add one below.", Foreground = Muted, FontFamily = Mono, FontSize = 13, Margin = new Thickness(2, 6) });
-        for (int di = 0; di < _recipe.Desktops.Count; di++)
+        for (int di = 0; di < _loadout.Desktops.Count; di++)
             _body.Children.Add(DesktopSection(di));
 
-        if (RecipeVariables.Discover(_recipe).Count > 0)
+        if (LoadoutVariables.Discover(_loadout).Count > 0)
             _body.Children.Add(VariablesSection());
     }
 
-    // Any {name} token used in the commands becomes a variable filled when the recipe is applied. This
+    // Any {name} token used in the commands becomes a variable filled when the loadout is applied. This
     // section lets you give each a default and mark it a folder — everything else is discovered automatically.
     private Control VariablesSection()
     {
         var rows = new StackPanel { Spacing = 6, Margin = new Thickness(0, 6, 0, 0) };
-        foreach (string name in RecipeVariables.Discover(_recipe))
+        foreach (string name in LoadoutVariables.Discover(_loadout))
         {
-            RecipeVariable v = _recipe.Variables.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
-                               ?? Add(new RecipeVariable { Name = name });
-            bool isDir = name.Equals(RecipeVariables.Dir, StringComparison.OrdinalIgnoreCase);
+            LoadoutVariable v = _loadout.Variables.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                               ?? Add(new LoadoutVariable { Name = name });
+            bool isDir = name.Equals(LoadoutVariables.Dir, StringComparison.OrdinalIgnoreCase);
 
             var def = new TextBox { Text = v.Default ?? "", PlaceholderText = "default (optional)", FontFamily = Mono, FontSize = 13 };
             def.TextChanged += (_, _) => v.Default = string.IsNullOrWhiteSpace(def.Text) ? null : def.Text!.Trim();
@@ -150,17 +150,17 @@ internal sealed class RecipeBuilderContent : IStageContent
             Child = new StackPanel { Children =
             {
                 new TextBlock { Text = "Variables", Foreground = Amber, FontFamily = Mono, FontSize = 13, FontWeight = FontWeight.SemiBold },
-                new TextBlock { Text = "Filled in when the recipe is applied — so one recipe fits any project. {dir} is filled from the current directory by the htree CLI.", Foreground = Muted, FontFamily = Mono, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 4) },
+                new TextBlock { Text = "Filled in when the loadout is applied — so one loadout fits any project. {dir} is filled from the current directory by the htree CLI.", Foreground = Muted, FontFamily = Mono, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 4) },
                 rows,
             } },
         };
     }
 
-    private RecipeVariable Add(RecipeVariable v) { _recipe.Variables.Add(v); return v; }
+    private LoadoutVariable Add(LoadoutVariable v) { _loadout.Variables.Add(v); return v; }
 
     private Control DesktopSection(int di)
     {
-        RecipeDesktop d = _recipe.Desktops[di];
+        LoadoutDesktop d = _loadout.Desktops[di];
 
         var label = new TextBox { Text = d.Label, Width = 220, FontFamily = Mono, FontSize = 14 };
         label.TextChanged += (_, _) => d.Label = label.Text ?? "";
@@ -172,7 +172,7 @@ internal sealed class RecipeBuilderContent : IStageContent
         left.Children.Add(new TextBlock { Text = $"Desktop {di + 1}", Foreground = Accent, FontFamily = Mono, FontSize = 13, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center });
         left.Children.Add(label);
         Grid.SetColumn(left, 0);
-        var remove = Btn("× Remove desktop", () => { _recipe.Desktops.RemoveAt(di); BuildBody(); }, danger: true);
+        var remove = Btn("× Remove desktop", () => { _loadout.Desktops.RemoveAt(di); BuildBody(); }, danger: true);
         Grid.SetColumn(remove, 1);
         header.Children.Add(left);
         header.Children.Add(remove);
@@ -189,10 +189,10 @@ internal sealed class RecipeBuilderContent : IStageContent
         };
     }
 
-    private Control MonitorSection(RecipeDesktop d, int m)
+    private Control MonitorSection(LoadoutDesktop d, int m)
     {
         var list = new StackPanel { Spacing = 4, Margin = new Thickness(0, 4, 0, 0) };
-        foreach (RecipeStep step in d.Steps.Where(s => s.Placement.Monitor == m).ToList())
+        foreach (LoadoutStep step in d.Steps.Where(s => s.Placement.Monitor == m).ToList())
             list.Children.Add(CommandRow(d, step));
         list.Children.Add(Btn("＋ add command", () => AddCommand(d, m)));
 
@@ -206,7 +206,7 @@ internal sealed class RecipeBuilderContent : IStageContent
         };
     }
 
-    private Control CommandRow(RecipeDesktop d, RecipeStep step)
+    private Control CommandRow(LoadoutDesktop d, LoadoutStep step)
     {
         string line = CommandLine.Join(step.Target, step.Arguments);
         string caption = string.IsNullOrWhiteSpace(step.Name) ? line : $"{step.Name}   {line}";
@@ -228,16 +228,16 @@ internal sealed class RecipeBuilderContent : IStageContent
 
     private void AddDesktop()
     {
-        _recipe.Desktops.Add(new RecipeDesktop { Label = $"desktop {_recipe.Desktops.Count + 1}" });
+        _loadout.Desktops.Add(new LoadoutDesktop { Label = $"desktop {_loadout.Desktops.Count + 1}" });
         BuildBody();
     }
 
-    private void AddCommand(RecipeDesktop d, int m)
+    private void AddCommand(LoadoutDesktop d, int m)
     {
         _stage?.Present(new CommandFormContent(res =>
         {
             var (target, args) = CommandLine.Split(res.CommandLine);
-            d.Steps.Add(new RecipeStep
+            d.Steps.Add(new LoadoutStep
             {
                 Name = res.Name.Length > 0 ? res.Name : target,
                 Target = target,
@@ -248,7 +248,7 @@ internal sealed class RecipeBuilderContent : IStageContent
         }, title: $"Add command · Monitor {m}"));
     }
 
-    private void EditCommand(RecipeStep step)
+    private void EditCommand(LoadoutStep step)
     {
         _stage?.Present(new CommandFormContent(res =>
         {
@@ -264,21 +264,21 @@ internal sealed class RecipeBuilderContent : IStageContent
     private void Save()
     {
         string name = _name.Text?.Trim() ?? "";
-        if (name.Length == 0) { _name.Focus(); return; } // a recipe needs a name
-        _recipe.Name = name;
+        if (name.Length == 0) { _name.Focus(); return; } // a loadout needs a name
+        _loadout.Name = name;
 
         // Keep each step's placement label in step with its desktop (a rename could have left it stale).
-        foreach (RecipeDesktop d in _recipe.Desktops)
-            foreach (RecipeStep s in d.Steps)
+        foreach (LoadoutDesktop d in _loadout.Desktops)
+            foreach (LoadoutStep s in d.Steps)
                 s.Placement.Desktop = d.Label;
 
         // Drop variable declarations that are no longer used, or that carry no real metadata (no default and
         // the plain text kind) — those are fully covered by discovery and needn't be stored.
-        var used = RecipeVariables.Discover(_recipe).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        _recipe.Variables.RemoveAll(v => !used.Contains(v.Name)
+        var used = LoadoutVariables.Discover(_loadout).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _loadout.Variables.RemoveAll(v => !used.Contains(v.Name)
                                          || (string.IsNullOrWhiteSpace(v.Default) && v.Kind == VariableKind.Text));
 
-        _onSave(_recipe);
+        _onSave(_loadout);
     }
 
     // ── Small buttons ─────────────────────────────────────────────────────────────

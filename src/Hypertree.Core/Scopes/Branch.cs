@@ -9,7 +9,7 @@ public sealed record DesktopRef(DesktopId Id, string Label);
 
 /// <summary>
 /// A read-only snapshot of a branch for session capture: its stable <see cref="Branch.Id"/>, name, and its
-/// desktops (id + label) in order. Carries labels because a generated recipe names each desktop by its
+/// desktops (id + label) in order. Carries labels because a generated loadout names each desktop by its
 /// label, not its GUID. Handed out by <see cref="NavigationModel.CurrentBranchView"/>.
 /// </summary>
 public sealed record BranchView(Guid Id, string Name, IReadOnlyList<DesktopRef> Desktops);

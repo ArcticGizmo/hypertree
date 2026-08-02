@@ -253,7 +253,7 @@ public sealed class VirtualDesktopController : IDesktopController
     private const uint WM_CLOSE = 0x0010;
     [DllImport("user32.dll")] private static extern bool PostMessage(nint hwnd, uint msg, nint wParam, nint lParam);
 
-    // Monitor placement (recipe restore). One shared EnumDisplayMonitors ordering keys both capture and place.
+    // Monitor placement (loadout restore). One shared EnumDisplayMonitors ordering keys both capture and place.
     private const uint MONITOR_DEFAULTTONEAREST = 2;
     private const int SW_RESTORE = 9, SW_MAXIMIZE = 3;
     private const uint SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010;

@@ -12,7 +12,7 @@ using Hypertree.Desktops;
 using Hypertree.Ipc;
 using Hypertree.Layout;
 using Hypertree.Platform;
-using Hypertree.Recipes;
+using Hypertree.Loadouts;
 using Hypertree.Scopes;
 using Hypertree.Settings;
 using Hypertree.Store;
@@ -137,7 +137,7 @@ public sealed partial class App : Application
         _appIcons = PlatformServices.CreateAppIconProvider();
         RefreshAppsInBackground(); // warm the (slow) app-discovery cache off-thread, so the first Ctrl+Alt+O is instant
         _model = new NavigationModel(_desktops, new FileStateStore());
-        _recipeStore = new FileRecipeStore(); // saved workspace recipes (see App.Sessions.cs)
+        _loadoutStore = new FileLoadoutStore(); // saved workspace loadouts (see App.Sessions.cs)
         // Desktops restored from persisted branches were created by Hypertree — track them so the
         // teardown guard still only ever destroys our own desktops.
         foreach (DesktopId id in _model.BranchDesktopIds()) _created.Add(id.Value);
@@ -1003,9 +1003,9 @@ public sealed partial class App : Application
             // move-windows is triggered from the map ("m"), not from here.
             // Save / restore / reset the whole desktop+branch arrangement — one manager for all three.
             new("Layouts…", LayoutsPrompt),
-            // Build / edit / delete workspace recipes, and apply one as a new branch.
-            new("Recipes…", () => ShowRecipesManager(refresh: false)),
-            new("Apply recipe…", ShowApplyRecipe),
+            // Build / edit / delete workspace loadouts, and apply one as a new branch.
+            new("Loadouts…", () => ShowLoadoutsManager(refresh: false)),
+            new("Apply loadout…", ShowApplyLoadout),
             // Quit Hypertree — behind a confirm (see ExitHypertree), since it's easy to land on while
             // typing/navigating the palette (unlike the deliberate tray menu item).
             new("Exit Hypertree", ExitHypertree),
@@ -1570,7 +1570,7 @@ public sealed partial class App : Application
         RefreshOrFlash();
     }
 
-    // ── Branch templates (reusable desktop recipes for new branches) ─────────────────
+    // ── Branch templates (reusable desktop loadouts for new branches) ─────────────────
 
     // The single template manager: a palette listing every saved template (with a live preview of what it
     // would create) plus a "Create new template" row. Choosing a template deletes it (behind a confirm);

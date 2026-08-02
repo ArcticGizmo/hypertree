@@ -37,7 +37,7 @@ internal sealed class CustomCommandContent : IStageContent
     /// name for a fresh add. Null starts blank.</param>
     /// <param name="isEdit">Titles the card "Edit"/"Add" and the button "Save"/"Add". Kept separate from
     /// <paramref name="seed"/> so a name-prefilled add still reads as an add.</param>
-    /// <param name="title">Overrides the card heading — the same four-field form edits a recipe step, where
+    /// <param name="title">Overrides the card heading — the same four-field form edits a loadout step, where
     /// "custom command" would be the wrong words.</param>
     /// <param name="subtitle">Overrides the explanatory line under the heading.</param>
     public CustomCommandContent(Action<CustomCommand> onSave, CustomCommand? seed = null, bool isEdit = false,

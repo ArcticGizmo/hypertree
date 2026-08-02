@@ -7,12 +7,12 @@ using Avalonia.Media;
 
 namespace Hypertree.App.Views;
 
-/// <summary>The entered values for one command in the recipe builder: an optional display name, the command
+/// <summary>The entered values for one command in the loadout builder: an optional display name, the command
 /// line to run (parsed into target + args at save), and an optional working directory.</summary>
 internal sealed record CommandFormResult(string Name, string CommandLine, string? WorkingDirectory);
 
 /// <summary>
-/// Add/edit form for a single command in a monitor's list (recipe builder), hosted as a <b>card</b> on the
+/// Add/edit form for a single command in a monitor's list (loadout builder), hosted as a <b>card</b> on the
 /// <see cref="OverlayStage"/>. One command line typed naturally — <c>code C:\proj</c>, <c>wt -d "C:\a b"</c>
 /// — plus an optional name and working directory. The command is required; like the other forms it never
 /// dismisses on lost focus. Esc steps back, Ctrl+Enter saves.
@@ -51,7 +51,7 @@ internal sealed class CommandFormContent : IStageContent
         panel.Children.Add(new TextBlock { Text = title, FontWeight = FontWeight.SemiBold });
         panel.Children.Add(new TextBlock
         {
-            Text = "The command run on this monitor when the recipe is applied — launched through the shell, like Win+R.",
+            Text = "The command run on this monitor when the loadout is applied — launched through the shell, like Win+R.",
             TextWrapping = TextWrapping.Wrap, Foreground = Muted, FontSize = 12, Margin = new Thickness(0, 0, 0, 4),
         });
         panel.Children.Add(Labelled("Command", _command));

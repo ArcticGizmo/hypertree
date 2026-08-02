@@ -1,33 +1,33 @@
 using Hypertree.Desktops;
-using Hypertree.Recipes;
+using Hypertree.Loadouts;
 using Xunit;
 
 namespace Hypertree.Tests;
 
 /// <summary>
-/// The OS-free decisions in a recipe restore (<see cref="RecipeRun"/>): flattening a recipe into an ordered
+/// The OS-free decisions in a loadout restore (<see cref="LoadoutRun"/>): flattening a loadout into an ordered
 /// run, matching the window a launch produced (new handle + matching executable path), and choosing which
 /// windows are safe to close on an abort. The App owns the timing and Win32; this is the testable kernel.
 /// </summary>
-public class RecipeRunTests
+public class LoadoutRunTests
 {
-    private static RecipeStep Step(string target) => new() { Target = target, Name = "x", Placement = new Placement { Desktop = "api" } };
+    private static LoadoutStep Step(string target) => new() { Target = target, Name = "x", Placement = new Placement { Desktop = "api" } };
     private static WindowInfo Win(nint hwnd, string path) => new(hwnd, "t", "p", path);
 
-    private static Recipe TwoDesktopRecipe() => new()
+    private static Loadout TwoDesktopLoadout() => new()
     {
         Name = "feat",
         Desktops =
         {
-            new RecipeDesktop { Label = "api", Steps = { Step(@"C:\Code.exe"), Step(@"C:\wt.exe") } },
-            new RecipeDesktop { Label = "web", Steps = { Step(@"C:\firefox.exe") } },
+            new LoadoutDesktop { Label = "api", Steps = { Step(@"C:\Code.exe"), Step(@"C:\wt.exe") } },
+            new LoadoutDesktop { Label = "web", Steps = { Step(@"C:\firefox.exe") } },
         },
     };
 
     [Fact]
     public void Plan_flattens_desktop_then_step_order_carrying_the_label()
     {
-        var steps = RecipeRun.Plan(TwoDesktopRecipe());
+        var steps = LoadoutRun.Plan(TwoDesktopLoadout());
         Assert.Equal(new[] { @"C:\Code.exe", @"C:\wt.exe", @"C:\firefox.exe" }, steps.Select(s => s.Step.Target));
         Assert.Equal(new[] { "api", "api", "web" }, steps.Select(s => s.DesktopLabel));
         Assert.All(steps, s => Assert.Equal(StepState.NotStarted, s.State));
@@ -38,7 +38,7 @@ public class RecipeRunTests
     {
         var before = new HashSet<nint> { 1 };
         var after = new[] { Win(1, @"C:\old.exe"), Win(2, @"C:\Code.exe") };
-        Assert.Equal(2, RecipeRun.MatchNewWindow(Step(@"C:\Code.exe"), before, after));
+        Assert.Equal(2, LoadoutRun.MatchNewWindow(Step(@"C:\Code.exe"), before, after));
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public class RecipeRunTests
         // The app was already open (handle 5 present before): no NEW window → 0 → caller marks AlreadyOpen.
         var before = new HashSet<nint> { 5 };
         var after = new[] { Win(5, @"C:\Code.exe") };
-        Assert.Equal(0, RecipeRun.MatchNewWindow(Step(@"C:\Code.exe"), before, after));
+        Assert.Equal(0, LoadoutRun.MatchNewWindow(Step(@"C:\Code.exe"), before, after));
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public class RecipeRunTests
     {
         var before = new HashSet<nint>();
         var after = new[] { Win(3, "   "), Win(4, @"c:\CODE.exe") };
-        Assert.Equal(4, RecipeRun.MatchNewWindow(Step(@"C:\Code.exe"), before, after));
+        Assert.Equal(4, LoadoutRun.MatchNewWindow(Step(@"C:\Code.exe"), before, after));
     }
 
     [Fact]
@@ -63,7 +63,7 @@ public class RecipeRunTests
     {
         var before = new HashSet<nint>();
         var after = new[] { Win(2, @"C:\other.exe") };
-        Assert.Equal(0, RecipeRun.MatchNewWindow(Step(@"C:\Code.exe"), before, after));
+        Assert.Equal(0, LoadoutRun.MatchNewWindow(Step(@"C:\Code.exe"), before, after));
     }
 
     [Fact]
@@ -78,6 +78,6 @@ public class RecipeRunTests
             new RunStep(Step(@"C:\e.exe"), "api") { State = StepState.Error, Window = 0 },         // never appeared
         };
 
-        Assert.Equal(new nint[] { 11, 12 }, RecipeRun.CleanupCandidates(steps));
+        Assert.Equal(new nint[] { 11, 12 }, LoadoutRun.CleanupCandidates(steps));
     }
 }

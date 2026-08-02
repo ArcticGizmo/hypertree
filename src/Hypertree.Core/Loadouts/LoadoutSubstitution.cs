@@ -1,31 +1,31 @@
 using System.Text.RegularExpressions;
 
-namespace Hypertree.Recipes;
+namespace Hypertree.Loadouts;
 
 /// <summary>
-/// Fills a recipe's <c>{name}</c> tokens with supplied values, producing a concrete recipe the executor can
+/// Fills a loadout's <c>{name}</c> tokens with supplied values, producing a concrete loadout the executor can
 /// run. Pure and OS-free. Substitution is quote-aware in the <em>arguments</em> field: a bare token whose
 /// value contains whitespace is wrapped in double quotes so it stays a single argument (a token already
 /// written inside quotes is filled in place). Targets and working directories are single values, so they're
 /// filled verbatim. An unknown token (no value supplied) is left as-is, so it's visible rather than silently
 /// blanked.
 /// </summary>
-public static class RecipeSubstitution
+public static class LoadoutSubstitution
 {
     private static readonly Regex Quoted = new("\"\\{(\\w+)\\}\"", RegexOptions.Compiled);
     private static readonly Regex Bare = new(@"\{(\w+)\}", RegexOptions.Compiled);
 
-    /// <summary>A copy of <paramref name="recipe"/> with every command's target / arguments / working
+    /// <summary>A copy of <paramref name="loadout"/> with every command's target / arguments / working
     /// directory filled from <paramref name="values"/> (variable names matched case-insensitively).</summary>
-    public static Recipe Apply(Recipe recipe, IReadOnlyDictionary<string, string> values)
+    public static Loadout Apply(Loadout loadout, IReadOnlyDictionary<string, string> values)
     {
         var lookup = new Dictionary<string, string>(values, StringComparer.OrdinalIgnoreCase);
-        var result = new Recipe { Name = recipe.Name };
-        foreach (RecipeDesktop d in recipe.Desktops)
+        var result = new Loadout { Name = loadout.Name };
+        foreach (LoadoutDesktop d in loadout.Desktops)
         {
-            var nd = new RecipeDesktop { Label = d.Label };
-            foreach (RecipeStep s in d.Steps)
-                nd.Steps.Add(new RecipeStep
+            var nd = new LoadoutDesktop { Label = d.Label };
+            foreach (LoadoutStep s in d.Steps)
+                nd.Steps.Add(new LoadoutStep
                 {
                     Name = s.Name,
                     Hint = s.Hint,

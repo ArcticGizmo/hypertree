@@ -3,7 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Hypertree.Recipes;
+using Hypertree.Loadouts;
 
 namespace Hypertree.App.Views;
 
@@ -18,7 +18,7 @@ internal enum RestoreDecision
 }
 
 /// <summary>
-/// The blocking overlay a recipe restore runs behind (docs/design/session-restore.md): a full-surface card
+/// The blocking overlay a loadout restore runs behind (docs/design/session-restore.md): a full-surface card
 /// listing every step grouped by its target desktop, each row live-updating through its
 /// <see cref="StepState"/> as the executor launches it, finds its window, and places it. A Cancel button
 /// (and Esc) stops launching further steps; when the run ends with windows left on staging, the footer

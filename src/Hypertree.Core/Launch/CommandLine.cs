@@ -1,7 +1,7 @@
 namespace Hypertree.Launch;
 
 /// <summary>
-/// Split a typed command line into a launch target and its arguments, so the recipe builder can accept a
+/// Split a typed command line into a launch target and its arguments, so the loadout builder can accept a
 /// natural single line (<c>code C:\proj</c>, <c>wt -d "C:\a b"</c>, <c>"C:\Program Files\x\app.exe" --flag</c>)
 /// and store it as the <c>Target</c> + <c>Arguments</c> the shell launcher wants. OS-free and unit-tested.
 /// </summary>

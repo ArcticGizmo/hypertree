@@ -4,13 +4,13 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Hypertree.Recipes;
+using Hypertree.Loadouts;
 
 namespace Hypertree.App.Views;
 
 /// <summary>
-/// Fills a recipe's <c>{name}</c> variables before it's applied (docs/design/session-restore.md): one field
-/// per variable, prefilled with its declared default, so the same recipe can outfit any project. Hosted as a
+/// Fills a loadout's <c>{name}</c> variables before it's applied (docs/design/session-restore.md): one field
+/// per variable, prefilled with its declared default, so the same loadout can outfit any project. Hosted as a
 /// card on the <see cref="OverlayStage"/>. A folder variable is flagged so you know a path is wanted (a
 /// picker comes later); the built-in <c>{dir}</c> notes that the <c>htree</c> CLI fills it from the current
 /// directory. Every field is required — a blank would launch a broken command. Esc cancels; Ctrl+Enter runs.
@@ -30,16 +30,16 @@ internal sealed class VariableFillContent : IStageContent
     private OverlayStage? _stage;
     private bool _submitted;
 
-    public VariableFillContent(IReadOnlyList<VariableSpec> specs, string recipeName,
+    public VariableFillContent(IReadOnlyList<VariableSpec> specs, string loadoutName,
                                Action<IReadOnlyDictionary<string, string>> onFill)
     {
         _onFill = onFill;
 
         var panel = new StackPanel { Spacing = 6 };
-        panel.Children.Add(new TextBlock { Text = $"Apply “{recipeName}”", FontWeight = FontWeight.SemiBold });
+        panel.Children.Add(new TextBlock { Text = $"Apply “{loadoutName}”", FontWeight = FontWeight.SemiBold });
         panel.Children.Add(new TextBlock
         {
-            Text = "Fill in the recipe's variables — its commands use these before it builds the branch.",
+            Text = "Fill in the loadout's variables — its commands use these before it builds the branch.",
             TextWrapping = TextWrapping.Wrap, Foreground = Muted, FontSize = 12, Margin = new Thickness(0, 0, 0, 4),
         });
 

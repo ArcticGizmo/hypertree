@@ -1,6 +1,6 @@
 using Hypertree.Desktops;
 
-namespace Hypertree.Recipes;
+namespace Hypertree.Loadouts;
 
 /// <summary>Where a step is in the restore pipeline (docs/design/session-restore.md).</summary>
 public enum StepState
@@ -26,19 +26,19 @@ public enum StepState
 }
 
 /// <summary>
-/// A recipe step as it runs: the <see cref="Step"/>, the desktop it targets, its live <see cref="State"/>,
+/// A loadout step as it runs: the <see cref="Step"/>, the desktop it targets, its live <see cref="State"/>,
 /// the <see cref="Window"/> we matched (0 until found), and an optional <see cref="Note"/> for the
 /// AlreadyOpen / Error states. The overlay renders these; the App drives the transitions.
 /// </summary>
 public sealed class RunStep
 {
-    public RecipeStep Step { get; }
+    public LoadoutStep Step { get; }
     public string DesktopLabel { get; }
     public StepState State { get; set; } = StepState.NotStarted;
     public nint Window { get; set; }
     public string? Note { get; set; }
 
-    public RunStep(RecipeStep step, string desktopLabel)
+    public RunStep(LoadoutStep step, string desktopLabel)
     {
         Step = step;
         DesktopLabel = desktopLabel;
@@ -46,16 +46,16 @@ public sealed class RunStep
 }
 
 /// <summary>
-/// The OS-free decisions in a recipe restore: flatten a recipe into an ordered run, work out which window a
+/// The OS-free decisions in a loadout restore: flatten a loadout into an ordered run, work out which window a
 /// just-launched step produced, and work out which windows are safe to close if the run is aborted. The App
 /// owns the timing (launch, poll, settle) and every Win32 call; this is the part worth unit-testing alone.
 /// </summary>
-public static class RecipeRun
+public static class LoadoutRun
 {
     /// <summary>The run's steps, flattened in desktop-then-step order — the order the executor launches
     /// them, so windows can be attributed to steps one at a time.</summary>
-    public static IReadOnlyList<RunStep> Plan(Recipe recipe) =>
-        recipe.Desktops.SelectMany(d => d.Steps.Select(s => new RunStep(s, d.Label))).ToList();
+    public static IReadOnlyList<RunStep> Plan(Loadout loadout) =>
+        loadout.Desktops.SelectMany(d => d.Steps.Select(s => new RunStep(s, d.Label))).ToList();
 
     /// <summary>
     /// The window a step's launch produced: a handle in <paramref name="after"/> but not
@@ -63,7 +63,7 @@ public static class RecipeRun
     /// none — the launch opened no new window (already running / single-instance), which the caller records
     /// as <see cref="StepState.AlreadyOpen"/>. Path match is case-insensitive; blank paths are ignored.
     /// </summary>
-    public static nint MatchNewWindow(RecipeStep step, IReadOnlySet<nint> before, IReadOnlyList<WindowInfo> after)
+    public static nint MatchNewWindow(LoadoutStep step, IReadOnlySet<nint> before, IReadOnlyList<WindowInfo> after)
     {
         foreach (WindowInfo w in after)
         {

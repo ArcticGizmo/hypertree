@@ -4,7 +4,7 @@ using Xunit;
 namespace Hypertree.Tests;
 
 /// <summary>
-/// <see cref="CommandLine.Split"/> turning a typed command line into target + arguments (so the recipe
+/// <see cref="CommandLine.Split"/> turning a typed command line into target + arguments (so the loadout
 /// builder can accept a natural single line), and <see cref="CommandLine.Join"/> recomposing it for display.
 /// </summary>
 public class CommandLineTests

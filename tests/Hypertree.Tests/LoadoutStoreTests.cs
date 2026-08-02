@@ -1,45 +1,45 @@
 using System;
 using System.IO;
-using Hypertree.Recipes;
+using Hypertree.Loadouts;
 using Xunit;
 
 namespace Hypertree.Tests;
 
 /// <summary>
-/// The recipe library round-trips through <see cref="FileRecipeStore"/>, including the nested
+/// The loadout library round-trips through <see cref="FileLoadoutStore"/>, including the nested
 /// desktop/step/placement shape, and a missing file yields an empty library rather than throwing — the same
-/// best-effort contract as the other file stores, so a bad or absent <c>recipes.json</c> never blocks startup.
+/// best-effort contract as the other file stores, so a bad or absent <c>loadouts.json</c> never blocks startup.
 /// </summary>
-public class RecipeStoreTests
+public class LoadoutStoreTests
 {
-    private static FileRecipeStore StoreInTempDir()
+    private static FileLoadoutStore StoreInTempDir()
         => new(Path.Combine(Path.GetTempPath(), "hypertree-tests", Guid.NewGuid().ToString("N")));
 
     [Fact]
-    public void Recipe_round_trips_with_its_desktops_and_steps()
+    public void Loadout_round_trips_with_its_desktops_and_steps()
     {
         var store = StoreInTempDir();
-        var recipe = new Recipe
+        var loadout = new Loadout
         {
             Name = "feat-1",
             Desktops =
             {
-                new RecipeDesktop
+                new LoadoutDesktop
                 {
                     Label = "api",
                     Steps =
                     {
-                        new RecipeStep { Target = @"C:\Code.exe", Name = "Code", Hint = "myrepo — Code", Placement = new Placement { Desktop = "api", Monitor = 2 } },
-                        new RecipeStep { Target = @"C:\wt.exe", Name = "WindowsTerminal", Arguments = "-w 0", WorkingDirectory = @"C:\proj", Placement = new Placement { Desktop = "api" } },
+                        new LoadoutStep { Target = @"C:\Code.exe", Name = "Code", Hint = "myrepo — Code", Placement = new Placement { Desktop = "api", Monitor = 2 } },
+                        new LoadoutStep { Target = @"C:\wt.exe", Name = "WindowsTerminal", Arguments = "-w 0", WorkingDirectory = @"C:\proj", Placement = new Placement { Desktop = "api" } },
                     },
                 },
             },
         };
-        store.Save(new PersistedRecipes { Recipes = { recipe } });
+        store.Save(new PersistedLoadouts { Loadouts = { loadout } });
 
-        Recipe loaded = Assert.Single(store.Load().Recipes);
+        Loadout loaded = Assert.Single(store.Load().Loadouts);
         Assert.Equal("feat-1", loaded.Name);
-        RecipeDesktop desktop = Assert.Single(loaded.Desktops);
+        LoadoutDesktop desktop = Assert.Single(loaded.Desktops);
         Assert.Equal("api", desktop.Label);
         Assert.Equal(new[] { @"C:\Code.exe", @"C:\wt.exe" }, desktop.Steps.Select(s => s.Target));
         Assert.Equal("api", desktop.Steps[0].Placement.Desktop);
@@ -53,6 +53,6 @@ public class RecipeStoreTests
     [Fact]
     public void Missing_file_yields_an_empty_library()
     {
-        Assert.Empty(StoreInTempDir().Load().Recipes);
+        Assert.Empty(StoreInTempDir().Load().Loadouts);
     }
 }

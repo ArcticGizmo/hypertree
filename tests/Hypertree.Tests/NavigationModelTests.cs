@@ -88,7 +88,7 @@ public class NavigationModelTests
         Assert.NotNull(view);
         Assert.Equal("feat-2", view!.Name);
         Assert.Equal(new[] { D(20), D(21) }, view.Desktops.Select(d => d.Id)); // its desktops, in order, by id
-        Assert.Equal(new[] { "x", "y" }, view.Desktops.Select(d => d.Label)); // …carrying their labels for the recipe
+        Assert.Equal(new[] { "x", "y" }, view.Desktops.Select(d => d.Label)); // …carrying their labels for the loadout
     }
 
     [Fact]
