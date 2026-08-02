@@ -38,6 +38,7 @@ internal sealed class LoadoutBuilderContent : IStageContent
     private readonly StackPanel _body;
     private readonly Control _root;
     private OverlayStage? _stage;
+    private bool _shown;
 
     public LoadoutBuilderContent(Loadout working, int monitors, Action<Loadout> onSave)
     {
@@ -80,7 +81,7 @@ internal sealed class LoadoutBuilderContent : IStageContent
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
             Child = inner,
         };
-        _root = new Panel { Children = { card } };
+        _root = new Panel { Focusable = true, Children = { card } };
     }
 
     // ── IStageContent ────────────────────────────────────────────────────────────
@@ -93,6 +94,11 @@ internal sealed class LoadoutBuilderContent : IStageContent
     {
         _stage = stage;
         BuildBody(); // rebuild every time we're (re)shown — reflects a command added/edited on a pushed card
+
+        // First open: focus the name so you can type it straight away. Returning from a pushed command form:
+        // give the builder back the keyboard focus (the pushed card had it), so Esc and the buttons work.
+        if (!_shown) { _shown = true; _name.Focus(); _name.SelectAll(); }
+        else _root.Focus();
     }
 
     public void OnRemoved() { }
@@ -210,7 +216,6 @@ internal sealed class LoadoutBuilderContent : IStageContent
     {
         string line = CommandLine.Join(step.Target, step.Arguments);
         string caption = string.IsNullOrWhiteSpace(step.Name) ? line : $"{step.Name}   {line}";
-        if (!string.IsNullOrWhiteSpace(step.WorkingDirectory)) caption += $"   · in {step.WorkingDirectory}";
 
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(1, GridUnitType.Star)));
@@ -242,7 +247,6 @@ internal sealed class LoadoutBuilderContent : IStageContent
                 Name = res.Name.Length > 0 ? res.Name : target,
                 Target = target,
                 Arguments = args.Length > 0 ? args : null,
-                WorkingDirectory = res.WorkingDirectory,
                 Placement = new Placement { Desktop = d.Label, Monitor = m },
             });
         }, title: $"Add command · Monitor {m}"));
@@ -256,9 +260,8 @@ internal sealed class LoadoutBuilderContent : IStageContent
             step.Name = res.Name.Length > 0 ? res.Name : target;
             step.Target = target;
             step.Arguments = args.Length > 0 ? args : null;
-            step.WorkingDirectory = res.WorkingDirectory;
         }, title: "Edit command",
-           name: step.Name, commandLine: CommandLine.Join(step.Target, step.Arguments), workingDirectory: step.WorkingDirectory));
+           name: step.Name, commandLine: CommandLine.Join(step.Target, step.Arguments)));
     }
 
     private void Save()

@@ -7,9 +7,9 @@ using Avalonia.Media;
 
 namespace Hypertree.App.Views;
 
-/// <summary>The entered values for one command in the loadout builder: an optional display name, the command
-/// line to run (parsed into target + args at save), and an optional working directory.</summary>
-internal sealed record CommandFormResult(string Name, string CommandLine, string? WorkingDirectory);
+/// <summary>The entered values for one command in the loadout builder: an optional display name and the
+/// command line to run (parsed into target + args at save).</summary>
+internal sealed record CommandFormResult(string Name, string CommandLine);
 
 /// <summary>
 /// Add/edit form for a single command in a monitor's list (loadout builder), hosted as a <b>card</b> on the
@@ -26,7 +26,6 @@ internal sealed class CommandFormContent : IStageContent
     private readonly Action<CommandFormResult> _onSave;
     private readonly TextBox _command;
     private readonly TextBox _name;
-    private readonly TextBox _workDir;
     private readonly PromptButton _ok;
     private readonly PromptButton _cancel;
     private readonly Control _root;
@@ -34,13 +33,12 @@ internal sealed class CommandFormContent : IStageContent
     private bool _submitted;
 
     public CommandFormContent(Action<CommandFormResult> onSave, string title,
-                              string? name = null, string? commandLine = null, string? workingDirectory = null)
+                              string? name = null, string? commandLine = null)
     {
         _onSave = onSave;
 
         _command = Field(@"e.g. code C:\proj   ·   wt -d ""C:\proj""", commandLine);
         _name = Field("optional label — e.g. Editor", name);
-        _workDir = Field(@"optional working directory — e.g. C:\projects\app", workingDirectory);
 
         _ok = new PromptButton("Save");
         _ok.Invoked += Submit;
@@ -56,7 +54,6 @@ internal sealed class CommandFormContent : IStageContent
         });
         panel.Children.Add(Labelled("Command", _command));
         panel.Children.Add(Labelled("Name", _name));
-        panel.Children.Add(Labelled("Working directory", _workDir));
         panel.Children.Add(new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 8,
@@ -113,14 +110,8 @@ internal sealed class CommandFormContent : IStageContent
         if (command.Length == 0) return; // the command is required
 
         _submitted = true;
-        _onSave(new CommandFormResult(_name.Text?.Trim() ?? "", command, Optional(_workDir)));
+        _onSave(new CommandFormResult(_name.Text?.Trim() ?? "", command));
         if (_stage?.Current == this) _stage.Back(); // return to the builder, which rebuilds itself
-    }
-
-    private static string? Optional(TextBox box)
-    {
-        string v = box.Text?.Trim() ?? "";
-        return v.Length == 0 ? null : v;
     }
 
     private void Cancel() => _stage?.Back();
