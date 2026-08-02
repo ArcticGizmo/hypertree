@@ -118,11 +118,14 @@ step as a card with its state — `not started`, `creating`, `placing`, `done`,
 
 ## Placement — phased fidelity
 
-| Layer | Captures | Places by |
-|---|---|---|
-| **v1 (desktop only)** | which desktop | virtual desktop assignment (`MoveWindowToDesktop`) |
-| **Monitor** (future) | monitor index + maximized/windowed | desktop + monitor + restore state |
-| **Exact geometry** (future) | monitor + window rect + state | desktop + monitor + exact rect |
+| Layer | Captures | Places by | Status |
+|---|---|---|---|
+| **v1 (desktop only)** | which desktop | virtual desktop assignment (`MoveWindowToDesktop`) | done (Phase B) |
+| **Monitor** | 1-based monitor index (per a shared `EnumDisplayMonitors` ordering) | desktop, then move onto the monitor's work area, re-maximising if it was maximised | done (Phase C) |
+| **Exact geometry** (future) | monitor + window rect + state | desktop + monitor + exact rect | Phase D |
+
+Monitor capture is automatic (the window's `MonitorFromWindow` mapped to an index) and editable in
+the review; placement is best-effort "on the right screen", not exact pixels — that's Phase D.
 
 **Exact geometry is explicitly a future phase, not dropped.** It's the highest-fidelity
 option and the most fragile (per-monitor DPI, apps that ignore or override their restore
@@ -156,10 +159,18 @@ location: **VS Code is a singleton per folder**, so relaunching `Code.exe` bare 
 blank window, not your project; a terminal wants to start in the right directory.
 
 The `RecipeStep` already carries `Arguments` and `WorkingDirectory`, so the answer is to
-let the user **specify** them: the "Sessions…" manager opens a recipe into a detail hub
-where each step is editable (target / arguments / working directory, reusing the
-custom-command form). So a VS Code step gets the folder as an argument, a terminal step
-gets its working directory, and restore relaunches them usefully.
+let the user **specify** them. Capture is now a **review**, not a silent save: snapshotting
+a branch builds a draft recipe and opens it straight away as a **prefilled list of
+suggestions**, one per captured window, each carrying the best guess we have (executable
+path, monitor, and the window title as a hint — e.g. the folder a VS Code window showed).
+The user then refines each suggestion into a real command (`RecipeStepContent`: target /
+arguments / working directory / monitor) or trims it. So a VS Code step gets the folder as
+an argument, a terminal step gets its working directory, and restore relaunches them
+usefully.
+
+*Known limitation:* capture dedupes to one step per executable, so two VS Code windows on
+different folders collapse to one suggestion (the hint shows which one was kept). Adding
+extra steps by hand, and per-window capture, are follow-ups.
 
 *Future nicety:* best-effort **auto-capture** of a process's working directory (via the
 PEB) to pre-fill the field at save time — helps terminals and many apps, though not the

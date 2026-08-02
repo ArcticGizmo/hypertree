@@ -11,6 +11,11 @@ public sealed class Placement
     /// by name. Matching by label (not GUID) is what lets a recipe survive a reboot: the executor recreates
     /// the desktop rather than trying to re-find one that no longer exists.</summary>
     public string Desktop { get; set; } = "";
+
+    /// <summary>The 1-based monitor to place the window on (null = leave it wherever it opens). Captured
+    /// from where the window sat, and editable in the review. Exact position/size is a later phase — this
+    /// only puts the window on the right screen.</summary>
+    public int? Monitor { get; set; }
 }
 
 /// <summary>
@@ -27,6 +32,10 @@ public sealed class RecipeStep
     /// <summary>Display label for the inspector (the captured app's name). Not used to launch — that's
     /// <see cref="Target"/> — but a recipe you can read is the whole point of the recipe model.</summary>
     public string Name { get; set; } = "";
+
+    /// <summary>The window title at capture, kept as a hint when refining the step — e.g. the folder a VS
+    /// Code window had open, which tells the user what argument to add. Informational; not launched.</summary>
+    public string Hint { get; set; } = "";
 
     public Placement Placement { get; set; } = new();
 }

@@ -132,6 +132,7 @@ public class DesktopPollTests
         public IReadOnlyList<WindowInfo> AllWindows() => Array.Empty<WindowInfo>();
         public DesktopId? DesktopOf(nint hwnd) => null;
         public void CloseWindow(nint hwnd) { }
+        public void MoveWindowToMonitor(nint hwnd, int monitor) { }
         public void SwitchTo(DesktopId id) => Now = id;
         public DesktopId Create(string name) => throw new NotSupportedException();
         public void Rename(DesktopId id, string name) { }

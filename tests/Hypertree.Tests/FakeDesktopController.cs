@@ -46,6 +46,10 @@ internal sealed class FakeDesktopController : IDesktopController
     public List<nint> Closed { get; } = new();
     public void CloseWindow(nint hwnd) => Closed.Add(hwnd);
 
+    /// <summary>Every MoveWindowToMonitor call, in order — so restore's monitor placement is assertable.</summary>
+    public List<(nint hwnd, int monitor)> MonitorMoves { get; } = new();
+    public void MoveWindowToMonitor(nint hwnd, int monitor) => MonitorMoves.Add((hwnd, monitor));
+
     /// <summary>Every MoveWindowToDesktop call, in order — so the move flow's output is assertable.</summary>
     public List<(nint hwnd, DesktopId to)> Moves { get; } = new();
 

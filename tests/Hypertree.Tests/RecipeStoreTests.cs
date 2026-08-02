@@ -29,7 +29,7 @@ public class RecipeStoreTests
                     Label = "api",
                     Steps =
                     {
-                        new RecipeStep { Target = @"C:\Code.exe", Name = "Code", Placement = new Placement { Desktop = "api" } },
+                        new RecipeStep { Target = @"C:\Code.exe", Name = "Code", Hint = "myrepo — Code", Placement = new Placement { Desktop = "api", Monitor = 2 } },
                         new RecipeStep { Target = @"C:\wt.exe", Name = "WindowsTerminal", Arguments = "-w 0", WorkingDirectory = @"C:\proj", Placement = new Placement { Desktop = "api" } },
                     },
                 },
@@ -43,6 +43,9 @@ public class RecipeStoreTests
         Assert.Equal("api", desktop.Label);
         Assert.Equal(new[] { @"C:\Code.exe", @"C:\wt.exe" }, desktop.Steps.Select(s => s.Target));
         Assert.Equal("api", desktop.Steps[0].Placement.Desktop);
+        Assert.Equal(2, desktop.Steps[0].Placement.Monitor);
+        Assert.Equal("myrepo — Code", desktop.Steps[0].Hint);
+        Assert.Null(desktop.Steps[1].Placement.Monitor);
         Assert.Equal("-w 0", desktop.Steps[1].Arguments);
         Assert.Equal(@"C:\proj", desktop.Steps[1].WorkingDirectory);
     }

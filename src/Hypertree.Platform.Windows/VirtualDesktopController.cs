@@ -82,10 +82,11 @@ public sealed class VirtualDesktopController : IDesktopController
     // the desktop asked about — the "move windows" picker. Text is best-effort (empty on failure).
     public IReadOnlyList<WindowInfo> WindowsOn(DesktopId id)
     {
+        List<nint> monitors = MonitorHandles(); // computed once per call; windows map their HMONITOR to an index
         var result = new List<WindowInfo>();
         foreach ((nint hwnd, Guid g) in EnumAppWindows())
             if (g == id.Value)
-                result.Add(new WindowInfo(hwnd, TitleOf(hwnd), ProcessOf(hwnd), PathOf(hwnd)));
+                result.Add(new WindowInfo(hwnd, TitleOf(hwnd), ProcessOf(hwnd), PathOf(hwnd), MonitorIndexOf(hwnd, monitors)));
         return result;
     }
 
@@ -108,6 +109,46 @@ public sealed class VirtualDesktopController : IDesktopController
     public void CloseWindow(nint hwnd)
     {
         if (hwnd != 0) PostMessage(hwnd, WM_CLOSE, 0, 0); // graceful; the window owns whether it honours it
+    }
+
+    // The window's monitor as a 1-based index into the shared monitor enumeration (0 if it can't be
+    // resolved). Same enumeration order MoveWindowToMonitor uses, so a captured index means the same screen.
+    private static int MonitorIndexOf(nint hwnd, List<nint> monitors)
+    {
+        nint hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        int i = monitors.IndexOf(hmon);
+        return i >= 0 ? i + 1 : 0;
+    }
+
+    private static List<nint> MonitorHandles()
+    {
+        var list = new List<nint>();
+        EnumDisplayMonitors(0, 0, (nint h, nint _, ref RECT _, nint _) => { list.Add(h); return true; }, 0);
+        return list;
+    }
+
+    // Put a window on the given monitor (1-based). Best-effort "on the right screen" placement, not exact
+    // geometry: keep the window's size (clamped to the target's work area) and drop it at the work-area
+    // top-left; a maximised window is restored, moved, then re-maximised so it fills the destination screen.
+    public void MoveWindowToMonitor(nint hwnd, int monitor)
+    {
+        if (hwnd == 0 || monitor < 1) return;
+        List<nint> monitors = MonitorHandles();
+        if (monitor > monitors.Count) return;
+
+        var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        if (!GetMonitorInfo(monitors[monitor - 1], ref mi)) return;
+        RECT work = mi.rcWork;
+
+        bool zoomed = IsZoomed(hwnd);
+        if (zoomed) ShowWindow(hwnd, SW_RESTORE);
+        if (GetWindowRect(hwnd, out RECT r))
+        {
+            int w = Math.Min(r.right - r.left, work.right - work.left);
+            int h = Math.Min(r.bottom - r.top, work.bottom - work.top);
+            SetWindowPos(hwnd, 0, work.left, work.top, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        if (zoomed) ShowWindow(hwnd, SW_MAXIMIZE);
     }
 
     // Walk every top-level window once, keeping only the "real" app windows (IsCountableWindow) that
@@ -209,6 +250,21 @@ public sealed class VirtualDesktopController : IDesktopController
     private static extern bool QueryFullProcessImageName(nint process, uint flags, System.Text.StringBuilder buf, ref int size);
     private const uint WM_CLOSE = 0x0010;
     [DllImport("user32.dll")] private static extern bool PostMessage(nint hwnd, uint msg, nint wParam, nint lParam);
+
+    // Monitor placement (recipe restore). One shared EnumDisplayMonitors ordering keys both capture and place.
+    private const uint MONITOR_DEFAULTTONEAREST = 2;
+    private const int SW_RESTORE = 9, SW_MAXIMIZE = 3;
+    private const uint SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010;
+    [StructLayout(LayoutKind.Sequential)] private struct RECT { public int left, top, right, bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags; }
+    private delegate bool MonitorEnumProc(nint hMonitor, nint hdc, ref RECT rect, nint data);
+    [DllImport("user32.dll")] private static extern bool EnumDisplayMonitors(nint hdc, nint clip, MonitorEnumProc cb, nint data);
+    [DllImport("user32.dll")] private static extern nint MonitorFromWindow(nint hwnd, uint flags);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetMonitorInfoW")] private static extern bool GetMonitorInfo(nint hmon, ref MONITORINFO mi);
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(nint hwnd, out RECT r);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(nint hwnd, nint after, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] private static extern bool IsZoomed(nint hwnd);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(nint hwnd, int cmd);
 
     // Switch/rename/remove tolerate a desktop that no longer exists (e.g. the user deleted it from
     // Task View): the id is stale, so there's nothing to do — no-op rather than crash the tray. The

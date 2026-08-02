@@ -2,7 +2,6 @@ using Hypertree.App.Views;
 using Hypertree.Launch;
 using Hypertree.Recipes;
 using Hypertree.Scopes;
-using Hypertree.Settings;
 
 namespace Hypertree.App;
 
@@ -83,37 +82,38 @@ public sealed partial class App
         if (replaceTop > 0) _stage?.ReplaceTop(replaceTop, palette); else _stage?.Present(palette);
     }
 
-    // A step's one-line detail: what it launches, with its arguments and working directory when set.
+    // A step's one-line detail: what it launches, with its arguments, working directory and monitor when set.
     private static string StepSummary(RecipeStep s)
     {
         string txt = s.Target;
         if (!string.IsNullOrWhiteSpace(s.Arguments)) txt += " " + s.Arguments;
-        if (!string.IsNullOrWhiteSpace(s.WorkingDirectory)) txt += "  ·  in " + s.WorkingDirectory;
+        var tags = new List<string>();
+        if (!string.IsNullOrWhiteSpace(s.WorkingDirectory)) tags.Add("in " + s.WorkingDirectory);
+        if (s.Placement.Monitor is int m) tags.Add($"monitor {m}");
+        if (tags.Count > 0) txt += "  ·  " + string.Join("  ·  ", tags);
         return txt;
     }
 
-    // Edit a step's launch fields, reusing the custom-command form (same four fields). On save, write them
-    // back into the stored recipe and rebuild the hub.
+    // Refine a step: its target, arguments, working directory and monitor. On save, write them back into
+    // the stored recipe and rebuild the hub.
     private void EditStep(string recipeName, int di, int si)
     {
         if (_recipeStore is null || StepAt(_recipeStore.Load(), recipeName, di, si) is not { } s) return;
 
-        var seed = new CustomCommand(s.Name, s.Target, s.Arguments, s.WorkingDirectory);
-        _stage?.Present(new CustomCommandContent(saved =>
+        _stage?.Present(new RecipeStepContent(edit =>
         {
             PersistedRecipes lib = _recipeStore.Load();
             if (StepAt(lib, recipeName, di, si) is { } step)
             {
-                step.Name = saved.Name;
-                step.Target = saved.Target;
-                step.Arguments = saved.Arguments;
-                step.WorkingDirectory = saved.WorkingDirectory;
+                step.Name = edit.Name;
+                step.Target = edit.Target;
+                step.Arguments = edit.Arguments;
+                step.WorkingDirectory = edit.WorkingDirectory;
+                step.Placement.Monitor = edit.Monitor;
                 _recipeStore.Save(lib);
             }
             OpenRecipe(recipeName, replaceTop: 2); // pop the editor + stale hub, show the updated one
-        }, seed, isEdit: true,
-           title: "Edit step",
-           subtitle: "What to launch when this recipe is restored — give VS Code or a terminal its folder here."));
+        }, s));
     }
 
     // Remove a step (Del on its row); an emptied desktop drops out of the recipe. Rebuilds the hub in place.
@@ -146,9 +146,10 @@ public sealed partial class App
         return $"{desktops} desktop{(desktops == 1 ? "" : "s")} · {steps} app{(steps == 1 ? "" : "s")}";
     }
 
-    // Generate a recipe from the branch's live desktops and save it under the branch name — overwriting any
-    // recipe of the same name, so re-saving a branch updates its recipe in place. Terminal: a notification
-    // confirms and the palette unwinds (reopen "Sessions…" to inspect).
+    // Snapshot the branch's live desktops into a draft recipe (overwriting any recipe of the same name),
+    // then open it as a prefilled review — a list of suggested launch steps to refine into real commands
+    // (add VS Code's folder, a terminal's working directory, fix a monitor) or trim. Nothing is placed
+    // yet; this is just capture + curate.
     private void SaveBranchAsRecipe(BranchView branch)
     {
         if (_model is null || _desktops is null || _recipeStore is null) return;
@@ -159,16 +160,18 @@ public sealed partial class App
             (d.Label, (IReadOnlyList<CapturedApp>)SessionCapture.FromWindows(_desktops.WindowsOn(d.Id))));
         Recipe recipe = RecipeBuilder.FromCapture(branch.Name, captured);
 
+        if (recipe.StepCount == 0)
+        {
+            Notify("Nothing captured", $"No open apps found on “{branch.Name}” to build a recipe from.");
+            return;
+        }
+
         PersistedRecipes lib = _recipeStore.Load();
         lib.Recipes.RemoveAll(x => x.Name.Equals(recipe.Name, StringComparison.OrdinalIgnoreCase));
         lib.Recipes.Add(recipe);
         _recipeStore.Save(lib);
 
-        int steps = recipe.StepCount, desks = recipe.Desktops.Count;
-        Notify(steps > 0 ? "Recipe saved" : "Nothing captured",
-               steps > 0
-                   ? $"“{recipe.Name}” — {steps} app{(steps == 1 ? "" : "s")} across {desks} desktop{(desks == 1 ? "" : "s")}."
-                   : $"No open apps found on “{branch.Name}”. Saved an empty recipe you can fill by re-saving later.");
+        OpenRecipe(recipe.Name, replaceTop: 0); // straight into the review, over the manager
     }
 
     private void ConfirmDeleteRecipe(Recipe recipe)

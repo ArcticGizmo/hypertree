@@ -103,7 +103,12 @@ public sealed partial class App
             rs.Window = hwnd;
             rs.State = StepState.Placing;
             content.Refresh();
-            try { _desktops.MoveWindowToDesktop(hwnd, targets[rs.DesktopLabel]); rs.State = StepState.Done; }
+            try
+            {
+                _desktops.MoveWindowToDesktop(hwnd, targets[rs.DesktopLabel]);
+                if (rs.Step.Placement.Monitor is int monitor) _desktops.MoveWindowToMonitor(hwnd, monitor);
+                rs.State = StepState.Done;
+            }
             catch { rs.State = StepState.Error; rs.Note = "couldn’t place"; }
             content.Refresh();
             _stage.BringToFront();

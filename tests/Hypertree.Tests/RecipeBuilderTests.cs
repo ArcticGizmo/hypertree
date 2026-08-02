@@ -37,6 +37,24 @@ public class RecipeBuilderTests
     }
 
     [Fact]
+    public void Carries_monitor_and_hint_into_the_step()
+    {
+        var apps = (IReadOnlyList<CapturedApp>)new[] { new CapturedApp(@"C:\Code.exe", "Code", Monitor: 2, Hint: "myrepo — Code") };
+        Recipe r = RecipeBuilder.FromCapture("feat", new[] { ("api", apps) });
+
+        RecipeStep step = r.Desktops[0].Steps[0];
+        Assert.Equal(2, step.Placement.Monitor);
+        Assert.Equal("myrepo — Code", step.Hint);
+    }
+
+    [Fact]
+    public void An_unknown_monitor_leaves_placement_monitor_null()
+    {
+        Recipe r = RecipeBuilder.FromCapture("feat", new[] { Desk("api", @"C:\Code.exe") }); // Monitor 0
+        Assert.Null(r.Desktops[0].Steps[0].Placement.Monitor);
+    }
+
+    [Fact]
     public void Drops_desktops_with_no_apps()
     {
         Recipe r = RecipeBuilder.FromCapture("feat", new[]

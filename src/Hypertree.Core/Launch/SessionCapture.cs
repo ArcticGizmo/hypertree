@@ -4,11 +4,12 @@ namespace Hypertree.Launch;
 
 /// <summary>
 /// One application recorded in a captured session — the <paramref name="Path"/> handed to the shell to
-/// relaunch it (a process's full executable path) and a <paramref name="Name"/> for display in any
-/// confirm / card. The launch counterpart of <see cref="AppEntry"/>, but sourced from a window that was
-/// open rather than a Start-menu shortcut.
+/// relaunch it (a process's full executable path), a <paramref name="Name"/> for display, the 1-based
+/// <paramref name="Monitor"/> its window was on (0 = unknown), and a <paramref name="Hint"/> (the window
+/// title at capture) to help the user recognise the suggestion when refining a recipe — e.g. the folder a
+/// VS Code window had open. The launch counterpart of <see cref="AppEntry"/>, sourced from an open window.
 /// </summary>
-public sealed record CapturedApp(string Path, string Name);
+public sealed record CapturedApp(string Path, string Name, int Monitor = 0, string Hint = "");
 
 /// <summary>
 /// The OS-free half of session capture: turn the raw windows found on a desktop into the deduped set of
@@ -33,7 +34,7 @@ public static class SessionCapture
             string path = (w.ExecutablePath ?? "").Trim();
             if (path.Length == 0) continue;   // no path → not relaunchable → not part of the session
             if (!seen.Add(path)) continue;    // one launch per executable, first window wins
-            apps.Add(new CapturedApp(path, DisplayName(w, path)));
+            apps.Add(new CapturedApp(path, DisplayName(w, path), w.Monitor, (w.Title ?? "").Trim()));
         }
         return apps;
     }

@@ -15,6 +15,20 @@ public class SessionCaptureTests
         => new(Hwnd: 1, Title: title, ProcessName: process, ExecutablePath: path);
 
     [Fact]
+    public void Captures_the_monitor_and_title_hint_of_the_first_window_per_app()
+    {
+        var apps = SessionCapture.FromWindows(new[]
+        {
+            new WindowInfo(1, "myrepo — Code", "Code", @"C:\Code.exe", Monitor: 2),
+            new WindowInfo(2, "other — Code", "Code", @"C:\Code.exe", Monitor: 1), // dedup: first window's values win
+        });
+
+        CapturedApp app = Assert.Single(apps);
+        Assert.Equal(2, app.Monitor);
+        Assert.Equal("myrepo — Code", app.Hint);
+    }
+
+    [Fact]
     public void Keeps_one_app_per_executable_first_window_wins()
     {
         var apps = SessionCapture.FromWindows(new[]

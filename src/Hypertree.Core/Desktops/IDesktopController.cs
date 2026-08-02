@@ -89,6 +89,14 @@ public interface IDesktopController
     void CloseWindow(nint hwnd);
 
     /// <summary>
+    /// Move a window onto <paramref name="monitor"/> (1-based, matching the index <see cref="WindowsOn"/>
+    /// records in <see cref="WindowInfo.Monitor"/>). Best-effort placement — keeps the window's size,
+    /// re-maximising it if it was maximised — used by recipe restore to put a window back on the screen it
+    /// was captured from. Exact position/size is a later phase. Out-of-range or a stale handle is a no-op.
+    /// </summary>
+    void MoveWindowToMonitor(nint hwnd, int monitor);
+
+    /// <summary>
     /// Pin a window to all virtual desktops so it stays visible when the desktop switches. Used to
     /// keep the map overlay on screen while you navigate underneath it.
     /// </summary>

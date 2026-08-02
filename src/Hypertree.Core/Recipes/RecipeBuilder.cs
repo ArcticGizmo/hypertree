@@ -28,7 +28,8 @@ public static class RecipeBuilder
                 {
                     Target = app.Path,
                     Name = app.Name,
-                    Placement = new Placement { Desktop = label },
+                    Hint = app.Hint,
+                    Placement = new Placement { Desktop = label, Monitor = app.Monitor > 0 ? app.Monitor : null },
                 });
             recipe.Desktops.Add(desktop);
         }
