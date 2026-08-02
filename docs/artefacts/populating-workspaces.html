@@ -1,0 +1,439 @@
+<style>
+  :root {
+    --mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    /* Light — "blueprint on cool paper" */
+    --ground: #E7ECF3;
+    --panel: #FFFFFF;
+    --panel-2: #F1F5FB;
+    --ink: #14202E;
+    --muted: #576B84;
+    --line: #D2DBE8;
+    --line-strong: #B9C6D8;
+    --accent: #2E63DE;      /* keys, actions, links */
+    --accent-soft: rgba(46,99,222,.10);
+    --context: #A96908;     /* the one reserved concept: working directory / context */
+    --context-soft: rgba(169,105,8,.10);
+    --ok: #1E924F;
+    --grid: rgba(46,99,222,.045);
+    --shadow: 0 1px 0 rgba(20,32,46,.04), 0 12px 30px -18px rgba(20,32,46,.28);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0C1017;
+      --panel: #141A24;
+      --panel-2: #1A212E;
+      --ink: #E7EDF6;
+      --muted: #8C99AE;
+      --line: #253044;
+      --line-strong: #33415A;
+      --accent: #6EA8FF;
+      --accent-soft: rgba(110,168,255,.13);
+      --context: #E8B75B;
+      --context-soft: rgba(232,183,91,.13);
+      --ok: #5BD68A;
+      --grid: rgba(110,168,255,.05);
+      --shadow: 0 1px 0 rgba(0,0,0,.3), 0 18px 40px -22px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #E7ECF3; --panel: #FFFFFF; --panel-2: #F1F5FB; --ink: #14202E;
+    --muted: #576B84; --line: #D2DBE8; --line-strong: #B9C6D8; --accent: #2E63DE;
+    --accent-soft: rgba(46,99,222,.10); --context: #A96908; --context-soft: rgba(169,105,8,.10);
+    --ok: #1E924F; --grid: rgba(46,99,222,.045); --shadow: 0 1px 0 rgba(20,32,46,.04), 0 12px 30px -18px rgba(20,32,46,.28);
+  }
+  :root[data-theme="dark"] {
+    --ground: #0C1017; --panel: #141A24; --panel-2: #1A212E; --ink: #E7EDF6;
+    --muted: #8C99AE; --line: #253044; --line-strong: #33415A; --accent: #6EA8FF;
+    --accent-soft: rgba(110,168,255,.13); --context: #E8B75B; --context-soft: rgba(232,183,91,.13);
+    --ok: #5BD68A; --grid: rgba(110,168,255,.05); --shadow: 0 1px 0 rgba(0,0,0,.3), 0 18px 40px -22px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 100% 30px,
+      var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16.5px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 24px 120px; }
+  .col { max-width: 660px; }
+
+  /* ---- type ---- */
+  h1, h2, h3, .eyebrow, .mono, code, kbd, .step-n, .tag { font-family: var(--mono); }
+  h1 { font-size: clamp(30px, 5.2vw, 46px); line-height: 1.04; letter-spacing: -.02em; font-weight: 700; text-wrap: balance; margin: 0; }
+  h2 { font-size: clamp(20px, 3vw, 25px); letter-spacing: -.01em; font-weight: 700; text-wrap: balance; margin: 0 0 2px; }
+  h3 { font-size: 16px; letter-spacing: 0; font-weight: 700; margin: 0; }
+  p { margin: 0 0 14px; }
+  .lead { font-family: var(--sans); font-size: clamp(17px, 2.4vw, 20px); line-height: 1.5; color: var(--ink); }
+  .eyebrow { font-size: 12px; letter-spacing: .18em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  .muted { color: var(--muted); }
+  strong { font-weight: 700; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+
+  code {
+    font-size: .86em; background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 5px; padding: .08em .4em; color: var(--ink);
+  }
+  code.ctx { color: var(--context); border-color: var(--context-soft); background: var(--context-soft); }
+  kbd {
+    font-size: .8em; font-weight: 600; background: var(--panel); color: var(--accent);
+    border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 6px;
+    padding: .12em .5em; white-space: nowrap;
+  }
+
+  /* ---- rhythm ---- */
+  header.hero { padding: 78px 0 30px; }
+  header.hero .eyebrow { display: block; margin-bottom: 20px; }
+  .hero-sub { margin-top: 22px; }
+  section { padding-top: 46px; }
+  .spine { border-left: 2px solid var(--line); padding-left: 22px; }
+  .sec-label {
+    font-family: var(--mono); font-size: 12.5px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 14px; display: flex; align-items: baseline; gap: 10px;
+  }
+  .sec-label .n { color: var(--accent); font-weight: 700; }
+
+  /* ---- the split (two modes) ---- */
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 22px; }
+  .mode {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px 20px;
+    box-shadow: var(--shadow);
+  }
+  .mode .tag { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .mode h3 { margin: 6px 0 8px; }
+  .mode ul { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 7px; }
+  .mode li { position: relative; padding-left: 18px; font-size: 14.5px; color: var(--muted); }
+  .mode li::before { content: "—"; position: absolute; left: 0; color: var(--line-strong); }
+  .mode.fill { border-color: var(--context-soft); }
+  .mode.fill .tag { color: var(--context); }
+
+  /* ---- context callout ---- */
+  .callout {
+    margin-top: 22px; background: var(--panel); border: 1px solid var(--line);
+    border-left: 3px solid var(--context); border-radius: 10px; padding: 18px 22px; box-shadow: var(--shadow);
+  }
+  .callout .k { color: var(--context); font-weight: 700; }
+  .cmd-before, .cmd-after { font-family: var(--mono); font-size: 13.5px; }
+  .cmd-before { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line-strong); }
+
+  /* ---- journey cards ---- */
+  .journeys { display: grid; gap: 18px; margin-top: 22px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .card-head { padding: 18px 22px 14px; border-bottom: 1px solid var(--line); display: flex; gap: 14px; align-items: flex-start; }
+  .card-badge {
+    flex: none; width: 34px; height: 34px; border-radius: 9px; background: var(--accent-soft);
+    color: var(--accent); font-family: var(--mono); font-weight: 700; font-size: 15px;
+    display: grid; place-items: center; border: 1px solid var(--line);
+  }
+  .card-head .t { flex: 1; }
+  .card-head .chord { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .card-body { padding: 16px 22px 20px; }
+  ol.steps { counter-reset: s; list-style: none; margin: 0 0 4px; padding: 0; display: grid; gap: 11px; }
+  ol.steps li { display: grid; grid-template-columns: 26px 1fr; gap: 12px; align-items: start; }
+  .step-n {
+    counter-increment: s; grid-column: 1; width: 24px; height: 24px; border-radius: 50%;
+    border: 1px solid var(--line-strong); color: var(--muted); font-size: 12px; font-weight: 600;
+    display: grid; place-items: center; margin-top: 1px;
+  }
+  ol.steps li .step-n::before { content: counter(s); }
+  ol.steps li > span:last-child { font-size: 15px; }
+  .verdict { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; margin-top: 16px; padding-top: 15px; border-top: 1px dashed var(--line); }
+  .verdict div { font-size: 14px; }
+  .verdict .lbl { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; display: block; margin-bottom: 3px; }
+  .verdict .good .lbl { color: var(--ok); }
+  .verdict .cost .lbl { color: var(--muted); }
+
+  /* ---- decisions table ---- */
+  .decisions { margin-top: 20px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+  .drow { display: grid; grid-template-columns: 200px 1fr; gap: 0; border-top: 1px solid var(--line); background: var(--panel); }
+  .drow:first-child { border-top: none; }
+  .drow .axis { padding: 14px 18px; font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--ink); background: var(--panel-2); border-right: 1px solid var(--line); }
+  .drow .opts { padding: 13px 18px; font-size: 14.5px; color: var(--muted); }
+  .drow .opts b { color: var(--ink); font-weight: 600; }
+  .pick { color: var(--accent); }
+
+  /* ---- recommendation weave ---- */
+  .weave { margin-top: 22px; background: var(--panel); border: 1px solid var(--accent-soft); border-radius: 14px; padding: 22px 24px; box-shadow: var(--shadow); }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 16px 0 6px; }
+  .flow .node { font-family: var(--mono); font-size: 13px; padding: 7px 11px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); }
+  .flow .node.act { color: var(--accent); border-color: var(--accent-soft); }
+  .flow .node.ctx { color: var(--context); border-color: var(--context-soft); background: var(--context-soft); }
+  .flow .arr { color: var(--muted); font-family: var(--mono); }
+
+  /* ---- open questions ---- */
+  .q { display: grid; gap: 12px; margin-top: 18px; }
+  .q > div { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; }
+  .q h3 { font-size: 14.5px; margin-bottom: 4px; }
+  .q p { margin: 0; font-size: 14.5px; color: var(--muted); }
+
+  .foot { margin-top: 54px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); font-family: var(--mono); }
+
+  @media (max-width: 620px) {
+    .split { grid-template-columns: 1fr; }
+    .drow { grid-template-columns: 1fr; }
+    .drow .axis { border-right: none; border-bottom: 1px solid var(--line); }
+    .verdict { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    header.hero, section { animation: rise .5s cubic-bezier(.2,.7,.3,1) both; }
+    section:nth-of-type(2) { animation-delay: .04s; }
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  }
+</style>
+
+<div class="wrap">
+  <header class="hero">
+    <span class="eyebrow">Hypertree · design brief</span>
+    <h1>Filling the rooms is a<br>different job than building them.</h1>
+    <p class="lead hero-sub col">
+      Arranging desktops is spatial and reflexive — you already do it mid-flow. <em>Populating</em>
+      them is context-heavy and deliberate: what runs here, in which folder, on which screen. The
+      current builder treats both as one big grid, and that's why setup feels like work. This is a
+      brainstorm of ways to make populating its own, lighter act — keyed on the one thing it really
+      turns on: <span class="mono" style="color:var(--context)">context</span>.
+    </p>
+  </header>
+
+  <section>
+    <div class="spine">
+      <div class="sec-label"><span class="n">01</span> The split</div>
+      <h2>Two modes hiding in one screen</h2>
+      <p class="col muted">
+        A branch of empty desktops is just labelled space — free to make, easy to rearrange, no
+        thinking required. The moment you decide <em>what lives there</em>, the cost changes. Naming
+        the modes separately is the first move.
+      </p>
+      <div class="split">
+        <div class="mode">
+          <span class="tag">Structure</span>
+          <h3>Arranging rooms</h3>
+          <ul>
+            <li>Context-free — a name and a place</li>
+            <li>Cheap, reversible, done constantly</li>
+            <li>Spatial: dive, surface, drag on the board</li>
+            <li>Already fast today</li>
+          </ul>
+        </div>
+        <div class="mode fill">
+          <span class="tag">Populating</span>
+          <h3>Furnishing a room</h3>
+          <ul>
+            <li>Context-bound — a folder, then commands</li>
+            <li>Deliberate, occasional, easy to get wrong</li>
+            <li>Command-oriented: what to run, where, which monitor</li>
+            <li>Needs focus — one room's worth at a time</li>
+          </ul>
+        </div>
+      </div>
+      <p class="col muted" style="margin-top:16px">
+        <em>On the name:</em> <strong>Populate</strong> and <strong>Set&nbsp;up</strong> both read
+        well; "Furnish" and "Equip" are more playful. Whatever it's called, it deserves its own verb
+        and its own key — a signal that you're switching from arranging to outfitting.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="spine">
+      <div class="sec-label"><span class="n">02</span> The lever</div>
+      <h2>Almost everything hangs off the working directory</h2>
+      <p class="col">
+        Look at a real dev desktop and the commands all point at the same place — a repo, usually a
+        worktree. Say that place <span class="k" style="color:var(--context);font-weight:700">once</span>
+        and the commands collapse to almost nothing.
+      </p>
+      <div class="callout col">
+        <p style="margin-bottom:10px"><span class="tag" style="font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)">Without a context</span></p>
+        <p class="cmd-before" style="margin:0 0 3px">code C:\repos\app</p>
+        <p class="cmd-before" style="margin:0 0 3px">wt -d "C:\repos\app"</p>
+        <p class="cmd-before" style="margin:0">pwsh -NoExit -Command "cd C:\repos\app; npm run dev"</p>
+        <p style="margin:16px 0 10px"><span class="tag" style="font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--context)">With context = <code class="ctx">C:\repos\app</code></span></p>
+        <p class="cmd-after" style="margin:0 0 3px">code <code class="ctx">.</code></p>
+        <p class="cmd-after" style="margin:0 0 3px">wt</p>
+        <p class="cmd-after" style="margin:0">npm run dev</p>
+      </div>
+      <p class="col" style="margin-top:16px">
+        So context isn't a per-command afterthought — it's the <strong>primary input</strong>, set at
+        the desktop (or the whole workspace) and inherited down. And once context is a named slot, a
+        layout stops being tied to one repo: parameterise it as a token like
+        <code class="ctx">{repo}</code> and the <em>same</em> populate recipe outfits any project.
+        That's the straight line back to the founding idea — <span class="mono">htree populate&nbsp;&lt;worktree&gt;</span>
+        spinning up a whole environment for a branch you just created.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="spine">
+      <div class="sec-label"><span class="n">03</span> Three shapes</div>
+      <h2>Ways the journey could go</h2>
+      <p class="col muted">Not exclusive — each picks a different stance on <em>where</em> you author, <em>when</em> it runs, and <em>how much</em> is on screen at once.</p>
+
+      <div class="journeys">
+
+        <article class="card">
+          <div class="card-head">
+            <div class="card-badge">A</div>
+            <div class="t">
+              <h3>Fill the room you're standing in</h3>
+              <div class="chord">in-place · just-in-time · one desktop · <kbd>Ctrl+Alt+E</kbd></div>
+            </div>
+          </div>
+          <div class="card-body">
+            <ol class="steps">
+              <li><span class="step-n"></span><span>Dive into a branch and land on an empty desktop.</span></li>
+              <li><span class="step-n"></span><span>Press the populate chord. A panel opens for <em>this desktop only</em> — its monitors as slots, a <code class="ctx">context</code> field on top.</span></li>
+              <li><span class="step-n"></span><span>Set the context: a folder, or “inherit from the branch”.</span></li>
+              <li><span class="step-n"></span><span>Type a command or two per monitor — <code>code .</code>, <code>wt</code>, <code>npm run dev</code> — each inheriting the context as its working directory.</span></li>
+              <li><span class="step-n"></span><span>Run now: they launch and land on their monitors — and the desktop quietly remembers them.</span></li>
+            </ol>
+            <div class="verdict">
+              <div class="good"><span class="lbl">Strong</span>No context-switch; you outfit the room you're in. Tiny surface. Rides existing dive/surface muscle memory.</div>
+              <div class="cost"><span class="lbl">Cost</span>No bird's-eye view of the whole branch; you move desktop to desktop (which is the point, but some will miss the map).</div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <div class="card-badge">B</div>
+            <div class="t">
+              <h3>One layout, any repo</h3>
+              <div class="chord">context as a parameter · reusable · the worktree dream</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <ol class="steps">
+              <li><span class="step-n"></span><span>A populate recipe declares a token up front: <code class="ctx">{repo}</code>.</span></li>
+              <li><span class="step-n"></span><span>Commands are written against it — <code>code {repo}</code>, <code>wt -d {repo}</code>.</span></li>
+              <li><span class="step-n"></span><span>Applying asks once: “Context?” You pick a folder — or it's the git worktree you're on.</span></li>
+              <li><span class="step-n"></span><span>The same recipe outfits <em>this</em> project. Tomorrow, a different folder, same layout.</span></li>
+            </ol>
+            <div class="verdict">
+              <div class="good"><span class="lbl">Strong</span>Author your dev layout once, reuse forever. This is the payoff Hypertree's name promised.</div>
+              <div class="cost"><span class="lbl">Cost</span>A token is a concept to learn; some commands still want per-command args on top.</div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <div class="card-badge">C</div>
+            <div class="t">
+              <h3>A guided setup pass</h3>
+              <div class="chord">wizard · desktop-by-desktop · never more than one on screen</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <ol class="steps">
+              <li><span class="step-n"></span><span>Start from an empty branch (rooms only).</span></li>
+              <li><span class="step-n"></span><span>“Populate…” walks you through one desktop at a time: <em>Desktop 1 · api — what runs here?</em></span></li>
+              <li><span class="step-n"></span><span>Set its context, add its commands, <em>Next</em>.</span></li>
+              <li><span class="step-n"></span><span>At the end: run it now, save it as a recipe, or both.</span></li>
+            </ol>
+            <div class="verdict">
+              <div class="good"><span class="lbl">Strong</span>Turns the overwhelming grid into a calm sequence. Great the first time you build a workspace.</div>
+              <div class="cost"><span class="lbl">Cost</span>Linear; poor for tweaking a single desktop later — which is exactly what shape A is for.</div>
+            </div>
+          </div>
+        </article>
+
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="spine">
+      <div class="sec-label"><span class="n">04</span> The decisions underneath</div>
+      <h2>Four dials, set independently</h2>
+      <p class="col muted">The shapes above are just presets on these. Worth choosing each on purpose.</p>
+      <div class="decisions">
+        <div class="drow">
+          <div class="axis">Context source</div>
+          <div class="opts"><b class="pick">A folder per desktop</b> · one folder for the whole branch · a <b>token</b> supplied on apply · <b>derived from the git worktree</b> you're on</div>
+        </div>
+        <div class="drow">
+          <div class="axis">Focus scope</div>
+          <div class="opts">The whole-branch grid (today) · <b class="pick">one desktop at a time</b> · down to one monitor slot</div>
+        </div>
+        <div class="drow">
+          <div class="axis">Timing</div>
+          <div class="opts"><b class="pick">Run it now</b> (populate the live desktop) · author a recipe to apply later · both from the same act</div>
+        </div>
+        <div class="drow">
+          <div class="axis">Memory</div>
+          <div class="opts">Ephemeral — just launch and forget · <b class="pick">remembered on the desktop</b> · promoted to a named, reusable recipe</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="spine">
+      <div class="sec-label"><span class="n">05</span> A recommended weave</div>
+      <h2>Context-first, one desktop at a time, doing and authoring at once</h2>
+      <p class="col">
+        The shapes reinforce each other. Make <strong>context</strong> the first field (dial 1),
+        scope the surface to <strong>one desktop</strong> (dial 2), let it <strong>run now and be
+        remembered</strong> (dials 3–4), and give it a <strong>dedicated key</strong>. You outfit the
+        room you're in; the reusable recipe falls out as a byproduct — no fragile auto-capture, because
+        you typed the commands.
+      </p>
+      <div class="weave col">
+        <div class="flow">
+          <span class="node">on an empty desktop</span>
+          <span class="arr">→</span>
+          <span class="node act">Ctrl+Alt+E</span>
+          <span class="arr">→</span>
+          <span class="node ctx">set context</span>
+          <span class="arr">→</span>
+          <span class="node">commands per monitor</span>
+          <span class="arr">→</span>
+          <span class="node act">run &amp; remember</span>
+        </div>
+        <p class="muted" style="margin:6px 0 0;font-size:14.5px">
+          Repeat per desktop as you move through the branch. “Save as recipe” promotes what you built;
+          re-applying it later asks only for a new context. Whole-branch editing (the current builder)
+          stays as the power-user view for reordering everything at once.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="spine">
+      <div class="sec-label"><span class="n">06</span> Still open</div>
+      <h2>Questions worth deciding before building</h2>
+      <div class="q col">
+        <div>
+          <h3>Monitors inside a single-desktop focus</h3>
+          <p>One desktop still has three screens. Slots left-to-right, or a “default monitor” with per-command overrides? Most commands probably don't care which screen — so maybe monitor is optional, not front-and-centre.</p>
+        </div>
+        <div>
+          <h3>How context is supplied on apply</h3>
+          <p>A typed path, a folder picker, recent folders, or — the good one — the worktree Hypertree already knows you're in. Ordering matters: the worktree case should be one keystroke.</p>
+        </div>
+        <div>
+          <h3>Per-command escape hatch</h3>
+          <p>Inheritance covers the common case; some commands need their own directory or args. Keep an override on each command so the simple path stays simple.</p>
+        </div>
+        <div>
+          <h3>Run-now vs. record</h3>
+          <p>If populating launches immediately, what happens when you re-run it on a desktop that's already populated — top up, skip what's open, or start clean? (The apply flow already has to answer this.)</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <p class="foot">Brainstorm for discussion · not a spec · Hypertree — populating workspaces</p>
+</div>
