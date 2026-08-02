@@ -52,6 +52,10 @@ internal sealed class Args
 
     public string? Value(string flag) => _values.TryGetValue(flag, out string? v) ? v : null;
 
+    /// <summary>Every <c>--name=value</c> pair given, keyed by the flag (with its leading dashes). Used by
+    /// <c>populate</c>, where any such pair is a loadout variable.</summary>
+    public IReadOnlyDictionary<string, string> Values => _values;
+
     public bool Json => Has("--json");
 
     /// <summary>Flags given that no command recognises — reported rather than ignored, so a typo like

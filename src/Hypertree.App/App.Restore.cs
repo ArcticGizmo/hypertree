@@ -39,6 +39,35 @@ public sealed partial class App
             values => ConfirmRestore(LoadoutSubstitution.Apply(loadout, values))));
     }
 
+    // The htree-populate path: pre-fill each variable from the supplied values, then its declared default.
+    // If everything's known, apply straight away (no confirm — the CLI call was the intent); otherwise prompt
+    // for the ones still missing, with the known values prefilled.
+    private void ApplyLoadoutFromValues(Loadout loadout, IReadOnlyDictionary<string, string> supplied)
+    {
+        var supplyLookup = new Dictionary<string, string>(supplied, StringComparer.OrdinalIgnoreCase);
+        IReadOnlyList<VariableSpec> prompts = LoadoutVariables.Prompts(loadout);
+
+        var known = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (VariableSpec p in prompts)
+        {
+            if (supplyLookup.TryGetValue(p.Name, out string? v) && v.Trim().Length > 0) known[p.Name] = v.Trim();
+            else if (!string.IsNullOrWhiteSpace(p.Default)) known[p.Name] = p.Default!;
+        }
+
+        if (prompts.All(p => known.ContainsKey(p.Name)))
+        {
+            RestoreLoadout(LoadoutSubstitution.Apply(loadout, known)); // fully specified — go
+            return;
+        }
+
+        // Prompt for the rest, pre-filling what we already know.
+        var seeded = prompts
+            .Select(p => p with { Default = known.TryGetValue(p.Name, out string? v) ? v : p.Default })
+            .ToList();
+        _stage?.Summon(new VariableFillContent(seeded, loadout.Name,
+            values => RestoreLoadout(LoadoutSubstitution.Apply(loadout, values))));
+    }
+
     // Ask before applying — the confirm doubles as an inspector, listing the desktops and (now filled-in)
     // commands it'll create.
     private void ConfirmRestore(Loadout loadout)

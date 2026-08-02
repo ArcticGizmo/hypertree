@@ -42,6 +42,7 @@ internal static class Program
             "status" => Commands.Status(args),
             "list" or "ls" => Commands.List(args),
             "goto" or "go" => Commands.Goto(args),
+            "populate" or "pop" => Commands.Populate(args),
             "watch" => Commands.Watch(args),
             "help" => Ok(Help.Print),
             _ => Unknown(args.Command),

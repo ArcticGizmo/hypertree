@@ -158,6 +158,53 @@ internal static class Commands
         return ExitCode.Ok;
     }
 
+    // ── populate ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Apply a named loadout as a new branch, filling its variables.</summary>
+    /// <remarks>
+    /// The current working directory is sent as the built-in <c>{dir}</c> variable — the whole point of
+    /// driving this from the shell rather than the tray, which has no meaningful directory. Any other
+    /// variable is passed as <c>--name=value</c> (e.g. <c>--repo=C:\src\app</c>); the tray fills the rest
+    /// from the loadout's declared defaults and prompts for anything still missing. Like <c>goto</c>, the
+    /// tray does the work — this hands off and returns.
+    /// </remarks>
+    public static int Populate(Args args)
+    {
+        string? name = args.Positional.ElementAtOrDefault(1);
+        if (name is null)
+        {
+            Output.Error("populate needs a loadout name. Try: htree populate <name> [--var=value ...]");
+            return ExitCode.BadUsage;
+        }
+
+        // Start from the working directory as {dir}; add every --name=value pair as a variable. Reserved
+        // flags (output/format) aren't variables.
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["dir"] = Directory.GetCurrentDirectory(),
+        };
+        foreach ((string flag, string value) in args.Values)
+        {
+            if (flag is "--json" or "--id") continue;
+            values[flag.TrimStart('-')] = value;
+        }
+
+        ControlResponse response = ControlClient.Send(new ControlRequest
+        {
+            Command = ControlRequest.CommandPopulate,
+            Populate = new PopulateRequest { Name = name, Values = values },
+        });
+
+        if (!response.Ok)
+        {
+            Output.Error(response.Error ?? "populate failed.");
+            return response.Code;
+        }
+
+        if (args.Has("--verbose") || args.Has("-v")) Output.Line(response.Landed ?? $"populating {name}");
+        return ExitCode.Ok;
+    }
+
     // ── watch ────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>

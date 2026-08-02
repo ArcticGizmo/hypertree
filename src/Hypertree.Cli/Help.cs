@@ -23,6 +23,7 @@ internal static class Help
         Output.Line($"  status              Where you are now, as {d("branch/desktop")}");
         Output.Line("  list, ls            The stack, top to bottom, main in its slot");
         Output.Line("  goto, go <target>   Jump to a branch, or a desktop on it");
+        Output.Line($"  populate, pop <name>  Apply a loadout as a new branch {d("({dir} = this directory)")}");
         Output.Line("  watch               Stream position changes until interrupted");
         Output.Line("  help                This text");
         Output.Line();
@@ -51,6 +52,8 @@ internal static class Help
         Output.Line($"  htree goto perch/docs          {d("# a named desktop on it")}");
         Output.Line($"  htree goto notes/2             {d("# the second desktop on 'notes'")}");
         Output.Line($"  htree list --all               {d("# the whole layout")}");
+        Output.Line($"  htree populate dev             {d("# build the 'dev' loadout here ({dir}=cwd)")}");
+        Output.Line($"  htree populate dev --repo=C:\\src\\app   {d("# ...supplying another variable")}");
         Output.Line($"  htree watch | while read p; do notify \"$p\"; done");
         Output.Line();
         Output.Line($"  {d("PowerShell prompt:")}");
@@ -65,6 +68,6 @@ internal static class Help
         Output.Line(b("NOTES"));
         Output.Line($"  Reads come from {d(StatusFile.FilePath)}");
         Output.Line("  which the tray keeps current — including switches made outside Hypertree");
-        Output.Line("  (Win+Ctrl+Arrow, Task View). Only 'goto' talks to the tray.");
+        Output.Line("  (Win+Ctrl+Arrow, Task View). Only 'goto' and 'populate' talk to the tray.");
     }
 }

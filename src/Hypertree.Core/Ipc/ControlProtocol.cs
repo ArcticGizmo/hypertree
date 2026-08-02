@@ -81,8 +81,24 @@ public sealed class ControlRequest
     /// <summary>Populated when <see cref="Command"/> is <c>goto</c>.</summary>
     public GotoRequest? Goto { get; set; }
 
+    /// <summary>Populated when <see cref="Command"/> is <c>populate</c>.</summary>
+    public PopulateRequest? Populate { get; set; }
+
     public const string CommandGoto = "goto";
     public const string CommandPing = "ping";
+    public const string CommandPopulate = "populate";
+}
+
+/// <summary>Apply a named loadout as a new branch, supplying its <c>{name}</c> variable values. The client
+/// always sends the built-in <c>dir</c> (its current working directory); the tray fills the rest from the
+/// values given, then their declared defaults, and prompts for anything still missing.</summary>
+public sealed class PopulateRequest
+{
+    public string Name { get; set; } = "";
+
+    /// <summary>Variable values, keyed by variable name (case matched loosely by the tray). Includes
+    /// <c>dir</c> = the caller's working directory, plus any the caller passed explicitly.</summary>
+    public Dictionary<string, string> Values { get; set; } = new();
 }
 
 /// <summary>Jump to a row's resume desktop, or to a specific desktop on it.</summary>

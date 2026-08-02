@@ -87,7 +87,25 @@ public sealed partial class App
 
     // Temporary home for "apply a loadout as a new branch" until branch creation absorbs it: a palette of
     // loadouts; choosing one confirms then restores. (Restore itself lives in App.Restore.cs.)
-    private void ShowApplyLoadout()
+    // The apply palette currently on the stage, so a second Ctrl+Alt+E toggles *it* closed rather than any
+    // other palette showing. Stale once dismissed — compared by reference to Current.
+    private PaletteContent? _applyPalette;
+
+    // Ctrl+Alt+E. Re-press while the apply palette is current toggles it closed; otherwise open it.
+    private void ToggleApplyLoadout()
+    {
+        if (_stage?.Current is MoveContent) return; // don't stack over an active window move
+        if (_applyPalette is not null && _stage?.Current == _applyPalette)
+        {
+            if (_stage.HasDurableBase) _stage.Back(); else _stage.Dismiss();
+            return;
+        }
+        ShowApplyLoadout(overCurrent: _overlay?.IsOpen == true);
+    }
+
+    // <param name="overCurrent">true: push over the current surface (the map), so Esc pops back to it.
+    // false: a fresh root (the chord from a bare desktop), so Esc dismisses.</param>
+    private void ShowApplyLoadout(bool overCurrent)
     {
         if (_loadoutStore is null) return;
         var items = _loadoutStore.Load().Loadouts.Select(loadout =>
@@ -100,8 +118,10 @@ public sealed partial class App
             items.Add(new PaletteItem("No loadouts yet", "build one in “Loadouts…” first", null, () => _stage?.Back(),
                                       DisabledReason: "build one in “Loadouts…” first"));
 
-        _stage?.Present(new PaletteContent("Apply loadout as a new branch…",
-            "↑↓ move · ↵ apply · Esc back", items));
+        var palette = new PaletteContent("Apply loadout as a new branch…",
+            "↑↓ move · ↵ apply · Esc back", items, clearSearchOnShow: true);
+        _applyPalette = palette;
+        if (overCurrent) _stage?.Present(palette); else _stage?.Summon(palette);
     }
 
     private static Loadout? FindLoadout(PersistedLoadouts lib, string name) =>

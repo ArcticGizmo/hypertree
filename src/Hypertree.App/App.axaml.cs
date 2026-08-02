@@ -299,8 +299,30 @@ public sealed partial class App : Application
     {
         ControlRequest.CommandPing => ControlResponse.Success(),
         ControlRequest.CommandGoto => HandleGoto(request.Goto),
+        ControlRequest.CommandPopulate => HandlePopulate(request.Populate),
         _ => ControlResponse.Failure(ExitCode.BadUsage, $"Unknown command '{request.Command}'."),
     };
+
+    // htree populate <name>: apply a named loadout as a new branch, using the caller's supplied variables
+    // (its working directory as {dir}, plus any it passed). The tray fills the rest from defaults and prompts
+    // for anything still missing, then runs the apply overlay — so this returns as soon as the work is kicked
+    // off, the way goto returns once the jump is made.
+    private ControlResponse HandlePopulate(PopulateRequest? req)
+    {
+        if (_model is null || _desktops is null || _loadoutStore is null)
+            return ControlResponse.Failure(ExitCode.Failed, "Hypertree is still starting up.");
+        if (req is null || string.IsNullOrWhiteSpace(req.Name))
+            return ControlResponse.Failure(ExitCode.BadUsage, "populate needs a loadout name.");
+
+        Loadout? loadout = FindLoadout(_loadoutStore.Load(), req.Name);
+        if (loadout is null)
+            return ControlResponse.Failure(ExitCode.UnknownTarget, $"No loadout named “{req.Name}”.");
+        if (loadout.Desktops.Count == 0)
+            return ControlResponse.Failure(ExitCode.Failed, $"“{loadout.Name}” has no desktops to apply.");
+
+        ApplyLoadoutFromValues(loadout, req.Values ?? new Dictionary<string, string>());
+        return ControlResponse.Success($"populating {loadout.Name}");
+    }
 
     private ControlResponse HandleGoto(GotoRequest? go)
     {
@@ -381,6 +403,7 @@ public sealed partial class App : Application
         HotkeyCommand.CommandPalette => ToggleCommandPalette,
         HotkeyCommand.OpenMap        => ToggleMap,
         HotkeyCommand.AppLauncher    => ToggleAppLauncher,
+        HotkeyCommand.ApplyLoadout   => ToggleApplyLoadout,
         HotkeyCommand.MoveWindows    => ToggleMoveWindows, // no default chord; only a user's kept rebinding fires this
         HotkeyCommand.Peek           => () => Peek(mods),
         HotkeyCommand.UndoNav        => () => StepHistory(back: true, mods),
@@ -1005,7 +1028,7 @@ public sealed partial class App : Application
             new("Layouts…", LayoutsPrompt),
             // Build / edit / delete workspace loadouts, and apply one as a new branch.
             new("Loadouts…", () => ShowLoadoutsManager(refresh: false)),
-            new("Apply loadout…", ShowApplyLoadout),
+            new("Apply loadout…", () => ShowApplyLoadout(overCurrent: true)),
             // Quit Hypertree — behind a confirm (see ExitHypertree), since it's easy to land on while
             // typing/navigating the palette (unlike the deliberate tray menu item).
             new("Exit Hypertree", ExitHypertree),

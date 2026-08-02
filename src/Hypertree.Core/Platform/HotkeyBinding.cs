@@ -28,6 +28,9 @@ public enum HotkeyCommand
     // Open the application launcher: a spotlight over installed apps plus the user's custom commands.
     // Defaults to Ctrl+Alt+O. Appended last so existing settings.json bindings keep deserializing.
     AppLauncher,
+    // Apply a loadout as a new branch: pick one, fill its variables, and populate the workspace. Defaults
+    // to Ctrl+Alt+E. Appended last so existing settings.json bindings keep deserializing.
+    ApplyLoadout,
 }
 
 /// <summary>A modifier combination plus a trigger key — the shape a global hotkey registers.</summary>
@@ -61,7 +64,7 @@ public static class Hotkeys
         HotkeyCommand.Dive, HotkeyCommand.Surface, HotkeyCommand.MoveLeft, HotkeyCommand.MoveRight,
         HotkeyCommand.UndoNav, HotkeyCommand.RedoNav, HotkeyCommand.ToggleNav,
         HotkeyCommand.Peek, HotkeyCommand.CommandPalette, HotkeyCommand.OpenMap,
-        HotkeyCommand.AppLauncher,
+        HotkeyCommand.AppLauncher, HotkeyCommand.ApplyLoadout,
     };
 
     /// <summary>The out-of-the-box chords. Ctrl+Alt+Arrow is the nav layer (M0: Win+Ctrl+Arrow is the
@@ -81,6 +84,7 @@ public static class Hotkeys
             [HotkeyCommand.CommandPalette] = new(NavMods, HotkeyKey.P),
             [HotkeyCommand.OpenMap]        = new(NavMods, HotkeyKey.M),
             [HotkeyCommand.AppLauncher]    = new(NavMods, HotkeyKey.O),
+            [HotkeyCommand.ApplyLoadout]   = new(NavMods, HotkeyKey.E),
         };
 
     private const HotkeyModifiers NavMods = HotkeyModifiers.Control | HotkeyModifiers.Alt;
@@ -98,6 +102,7 @@ public static class Hotkeys
         HotkeyCommand.CommandPalette => "Command palette",
         HotkeyCommand.OpenMap        => "Open map",
         HotkeyCommand.AppLauncher    => "App launcher",
+        HotkeyCommand.ApplyLoadout   => "Apply loadout",
         HotkeyCommand.MoveWindows    => "Move windows",
         _ => command.ToString(),
     };
