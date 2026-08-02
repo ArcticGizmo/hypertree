@@ -1003,8 +1003,9 @@ public sealed partial class App : Application
             // move-windows is triggered from the map ("m"), not from here.
             // Save / restore / reset the whole desktop+branch arrangement — one manager for all three.
             new("Layouts…", LayoutsPrompt),
-            // Capture a branch as a recipe, inspect or delete saved recipes (session restore — Phase A).
-            new("Sessions…", () => ShowSessionsManager(refresh: false)),
+            // Build / edit / delete workspace recipes, and apply one as a new branch.
+            new("Recipes…", () => ShowRecipesManager(refresh: false)),
+            new("Apply recipe…", ShowApplyRecipe),
             // Quit Hypertree — behind a confirm (see ExitHypertree), since it's easy to land on while
             // typing/navigating the palette (unlike the deliberate tray menu item).
             new("Exit Hypertree", ExitHypertree),
