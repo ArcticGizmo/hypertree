@@ -44,7 +44,7 @@ internal sealed class RecipeBuilderContent : IStageContent
         _monitors = Math.Max(1, monitors);
         _onSave = onSave;
 
-        _name = new TextBox { Text = _recipe.Name, Width = 320, FontFamily = Mono, FontSize = 14, Watermark = "recipe name" };
+        _name = new TextBox { Text = _recipe.Name, Width = 320, FontFamily = Mono, FontSize = 14, PlaceholderText = "recipe name" };
         _body = new StackPanel { Spacing = 10 };
 
         var save = Btn("Save recipe", Save, accent: true);
