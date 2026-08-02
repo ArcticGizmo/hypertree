@@ -26,6 +26,7 @@ internal sealed class RecipeBuilderContent : IStageContent
     private static readonly IBrush Ink = new SolidColorBrush(Color.Parse("#E8EDF5"));
     private static readonly IBrush Muted = new SolidColorBrush(Color.Parse("#9AA6B8"));
     private static readonly IBrush Accent = new SolidColorBrush(Color.Parse("#6EA8FF"));
+    private static readonly IBrush Amber = new SolidColorBrush(Color.Parse("#E8B75B")); // {variable} tokens
     private static readonly IBrush Red = new SolidColorBrush(Color.Parse("#E86A6A"));
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
 
@@ -110,7 +111,52 @@ internal sealed class RecipeBuilderContent : IStageContent
             _body.Children.Add(new TextBlock { Text = "No desktops yet — add one below.", Foreground = Muted, FontFamily = Mono, FontSize = 13, Margin = new Thickness(2, 6) });
         for (int di = 0; di < _recipe.Desktops.Count; di++)
             _body.Children.Add(DesktopSection(di));
+
+        if (RecipeVariables.Discover(_recipe).Count > 0)
+            _body.Children.Add(VariablesSection());
     }
+
+    // Any {name} token used in the commands becomes a variable filled when the recipe is applied. This
+    // section lets you give each a default and mark it a folder — everything else is discovered automatically.
+    private Control VariablesSection()
+    {
+        var rows = new StackPanel { Spacing = 6, Margin = new Thickness(0, 6, 0, 0) };
+        foreach (string name in RecipeVariables.Discover(_recipe))
+        {
+            RecipeVariable v = _recipe.Variables.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                               ?? Add(new RecipeVariable { Name = name });
+            bool isDir = name.Equals(RecipeVariables.Dir, StringComparison.OrdinalIgnoreCase);
+
+            var def = new TextBox { Text = v.Default ?? "", PlaceholderText = "default (optional)", FontFamily = Mono, FontSize = 13 };
+            def.TextChanged += (_, _) => v.Default = string.IsNullOrWhiteSpace(def.Text) ? null : def.Text!.Trim();
+            var kind = Btn(v.Kind == VariableKind.Folder ? "folder" : "text",
+                () => { v.Kind = v.Kind == VariableKind.Folder ? VariableKind.Text : VariableKind.Folder; BuildBody(); });
+
+            var row = new Grid { Margin = new Thickness(0, 0, 0, 0) };
+            row.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(130)));
+            row.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(1, GridUnitType.Star)));
+            row.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+            var tok = new TextBlock { Text = $"{{{name}}}", Foreground = Amber, FontFamily = Mono, FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
+            if (isDir) { def.IsEnabled = false; def.PlaceholderText = "the CLI fills this"; }
+            Grid.SetColumn(tok, 0); Grid.SetColumn(def, 1); Grid.SetColumn(kind, 2);
+            row.Children.Add(tok); row.Children.Add(def); row.Children.Add(kind);
+            rows.Children.Add(row);
+        }
+
+        return new Border
+        {
+            Background = Panel, BorderBrush = Stroke, BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8), Padding = new Thickness(14, 12),
+            Child = new StackPanel { Children =
+            {
+                new TextBlock { Text = "Variables", Foreground = Amber, FontFamily = Mono, FontSize = 13, FontWeight = FontWeight.SemiBold },
+                new TextBlock { Text = "Filled in when the recipe is applied — so one recipe fits any project. {dir} is filled from the current directory by the htree CLI.", Foreground = Muted, FontFamily = Mono, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 4) },
+                rows,
+            } },
+        };
+    }
+
+    private RecipeVariable Add(RecipeVariable v) { _recipe.Variables.Add(v); return v; }
 
     private Control DesktopSection(int di)
     {
@@ -221,11 +267,17 @@ internal sealed class RecipeBuilderContent : IStageContent
         if (name.Length == 0) { _name.Focus(); return; } // a recipe needs a name
         _recipe.Name = name;
 
-        // Keep each step's placement label in step with its desktop (a rename could have left it stale), then
-        // hand the finished recipe back to the App to persist.
+        // Keep each step's placement label in step with its desktop (a rename could have left it stale).
         foreach (RecipeDesktop d in _recipe.Desktops)
             foreach (RecipeStep s in d.Steps)
                 s.Placement.Desktop = d.Label;
+
+        // Drop variable declarations that are no longer used, or that carry no real metadata (no default and
+        // the plain text kind) — those are fully covered by discovery and needn't be stored.
+        var used = RecipeVariables.Discover(_recipe).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _recipe.Variables.RemoveAll(v => !used.Contains(v.Name)
+                                         || (string.IsNullOrWhiteSpace(v.Default) && v.Kind == VariableKind.Text));
+
         _onSave(_recipe);
     }
 

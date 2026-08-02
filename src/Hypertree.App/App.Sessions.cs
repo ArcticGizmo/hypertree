@@ -93,7 +93,7 @@ public sealed partial class App
         var items = _recipeStore.Load().Recipes.Select(recipe =>
         {
             Recipe r = recipe;
-            return new PaletteItem(r.Name, DescribeRecipe(r), "▶", () => ConfirmRestore(r));
+            return new PaletteItem(r.Name, DescribeRecipe(r), "▶", () => BeginApply(r));
         }).ToList();
 
         if (items.Count == 0)

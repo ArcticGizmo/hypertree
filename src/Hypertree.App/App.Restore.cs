@@ -1,6 +1,7 @@
 using System.Threading.Tasks;
 using Hypertree.App.Views;
 using Hypertree.Desktops;
+using Hypertree.Launch;
 using Hypertree.Recipes;
 using Hypertree.Scopes;
 
@@ -21,22 +22,41 @@ public sealed partial class App
     private const int PollMs = 150;          // how often to look for a launched window
     private const int LaunchTimeoutMs = 8000; // give a slow app this long to show its first window
 
-    // Ask before restoring — the confirm doubles as an inspector, listing the desktops and apps it'll create.
+    // Applying a recipe: if it uses {name} variables, fill them first, substitute, then confirm the filled
+    // commands; otherwise straight to the confirm. Keeps one recipe reusable across projects.
+    private void BeginApply(Recipe recipe)
+    {
+        if (recipe.Desktops.Count == 0)
+        {
+            Notify("Empty recipe", $"“{recipe.Name}” has no desktops — build one first.");
+            return;
+        }
+
+        IReadOnlyList<VariableSpec> prompts = RecipeVariables.Prompts(recipe);
+        if (prompts.Count == 0) { ConfirmRestore(recipe); return; }
+
+        _stage?.Present(new VariableFillContent(prompts, recipe.Name,
+            values => ConfirmRestore(RecipeSubstitution.Apply(recipe, values))));
+    }
+
+    // Ask before applying — the confirm doubles as an inspector, listing the desktops and (now filled-in)
+    // commands it'll create.
     private void ConfirmRestore(Recipe recipe)
     {
         if (recipe.Desktops.Count == 0)
         {
-            Notify("Empty recipe", $"“{recipe.Name}” has nothing to restore — save a branch with some apps open first.");
+            Notify("Empty recipe", $"“{recipe.Name}” has nothing to apply — build one first.");
             return;
         }
-        _stage?.Present(new ConfirmContent(RestoreConfirmMessage(recipe), () => RestoreRecipe(recipe), confirmLabel: "Restore"));
+        _stage?.Present(new ConfirmContent(RestoreConfirmMessage(recipe), () => RestoreRecipe(recipe), confirmLabel: "Apply"));
     }
 
     private static string RestoreConfirmMessage(Recipe r)
     {
-        IEnumerable<string> lines = r.Desktops.Select(d => $"  {d.Label}: {string.Join(", ", d.Steps.Select(s => s.Name))}");
-        return $"Restore “{r.Name}”?\n" +
-               $"Creates a new branch and launches {r.StepCount} app{(r.StepCount == 1 ? "" : "s")} onto " +
+        IEnumerable<string> lines = r.Desktops.Select(d =>
+            $"  {d.Label}: {string.Join("  ·  ", d.Steps.Select(s => CommandLine.Join(s.Target, s.Arguments)))}");
+        return $"Apply “{r.Name}”?\n" +
+               $"Creates a new branch and runs {r.StepCount} command{(r.StepCount == 1 ? "" : "s")} across " +
                $"{r.Desktops.Count} desktop{(r.Desktops.Count == 1 ? "" : "s")}:\n" +
                string.Join("\n", lines);
     }
