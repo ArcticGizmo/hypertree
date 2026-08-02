@@ -13,6 +13,10 @@ public interface IDesktopController
     /// <summary>Number of virtual desktops the OS currently has.</summary>
     int Count { get; }
 
+    /// <summary>Number of physical monitors attached — the number of per-desktop slots the recipe builder
+    /// draws, and the range a step's <see cref="WindowInfo.Monitor"/> / placement index runs over. At least 1.</summary>
+    int MonitorCount { get; }
+
     /// <summary>The desktop currently shown across the monitor array.</summary>
     DesktopId Current { get; }
 

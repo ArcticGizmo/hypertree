@@ -21,6 +21,10 @@ internal sealed class FakeDesktopController : IDesktopController
     }
 
     public int Count => _desktops.Count;
+
+    /// <summary>Monitor count a test can set to exercise the recipe builder's per-desktop slots. Default 1.</summary>
+    public int MonitorCount { get; set; } = 1;
+
     public DesktopId Current { get; private set; }
     public IReadOnlyList<DesktopInfo> List() => _desktops;
 

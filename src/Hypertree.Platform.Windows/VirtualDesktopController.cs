@@ -47,6 +47,8 @@ public sealed class VirtualDesktopController : IDesktopController
 
     public int Count => _vdm.GetCount();
 
+    public int MonitorCount => Math.Max(1, MonitorHandles().Count);
+
     public DesktopId Current => new(_vdm.GetCurrentDesktop().GetId());
 
     public IReadOnlyList<DesktopInfo> List()

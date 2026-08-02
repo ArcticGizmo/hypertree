@@ -126,6 +126,7 @@ public class DesktopPollTests
         public DesktopId Current => Throw ? throw new InvalidOperationException("shell gone") : Now;
 
         public int Count => 1;
+        public int MonitorCount => 1;
         public IReadOnlyList<DesktopInfo> List() => new[] { new DesktopInfo(Now, "d", 0) };
         public IReadOnlyDictionary<DesktopId, int> WindowCounts() => new Dictionary<DesktopId, int>();
         public IReadOnlyList<WindowInfo> WindowsOn(DesktopId id) => Array.Empty<WindowInfo>();
