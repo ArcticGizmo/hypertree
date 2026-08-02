@@ -37,14 +37,18 @@ internal sealed class CustomCommandContent : IStageContent
     /// name for a fresh add. Null starts blank.</param>
     /// <param name="isEdit">Titles the card "Edit"/"Add" and the button "Save"/"Add". Kept separate from
     /// <paramref name="seed"/> so a name-prefilled add still reads as an add.</param>
-    public CustomCommandContent(Action<CustomCommand> onSave, CustomCommand? seed = null, bool isEdit = false)
+    /// <param name="title">Overrides the card heading — the same four-field form edits a recipe step, where
+    /// "custom command" would be the wrong words.</param>
+    /// <param name="subtitle">Overrides the explanatory line under the heading.</param>
+    public CustomCommandContent(Action<CustomCommand> onSave, CustomCommand? seed = null, bool isEdit = false,
+                                string? title = null, string? subtitle = null)
     {
         _onSave = onSave;
         CustomCommand? existing = seed;
 
         _name = Field("e.g. Open work email", existing?.Name);
         _target = Field(@"app, file, folder or URL — e.g. https://mail.google.com", existing?.Target);
-        _args = Field("optional arguments", existing?.Arguments);
+        _args = Field(@"optional arguments — e.g. a folder for VS Code", existing?.Arguments);
         _workDir = Field(@"optional working directory — e.g. C:\projects", existing?.WorkingDirectory);
 
         _ok = new PromptButton(isEdit ? "Save" : "Add");
@@ -62,9 +66,9 @@ internal sealed class CustomCommandContent : IStageContent
                 Spacing = 6,
                 Children =
                 {
-                    new TextBlock { Text = isEdit ? "Edit custom command" : "Add custom command",
+                    new TextBlock { Text = title ?? (isEdit ? "Edit custom command" : "Add custom command"),
                                     FontWeight = FontWeight.SemiBold },
-                    new TextBlock { Text = "Launched through the shell, exactly as if you double-clicked it.",
+                    new TextBlock { Text = subtitle ?? "Launched through the shell, exactly as if you double-clicked it.",
                                     TextWrapping = TextWrapping.Wrap, Foreground = Muted, FontSize = 12,
                                     Margin = new Thickness(0, 0, 0, 4) },
                     Labelled("Name", _name),

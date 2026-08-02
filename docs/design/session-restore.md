@@ -148,6 +148,24 @@ Related surfaces once the engine exists: **launch recipes on templates** (author
 by hand, same executor) and the **resume-card-on-dive** (offer restore when you enter a
 branch) — ideas §4.
 
+## Editing steps (working directory & arguments)
+
+Capture only ever knows a window's **executable** — not the document, folder or
+command line behind it. That's fine for most apps, but not for the ones keyed to a
+location: **VS Code is a singleton per folder**, so relaunching `Code.exe` bare opens a
+blank window, not your project; a terminal wants to start in the right directory.
+
+The `RecipeStep` already carries `Arguments` and `WorkingDirectory`, so the answer is to
+let the user **specify** them: the "Sessions…" manager opens a recipe into a detail hub
+where each step is editable (target / arguments / working directory, reusing the
+custom-command form). So a VS Code step gets the folder as an argument, a terminal step
+gets its working directory, and restore relaunches them usefully.
+
+*Future nicety:* best-effort **auto-capture** of a process's working directory (via the
+PEB) to pre-fill the field at save time — helps terminals and many apps, though not the
+VS Code singleton (whose folder isn't in any process's command line), so editing stays
+the reliable path.
+
 ## Known unknowns
 
 - **Authoring placement.** How a user says "this app on that screen" without it being
