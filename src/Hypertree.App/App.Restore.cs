@@ -22,6 +22,8 @@ public sealed partial class App
     private const int PollMs = 150;          // how often to look for a launched window
     private const int LaunchTimeoutMs = 8000; // give a slow app this long to show its first window
 
+    private static readonly IReadOnlySet<int> EmptyPids = new HashSet<int>(); // launch reported no pid → name-match only
+
     // Applying a loadout: if it uses {name} variables, fill them first, substitute, then confirm the filled
     // commands; otherwise straight to the confirm. Keeps one loadout reusable across projects.
     private void BeginApply(Loadout loadout)
@@ -103,13 +105,28 @@ public sealed partial class App
 
         _model.Reconcile();
 
-        // 1) Create the loadout's target desktops (by label) + a throwaway staging desktop to launch on.
+        // Where the user launched from. A single-desktop loadout lands its windows here — on the desktop
+        // they were already on — rather than minting a new branch; staging is still used, purely to find the
+        // windows reliably before moving them home. A multi-desktop loadout needs several destinations, so it
+        // keeps the create-desktops-and-branch model.
+        DesktopId launchDesktop = _desktops.Current;
+        bool intoCurrent = loadout.Desktops.Count == 1;
+
+        // 1) Create the loadout's target desktops (by label) + a throwaway staging desktop to launch on. For
+        //    an into-current apply the sole "target" IS the launch desktop, so nothing new is created for it.
         var targets = new Dictionary<string, DesktopId>();
-        foreach (LoadoutDesktop d in loadout.Desktops)
+        if (intoCurrent)
         {
-            DesktopId id = _desktops.Create($"{loadout.Name} · {d.Label}");
-            _created.Add(id.Value);
-            targets[d.Label] = id;
+            targets[loadout.Desktops[0].Label] = launchDesktop;
+        }
+        else
+        {
+            foreach (LoadoutDesktop d in loadout.Desktops)
+            {
+                DesktopId id = _desktops.Create($"{loadout.Name} · {d.Label}");
+                _created.Add(id.Value);
+                targets[d.Label] = id;
+            }
         }
         DesktopId staging = _desktops.Create($"{loadout.Name} · staging");
         _created.Add(staging.Value);
@@ -122,11 +139,19 @@ public sealed partial class App
         {
             if (cancelled) break;
 
+            // Re-assert staging as the active desktop before every launch: opening the previous step's app
+            // can activate an existing singleton window on another desktop and pull us there, which would
+            // otherwise open this step's window on the wrong desktop. A no-op when we're already on staging,
+            // and invisible — the overlay is pinned across every desktop, so nothing flickers underneath it.
+            _desktops.SwitchTo(staging);
+            _stage.BringToFront();
+
             rs.State = StepState.Creating;
             content.Refresh();
 
             var before = _desktops.AllWindows().Select(w => w.Hwnd).ToHashSet();
-            if (!_appLauncher.Launch(rs.Step.Target, rs.Step.Arguments, rs.Step.WorkingDirectory))
+            LaunchResult launch = _appLauncher.Launch(rs.Step.Target, rs.Step.Arguments, rs.Step.WorkingDirectory);
+            if (!launch.Started)
             {
                 rs.State = StepState.Error;
                 rs.Note = "couldn’t launch";
@@ -138,7 +163,18 @@ public sealed partial class App
             for (int waited = 0; waited < LaunchTimeoutMs && !cancelled; waited += PollMs)
             {
                 await Task.Delay(PollMs); // resumes on the UI thread (Avalonia sync context) for the next COM call
-                hwnd = LoadoutRun.MatchNewWindow(rs.Step, before, _desktops.AllWindows());
+
+                // Re-read the process subtree each poll: a launcher stub's real child may not have spawned yet
+                // on the first look. Empty when the launch reported no pid — MatchNewWindow then falls to name.
+                IReadOnlySet<int> launched = launch.ProcessId is int pid && _processTree is not null
+                    ? _processTree.DescendantsAndSelf(pid)
+                    : EmptyPids;
+
+                // The windows currently on staging: our scratch desktop, so a new one here is this step's even
+                // when its pid/name can't be matched (a shim handing off to a singleton — wt, code).
+                IReadOnlySet<nint> onStaging = _desktops.WindowsOn(staging).Select(w => w.Hwnd).ToHashSet();
+
+                hwnd = LoadoutRun.MatchNewWindow(rs.Step, before, _desktops.AllWindows(), launched, onStaging: onStaging);
                 if (hwnd != 0) break;
             }
             if (hwnd == 0)
@@ -169,28 +205,47 @@ public sealed partial class App
             .Where(h => _desktops.DesktopOf(h) == staging)
             .ToList();
 
-        RestoreDecision decision = await content.Finish(residue.Count);
+        // A clean run — every step placed, nothing left on staging, not cancelled — needs no decision: skip
+        // the finish dialog, dismiss straight away, and land the user on the target desktop. The dialog only
+        // stays up when there's something to review (an error, an app that opened no new window, or residue).
+        bool allPlaced = !cancelled && residue.Count == 0 && steps.All(s => s.State == StepState.Done);
+
+        RestoreDecision decision = allPlaced ? RestoreDecision.Finish : await content.Finish(residue.Count);
         bool keepStaging = false;
         if (decision == RestoreDecision.CleanUp)
             foreach (nint h in residue) { try { _desktops.CloseWindow(h); } catch { /* window may refuse / prompt — best-effort */ } }
         else if (residue.Count > 0)
             keepStaging = true; // leave the unplaced windows where they are — keep staging as a branch desktop
 
-        // 4) Fold the target desktops into a new branch, drop staging (unless we're keeping leftovers), land there.
-        var refs = loadout.Desktops.Select(d => new DesktopRef(targets[d.Label], d.Label)).ToList();
-        if (keepStaging) refs.Add(new DesktopRef(staging, "unplaced"));
-
-        var branch = new Branch(loadout.Name, refs);
-        _model.AddBranch(branch);
-
-        if (!keepStaging)
+        // 4) Land the user. Into-current: drop staging (leftovers fall back onto the launch desktop, so
+        //    nothing we launched is stranded on scratch) and return there — the placed windows are already
+        //    home. Multi-desktop: fold the new target desktops into a new branch and land on its first desktop.
+        if (intoCurrent)
         {
             _created.Remove(staging.Value);
-            try { _desktops.Remove(staging, targets[loadout.Desktops[0].Label]); } catch { /* already gone */ }
-        }
+            try { _desktops.Remove(staging, launchDesktop); } catch { /* already gone */ }
 
-        _model.Reconcile();
-        _model.GoTo(branch.Id, 0, out _); // land on the branch's first desktop
+            _desktops.SwitchTo(launchDesktop);
+            _model.Reconcile();
+            _model.AnchorToCurrent(); // re-point the cursor at the launch desktop the OS is back on
+        }
+        else
+        {
+            var refs = loadout.Desktops.Select(d => new DesktopRef(targets[d.Label], d.Label)).ToList();
+            if (keepStaging) refs.Add(new DesktopRef(staging, "unplaced"));
+
+            var branch = new Branch(loadout.Name, refs);
+            _model.AddBranch(branch);
+
+            if (!keepStaging)
+            {
+                _created.Remove(staging.Value);
+                try { _desktops.Remove(staging, targets[loadout.Desktops[0].Label]); } catch { /* already gone */ }
+            }
+
+            _model.Reconcile();
+            _model.GoTo(branch.Id, 0, out _); // land on the branch's first desktop
+        }
 
         _stage.Dismiss();
         RefreshOrFlash();

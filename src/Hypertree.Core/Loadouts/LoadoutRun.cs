@@ -1,3 +1,4 @@
+using System.IO;
 using Hypertree.Desktops;
 
 namespace Hypertree.Loadouts;
@@ -59,19 +60,44 @@ public static class LoadoutRun
 
     /// <summary>
     /// The window a step's launch produced: a handle in <paramref name="after"/> but not
-    /// <paramref name="before"/> whose process executable path matches the step's target. Returns 0 when
-    /// none — the launch opened no new window (already running / single-instance), which the caller records
-    /// as <see cref="StepState.AlreadyOpen"/>. Path match is case-insensitive; blank paths are ignored.
+    /// <paramref name="before"/> (so always a genuinely new window) that we can attribute to the launch, in
+    /// descending order of certainty:
+    /// <list type="number">
+    /// <item>owned by a process in <paramref name="launchedPids"/> (the launched pid plus everything it
+    /// spawned) — survives a cold start where the shim we launched re-execs the real app as a child;</item>
+    /// <item>its executable matches the step's target by name — a resolved <paramref name="targetName"/> if
+    /// the caller has one, else the target's own file-name stem;</item>
+    /// <item>it appeared on the throwaway <b>staging</b> desktop (<paramref name="onStaging"/>) — the whole
+    /// point of launching there: a genuinely new window on our own scratch desktop is this step's, even when
+    /// its process is a pre-existing singleton (VS Code, packaged Windows Terminal) whose pid and exe name we
+    /// could never have matched.</item>
+    /// </list>
+    /// Returns 0 when nothing matches — the launch opened no attributable window (already running elsewhere /
+    /// single-instance focus), which the caller records as <see cref="StepState.AlreadyOpen"/>.
     /// </summary>
-    public static nint MatchNewWindow(LoadoutStep step, IReadOnlySet<nint> before, IReadOnlyList<WindowInfo> after)
+    public static nint MatchNewWindow(
+        LoadoutStep step,
+        IReadOnlySet<nint> before,
+        IReadOnlyList<WindowInfo> after,
+        IReadOnlySet<int> launchedPids,
+        string? targetName = null,
+        IReadOnlySet<nint>? onStaging = null)
     {
+        nint nameMatch = 0, stagingMatch = 0;
         foreach (WindowInfo w in after)
         {
             if (w.Hwnd == 0 || before.Contains(w.Hwnd)) continue;
-            if (string.IsNullOrWhiteSpace(w.ExecutablePath)) continue;
-            if (PathMatches(step.Target, w.ExecutablePath)) return w.Hwnd;
+
+            // (1) Owned by the process we launched, or one it spawned — the strongest signal, take it now.
+            if (w.ProcessId != 0 && launchedPids.Contains(w.ProcessId)) return w.Hwnd;
+
+            // (2) A new window whose exe matches the target by name.
+            if (nameMatch == 0 && ExecutableMatches(step.Target, targetName, w.ExecutablePath)) nameMatch = w.Hwnd;
+
+            // (3) A new window on our scratch staging desktop — the fallback for shims and singletons.
+            if (stagingMatch == 0 && onStaging is not null && onStaging.Contains(w.Hwnd)) stagingMatch = w.Hwnd;
         }
-        return 0;
+        return nameMatch != 0 ? nameMatch : stagingMatch;
     }
 
     /// <summary>
@@ -85,8 +111,30 @@ public static class LoadoutRun
              .Select(s => s.Window)
              .ToList();
 
-    // Full-path equality, case-insensitive — safer than a file-name match, which would conflate two
-    // different installs of the same exe.
-    private static bool PathMatches(string? target, string? windowPath) =>
-        string.Equals(target?.Trim(), windowPath?.Trim(), StringComparison.OrdinalIgnoreCase);
+    // Does a new window's executable match the step's target? A name/path fallback, safe because the caller
+    // has already restricted us to a genuinely new window. Compares by file-name *stem* (no extension) so a
+    // bare command matches its exe — "code" ↔ "Code.exe", "notepad" ↔ "notepad.exe". Prefers a resolved
+    // targetName, then whole-path equality (the target IS the exe path), then the target's own stem.
+    private static bool ExecutableMatches(string? target, string? targetName, string? windowPath)
+    {
+        if (string.IsNullOrWhiteSpace(windowPath)) return false;
+        string winPath = windowPath.Trim();
+        string winStem = Stem(winPath);
+
+        if (!string.IsNullOrWhiteSpace(targetName)
+            && string.Equals(winStem, Stem(targetName!.Trim()), StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (string.IsNullOrWhiteSpace(target)) return false;
+        string t = target!.Trim();
+
+        if (string.Equals(t, winPath, StringComparison.OrdinalIgnoreCase)) return true; // whole-path (original rule)
+
+        string tStem = Stem(t);
+        return tStem.Length > 0 && string.Equals(tStem, winStem, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // The file name without its extension. Path.* here are pure string ops (no I/O, no throw) even for a URL
+    // or an AUMID — they just return the tail, which is the "compare it whole if it isn't a path" behaviour.
+    private static string Stem(string path) => Path.GetFileNameWithoutExtension(path);
 }

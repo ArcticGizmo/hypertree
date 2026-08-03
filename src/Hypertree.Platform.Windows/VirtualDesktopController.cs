@@ -98,7 +98,7 @@ public sealed class VirtualDesktopController : IDesktopController
     {
         var result = new List<WindowInfo>();
         foreach ((nint hwnd, Guid _) in EnumAppWindows())
-            result.Add(new WindowInfo(hwnd, TitleOf(hwnd), ProcessOf(hwnd), PathOf(hwnd)));
+            result.Add(new WindowInfo(hwnd, TitleOf(hwnd), ProcessOf(hwnd), PathOf(hwnd), ProcessId: (int)PidOf(hwnd)));
         return result;
     }
 
@@ -177,6 +177,14 @@ public sealed class VirtualDesktopController : IDesktopController
         var sb = new System.Text.StringBuilder(len + 1);
         GetWindowText(hwnd, sb, sb.Capacity);
         return sb.ToString();
+    }
+
+    // The window's owning process id (0 if it can't be read) — the key a loadout restore attributes a
+    // freshly launched window by (see LoadoutRun.MatchNewWindow).
+    private static uint PidOf(nint hwnd)
+    {
+        GetWindowThreadProcessId(hwnd, out uint pid);
+        return pid;
     }
 
     private static string ProcessOf(nint hwnd)

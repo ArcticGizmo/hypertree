@@ -22,6 +22,22 @@ public interface IAppCatalog
 }
 
 /// <summary>
+/// The outcome of an <see cref="IAppLauncher.Launch"/> call: whether the OS started anything, and the
+/// process id the shell handed back when it started one. <see cref="ProcessId"/> is null when the launch
+/// went through a broker that owns no useful pid (a packaged-app activation via Explorer) or when the shell
+/// reused an already-running process — a loadout restore then attributes the new window by executable name
+/// instead of by pid.
+/// </summary>
+public readonly record struct LaunchResult(bool Started, int? ProcessId)
+{
+    /// <summary>The launch didn't happen — a bad path, a declined UAC prompt.</summary>
+    public static readonly LaunchResult Failed = new(false, null);
+
+    /// <summary>The launch started, carrying the pid the shell reported (null when it reported none).</summary>
+    public static LaunchResult Ok(int? processId) => new(true, processId);
+}
+
+/// <summary>
 /// Starts things the way double-clicking them in Explorer would: an app shortcut, an <c>.exe</c>, a file,
 /// a folder, or a URL — all via the shell (<c>ShellExecute</c>). Behind an interface so the launcher and
 /// the custom-command runner never touch <c>Process.Start</c> directly and a non-Windows head can swap in
@@ -30,9 +46,11 @@ public interface IAppCatalog
 public interface IAppLauncher
 {
     /// <summary>Launch <paramref name="target"/> (with optional <paramref name="arguments"/> and
-    /// <paramref name="workingDirectory"/>) through the shell. Returns false if the OS refused to start it —
-    /// a bad path, a cancelled UAC prompt — which the caller surfaces rather than crashing on.</summary>
-    bool Launch(string target, string? arguments = null, string? workingDirectory = null);
+    /// <paramref name="workingDirectory"/>) through the shell. The result's <see cref="LaunchResult.Started"/>
+    /// is false if the OS refused to start it — a bad path, a cancelled UAC prompt — which the caller surfaces
+    /// rather than crashing on; <see cref="LaunchResult.ProcessId"/> carries the started pid when the shell
+    /// reports one (used to attribute the window a loadout step produced).</summary>
+    LaunchResult Launch(string target, string? arguments = null, string? workingDirectory = null);
 }
 
 /// <summary>

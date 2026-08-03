@@ -64,27 +64,45 @@ A recipe describes a whole workspace, layered on the existing layout snapshot
 Restore runs a recipe through a state machine behind a **blocking overlay**.
 
 **Lifecycle**
-1. Create the recipe's target desktops (by label) as a new branch, plus one **staging**
-   desktop; switch to staging.
+1. Create the recipe's target desktops (by label), plus one **staging** desktop; switch to
+   staging. A **single-desktop** loadout is applied **into the current desktop** — its sole
+   target *is* the desktop the user launched from, so no new desktop and no new branch are
+   created (staging is still used, purely to find the windows before moving them home). A
+   **multi-desktop** loadout needs several destinations, so it creates the target desktops
+   and folds them into a **new branch** (step 3).
 2. For each step, **sequentially** (see matching):
    - `not started → creating`: shell-launch `Target` on staging.
    - `creating → placing`: the step's window has appeared (see below) — move it to its
      target desktop (v1) / monitor+state (later).
    - `placing → done`.
    - Any failure → `error/issue` with a reason.
-3. When all steps settle, remove the (now-empty) staging desktop and land the user in the
-   new branch.
+3. When all steps settle, remove the (now-empty) staging desktop — any leftovers on it fall
+   back onto the target — and land the user: back on the **current desktop** (into-current),
+   or in the **new branch's** first desktop (multi-desktop).
 
 **Matching a launched app to its window** — the crux, because `ShellExecute` won't hand
 back a usable handle (packaged apps launch via `explorer.exe`; stub launchers exit at
-once):
+once), and the target is a *launch command* (a bare name like `code`, a `.cmd` shim, a
+Store **execution alias** like `wt`, a `.lnk`, an AUMID) that rarely equals the running
+exe's path. So matching is **tiered**, most-certain first (`LoadoutRun.MatchNewWindow`):
 
-- **Snapshot** the set of top-level app-window handles *before* the step.
-- **Launch**, then **poll** (~150 ms, up to a per-step timeout) for a *new* handle whose
-  process **executable path matches** the step's target.
-- **First match** → `placing`. **Timeout with no new window** → `error/issue`, reason
-  "no window appeared" — which is exactly the single-instance-app case (it focused an
-  existing window instead of opening a new one).
+- **Snapshot** the set of top-level app-window handles *before* the step. Every tier only
+  ever considers a handle that is **new** since that snapshot.
+- **Launch**, capturing the started **pid** where the shell reports one
+  (`IAppLauncher.Launch` → `LaunchResult`), then **poll** (~150 ms, up to a per-step
+  timeout) trying, in order:
+  1. **Owned by the launch** — a new window whose process is the launched pid *or a
+     descendant of it* (`IProcessTree`, a Toolhelp walk). Catches a cold start where a
+     shim re-execs the real app as a child.
+  2. **Name** — the new window's exe matches the target by file-name **stem** (no
+     extension), so `code` ↔ `Code.exe`, `notepad` ↔ `notepad.exe`.
+  3. **New window on staging** — a genuinely new window on our own throwaway staging
+     desktop is *this step's*, even when its process is a **pre-existing singleton** (VS
+     Code with dozens of `Code.exe` already up) or a **packaged app** (`WindowsTerminal.
+     exe`) whose pid and exe name we could never have matched. This is the tier that makes
+     `wt`/`code`-style commands work, and it's the whole reason we launch on staging.
+- **First match** → `placing`. **Timeout with no match at all** → `AlreadyOpen`, reason
+  "no window appeared" — the single-instance case that even focused no new window.
 - Steps launch **sequentially** so "which new window is which" stays unambiguous.
   (Parallel launches only work when every exe is distinct; serial + the overlay makes the
   wait acceptable.)

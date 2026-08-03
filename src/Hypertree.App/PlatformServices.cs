@@ -22,6 +22,7 @@ internal static class PlatformServices
     public static IPathInstaller CreatePathInstaller() => new Impl.PathInstaller();
     public static IAppCatalog CreateAppCatalog() => new Impl.ShellAppCatalog();
     public static IAppLauncher CreateAppLauncher() => new Impl.ShellAppLauncher();
+    public static IProcessTree CreateProcessTree() => new Impl.ProcessTree();
     public static IAppIconProvider CreateAppIconProvider() => new Impl.ShellIconProvider();
 #else
     public static IDesktopController CreateDesktopController()
@@ -38,6 +39,8 @@ internal static class PlatformServices
         => throw new PlatformNotSupportedException("No app catalog for this platform yet.");
     public static IAppLauncher CreateAppLauncher()
         => throw new PlatformNotSupportedException("No app launcher for this platform yet.");
+    public static IProcessTree CreateProcessTree()
+        => throw new PlatformNotSupportedException("No process tree for this platform yet.");
     public static IAppIconProvider CreateAppIconProvider()
         => throw new PlatformNotSupportedException("No app icon provider for this platform yet.");
 #endif

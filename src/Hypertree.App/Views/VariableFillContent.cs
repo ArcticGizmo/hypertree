@@ -87,7 +87,8 @@ internal sealed class VariableFillContent : IStageContent
         return box;
     }
 
-    // A folder variable: a type-ahead of matching directories, plus a Browse… button.
+    // A folder variable: a type-ahead of matching directories, a Home button (the user's profile folder),
+    // and a Browse… button. Tab completes the box to the first suggestion, the way shell tab-completion does.
     private Control FolderField(VariableSpec spec)
     {
         var box = new AutoCompleteBox
@@ -99,44 +100,67 @@ internal sealed class VariableFillContent : IStageContent
             IsTextCompletionEnabled = false,                 // suggest, don't auto-type into the box
             AsyncPopulator = SuggestFolders,
         };
+        box.AddHandler(InputElement.KeyDownEvent, (_, e) => TabComplete(box, e), RoutingStrategies.Tunnel);
         _fields.Add((spec.Name, () => box.Text ?? "", () => box.Focus()));
+
+        var home = new PromptButton("Home");                 // fill with the current user's home folder
+        home.Invoked += () => { box.Text = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile); box.Focus(); };
 
         var browse = new PromptButton("Browse…");
         browse.Invoked += () => _ = Browse(box);
 
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto") };
         grid.ColumnSpacing = 8;
         Grid.SetColumn(box, 0);
-        Grid.SetColumn(browse, 1);
+        Grid.SetColumn(home, 1);
+        Grid.SetColumn(browse, 2);
         grid.Children.Add(box);
+        grid.Children.Add(home);
         grid.Children.Add(browse);
         return grid;
     }
 
+    // Tab accepts the first folder suggestion (the top of the type-ahead list): complete the box to it and
+    // keep focus, shell-style. With nothing to complete — no match, or the text already is that match — Tab
+    // falls through to normal focus navigation. (Shift+Tab, carrying a modifier, always navigates.)
+    private static void TabComplete(AutoCompleteBox box, KeyEventArgs e)
+    {
+        if (e.Key != Key.Tab || e.KeyModifiers != KeyModifiers.None) return;
+        string current = (box.Text ?? "").Trim();
+        List<string> matches = FolderMatches(current);
+        if (matches.Count == 0 || string.Equals(matches[0], current, StringComparison.OrdinalIgnoreCase)) return;
+        box.Text = matches[0];
+        e.Handled = true; // consumed Tab → stay on the completed path instead of moving focus
+    }
+
     // Directory suggestions for what's typed so far: children of the folder when the text ends in a
-    // separator (or is itself a folder), otherwise siblings whose name starts with the last segment. Off the
-    // UI thread — a directory listing can touch a slow drive. Any error yields no suggestions.
-    private static Task<IEnumerable<object>> SuggestFolders(string? text, CancellationToken ct) => Task.Run<IEnumerable<object>>(() =>
+    // separator (or is itself a folder), otherwise siblings whose name starts with the last segment. Any
+    // error (a bad path, an unreadable drive) yields no suggestions.
+    private static List<string> FolderMatches(string? text)
     {
         try
         {
             string input = (text ?? "").Trim();
-            if (input.Length == 0) return Array.Empty<object>();
+            if (input.Length == 0) return new();
 
             string parent, prefix;
             if (input.EndsWith('\\') || input.EndsWith('/')) { parent = input; prefix = ""; }
             else { parent = System.IO.Path.GetDirectoryName(input) ?? ""; prefix = System.IO.Path.GetFileName(input); }
-            if (parent.Length == 0 || !Directory.Exists(parent)) return Array.Empty<object>();
+            if (parent.Length == 0 || !Directory.Exists(parent)) return new();
 
             return Directory.EnumerateDirectories(parent)
                 .Where(d => System.IO.Path.GetFileName(d).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
                 .Take(20)
-                .Cast<object>()
-                .ToArray();
+                .ToList();
         }
-        catch { return Array.Empty<object>(); }
-    }, ct);
+        catch { return new(); }
+    }
+
+    // The async wrapper the AutoCompleteBox populates its dropdown from — the listing is off the UI thread
+    // (a directory read can touch a slow drive).
+    private static Task<IEnumerable<object>> SuggestFolders(string? text, CancellationToken ct) =>
+        Task.Run<IEnumerable<object>>(() => FolderMatches(text).Cast<object>().ToArray(), ct);
 
     // The native folder picker, parented to the overlay host. On pick, the chosen path fills the box.
     private static async Task Browse(AutoCompleteBox box)

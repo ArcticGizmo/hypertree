@@ -12,9 +12,9 @@ namespace Hypertree.Platform.Windows;
 /// </summary>
 public sealed class ShellAppLauncher : IAppLauncher
 {
-    public bool Launch(string target, string? arguments = null, string? workingDirectory = null)
+    public LaunchResult Launch(string target, string? arguments = null, string? workingDirectory = null)
     {
-        if (string.IsNullOrWhiteSpace(target)) return false;
+        if (string.IsNullOrWhiteSpace(target)) return LaunchResult.Failed;
         try
         {
             // A packaged app is a "shell:AppsFolder\<AUMID>" moniker, not a file — hand it to Explorer, which
@@ -25,18 +25,23 @@ public sealed class ShellAppLauncher : IAppLauncher
                 var explorer = new ProcessStartInfo("explorer.exe") { UseShellExecute = false };
                 explorer.ArgumentList.Add(target);
                 Process.Start(explorer);
-                return true;
+                // Explorer is only the activation broker: the packaged app it starts is not its child, and
+                // explorer's own pid owns unrelated windows. Report "started, pid unknown" so window matching
+                // falls back to the executable name rather than trusting a misleading pid.
+                return LaunchResult.Ok(null);
             }
 
             var psi = new ProcessStartInfo(target) { UseShellExecute = true };
             if (!string.IsNullOrWhiteSpace(arguments)) psi.Arguments = arguments;
             if (!string.IsNullOrWhiteSpace(workingDirectory)) psi.WorkingDirectory = workingDirectory;
-            Process.Start(psi);
-            return true;
+            // The pid drives window attribution during a loadout restore; it's null when the shell reused an
+            // already-running process (single-instance apps), which the restore then handles by name.
+            Process? p = Process.Start(psi);
+            return LaunchResult.Ok(p?.Id);
         }
         catch
         {
-            return false; // nothing to fault the caller with — the launch just didn't happen
+            return LaunchResult.Failed; // nothing to fault the caller with — the launch just didn't happen
         }
     }
 }

@@ -50,6 +50,7 @@ public sealed partial class App : Application
     // See App.Launcher.cs for the overlay that uses them.
     private Hypertree.Launch.IAppCatalog? _appCatalog;
     private Hypertree.Launch.IAppLauncher? _appLauncher;
+    private Hypertree.Launch.IProcessTree? _processTree;
     private Hypertree.Launch.IAppIconProvider? _appIcons;
     private NavigationModel? _model;
     private HudWindow? _hud;
@@ -134,6 +135,7 @@ public sealed partial class App : Application
         _startup = PlatformServices.CreateStartupManager();
         _appCatalog = PlatformServices.CreateAppCatalog();
         _appLauncher = PlatformServices.CreateAppLauncher();
+        _processTree = PlatformServices.CreateProcessTree();
         _appIcons = PlatformServices.CreateAppIconProvider();
         RefreshAppsInBackground(); // warm the (slow) app-discovery cache off-thread, so the first Ctrl+Alt+O is instant
         _model = new NavigationModel(_desktops, new FileStateStore());

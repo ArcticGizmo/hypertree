@@ -122,14 +122,14 @@ public sealed partial class App
     private void LaunchApp(string path, string name)
     {
         _stage?.Dismiss(); // clear our top-most overlay first, so the launched window comes up in front
-        if (_appLauncher?.Launch(path) == false)
+        if (_appLauncher?.Launch(path) is { Started: false })
             Notify("Couldn’t launch", $"“{name}” could not be started.");
     }
 
     private void LaunchCustom(CustomCommand c)
     {
         _stage?.Dismiss();
-        if (_appLauncher?.Launch(c.Target, c.Arguments, c.WorkingDirectory) == false)
+        if (_appLauncher?.Launch(c.Target, c.Arguments, c.WorkingDirectory) is { Started: false })
             Notify("Couldn’t launch", $"“{c.Name}” could not be started.");
     }
 
@@ -146,7 +146,7 @@ public sealed partial class App
     private void LaunchRaw(string command)
     {
         _stage?.Dismiss(); // the prompt (and the launcher under it) are done — tear down, then run
-        if (_appLauncher?.Launch(command) == false)
+        if (_appLauncher?.Launch(command) is { Started: false })
             Notify("Couldn’t run", $"“{command}” could not be started.");
     }
 
