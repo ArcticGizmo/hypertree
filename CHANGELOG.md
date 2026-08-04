@@ -9,6 +9,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.3.8] - 2026-08-04
+
+### Changed
+
+- On the map, **`Shift+R`** renames the selected **branch** (a no-op on main); `r` still renames the desktop.
+- On the map, **`Shift+↑/↓`** now re-slots the **main timeline** too, not just branches — sink main below a branch or lift it above one.
+
+---
+
 ## [v0.3.7] - 2026-08-01
 
 ### Added

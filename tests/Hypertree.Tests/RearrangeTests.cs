@@ -134,6 +134,49 @@ public class RearrangeTests
         Assert.Equal(2, store.State.MainSlot);
     }
 
+    // ── Re-slotting main itself ───────────────────────────────────────────────────
+
+    [Fact]
+    public void Moving_main_down_a_row_sinks_it_below_the_branch_below()
+    {
+        var (m, c) = Stack(); // main / A / B / C — main at row 0
+        Assert.Equal(1, m.MoveMainToRow(1)); // main steps past A
+
+        NavMap map = m.BuildMap();
+        Assert.Equal(new[] { "A", "B", "C" }, map.Branches.Select(g => g.Name)); // branches untouched
+        Assert.Equal(1, map.TopPosition);                                        // A now renders above main
+        Assert.Empty(c.Switches);                                                // re-slotting never switches
+    }
+
+    [Fact]
+    public void Moving_main_up_lifts_it_above_the_branch_on_top()
+    {
+        var (m, _, _) = Pivot(); // feat-1 / main / feat-2 (mainSlot 1)
+        Assert.Equal(0, m.MoveMainToRow(0)); // main to the top of the stack
+
+        NavMap map = m.BuildMap();
+        Assert.Equal(new[] { "feat-1", "feat-2" }, map.Branches.Select(g => g.Name));
+        Assert.Equal(0, map.TopPosition); // nothing above main any more
+    }
+
+    [Fact]
+    public void Moving_main_to_the_row_it_already_holds_is_a_noop()
+    {
+        var (m, _) = Stack(); // main at row 0
+        Assert.Null(m.MoveMainToRow(0));  // already the top row
+        Assert.Null(m.MoveMainToRow(-2)); // clamps onto row 0 — still a no-op
+    }
+
+    [Fact]
+    public void A_re_slotted_main_is_persisted()
+    {
+        var (m, _, store) = Pivot(); // feat-1 / main / feat-2 (mainSlot 1)
+        m.MoveMainToRow(2);          // main to the bottom: feat-1 / feat-2 / main
+
+        Assert.Equal(new[] { "feat-1", "feat-2" }, store.State.Branches.Select(b => b.Name));
+        Assert.Equal(2, store.State.MainSlot);
+    }
+
     // ── Moving a desktop ──────────────────────────────────────────────────────────
 
     [Fact]

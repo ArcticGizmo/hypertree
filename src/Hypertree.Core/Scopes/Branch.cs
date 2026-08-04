@@ -27,7 +27,7 @@ public sealed class Branch
     /// </summary>
     public Guid Id { get; }
 
-    public string Name { get; }
+    public string Name { get; private set; }
     public IReadOnlyList<DesktopRef> Desktops => _desktops;
 
     /// <summary>Index within <see cref="Desktops"/> last occupied — the resume point. Always valid.</summary>
@@ -83,6 +83,9 @@ public sealed class Branch
         LastUsedIndex = _desktops.IndexOf(resume);
         return true;
     }
+
+    /// <summary>Rename the branch itself. The name isn't unique or enforced (see <see cref="Id"/>).</summary>
+    public void SetName(string name) => Name = name;
 
     /// <summary>Rename a desktop in place, keeping its position and the resume point.</summary>
     public void SetLabel(int index, string label)

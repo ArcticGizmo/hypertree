@@ -422,6 +422,27 @@ public sealed class NavigationModel
     }
 
     /// <summary>
+    /// Re-slot the <b>main timeline</b> to <paramref name="row"/> in the combined sequence — the mirror of
+    /// <see cref="MoveBranchToRow"/> for main itself (Shift+↑/↓ with main selected). Main's combined row is
+    /// exactly <see cref="_mainSlot"/> (the branch count above it), so this just moves the slot; the branches
+    /// keep their relative order and none switches desktop. This only re-slots main in the <em>stack</em> —
+    /// the "stable pivot" invariant is about navigation not leaping over main, not about the stack being
+    /// unarrangeable. Returns the row main landed on, or null on a no-op (out of range or unmoved).
+    /// </summary>
+    public int? MoveMainToRow(int row)
+    {
+        row = Math.Clamp(row, 0, _branches.Count);
+        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
+        if (row == slot) return null;
+
+        _mainSlot = row;
+        ClampState();
+        Save();
+        Changed?.Invoke();
+        return row;
+    }
+
+    /// <summary>
     /// Move a single desktop to another slot in the stack: along its own row, into another branch, or
     /// on/off the main timeline. <paramref name="toIndex"/> is an <em>insertion point</em> in the
     /// destination row as the map draws it (0..count), so a drop between two tiles lands where the caret
@@ -584,6 +605,15 @@ public sealed class NavigationModel
     /// <summary>The name of the branch at <paramref name="index"/>, or null when there's no such branch.</summary>
     public string? BranchNameAt(int index)
         => index >= 0 && index < _branches.Count ? _branches[index].Name : null;
+
+    /// <summary>Rename the branch at <paramref name="index"/>, persisting and notifying. No-op off-range.</summary>
+    public void RenameBranch(int index, string name)
+    {
+        if (index < 0 || index >= _branches.Count) return;
+        _branches[index].SetName(name);
+        Save();
+        Changed?.Invoke();
+    }
 
     /// <summary>
     /// Detach a desktop from a branch so the caller can destroy it. Returns the id (null if invalid).

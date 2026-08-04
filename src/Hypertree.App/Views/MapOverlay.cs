@@ -24,7 +24,8 @@ namespace Hypertree.App.Views;
 /// double-click does the same for a specific tile.
 ///
 /// A shortcut legend in the top-left lists the management actions, each raised as an event for <c>App</c>
-/// (which owns the <see cref="NavigationModel"/> and desktop controller): <b>r</b> rename, <b>Del</b>
+/// (which owns the <see cref="NavigationModel"/> and desktop controller): <b>r</b> rename, <b>Shift+r</b>
+/// rename the branch (no-op on main), <b>Del</b>
 /// delete desktop, <b>Shift+Del</b> delete branch, <b>n</b> new desktop in the selected row, <b>b</b> new branch, <b>m</b>
 /// move this desktop's windows elsewhere, <b>f</b> the finder, <b>p</b> the command palette. The last two
 /// open <em>over</em> the map, so Esc pops back to it. Because it lives on the persistent stage it survives the desktop
@@ -75,12 +76,17 @@ internal sealed class MapOverlay : IStageContent
     /// <summary>Re-slot a branch (Shift+↑/↓, or a dragged branch box): its index, and the row of the
     /// combined sequence it should end up on — branches above main, main, then the branches below.</summary>
     public event Action<int, int>? MoveBranchRequested;
+    /// <summary>Re-slot the main timeline (Shift+↑/↓ with main selected): the row of the combined sequence
+    /// it should end up on.</summary>
+    public event Action<int>? MoveMainRequested;
     /// <summary>Move a desktop to another slot (Ctrl+arrows, or a dragged tile): where it is now, and where
     /// it should land. The destination's <c>DesktopIndex</c> is an <em>insertion point</em> in its row,
     /// counting the desktop itself when it isn't leaving that row.</summary>
     public event Action<DesktopSelection, DesktopSelection>? MoveDesktopRequested;
     /// <summary>Rename the selected desktop (r).</summary>
     public event Action<DesktopSelection>? RenameRequested;
+    /// <summary>Rename the selected branch (Shift+R) by its index. No-op on main.</summary>
+    public event Action<int>? RenameBranchRequested;
     /// <summary>Create a new desktop (n) — in the selected row, so it lands in the branch you're looking at
     /// (or on main when that's what's selected) — / a new branch (b).</summary>
     public event Action<DesktopSelection>? NewDesktopRequested;
@@ -203,6 +209,10 @@ internal sealed class MapOverlay : IStageContent
             case Key.P: CommandPaletteRequested?.Invoke(); e.Handled = true; break;
             case Key.O: AppLauncherRequested?.Invoke(); e.Handled = true; break;
             case Key.V: ViewStyleToggleRequested?.Invoke(); e.Handled = true; break;
+            case Key.R when e.KeyModifiers.HasFlag(KeyModifiers.Shift):
+                if (!RowIsMain(_row)) RenameBranchRequested?.Invoke(BranchOfRow(_row)); // no branch to rename on main
+                e.Handled = true;
+                break;
             case Key.R: RenameRequested?.Invoke(CurrentSelection()); e.Handled = true; break;
             case Key.N: NewDesktopRequested?.Invoke(CurrentSelection()); e.Handled = true; break;
             case Key.B: NewBranchRequested?.Invoke(); e.Handled = true; break;
@@ -289,14 +299,15 @@ internal sealed class MapOverlay : IStageContent
 
     // ── Rearranging the layout (Shift/Ctrl+arrows, and the drop half of a drag) ─────
 
-    // Shift+↑/↓ — lift the selected branch one row up or down the stack. Main is a row too, so a branch
-    // stepping across it swaps places with main; App applies it and re-homes the selection on the branch.
+    // Shift+↑/↓ — lift the selected row one place up or down the stack. A branch swaps with whatever it
+    // steps over (main included); main itself re-slots the same way, moving branches above it to below.
+    // App applies it and re-homes the selection on the row that moved.
     private void MoveBranchRow(int delta)
     {
-        if (RowIsMain(_row)) return; // main is the pivot, not a branch — there's nothing to re-slot
         int target = _row + delta;
         if (target < 0 || target >= RowCount) return;
-        MoveBranchRequested?.Invoke(BranchOfRow(_row), target);
+        if (RowIsMain(_row)) MoveMainRequested?.Invoke(target);
+        else MoveBranchRequested?.Invoke(BranchOfRow(_row), target);
     }
 
     // Ctrl+↑/↓ — move the selected desktop into the row above/below (branch ↔ main ↔ branch), keeping it
@@ -660,8 +671,9 @@ internal sealed class MapOverlay : IStageContent
         rows.Children.Add(LegendRow("Enter", "switch to selected"));
         rows.Children.Add(LegendRow("Ctrl+Alt+←→↑↓", "switch to a desktop"));
         rows.Children.Add(LegendRow("Ctrl+←→↑↓", "move this desktop"));
-        rows.Children.Add(LegendRow("Shift+↑↓", "move this branch"));
+        rows.Children.Add(LegendRow("Shift+↑↓", "move this row (branch or main)"));
         rows.Children.Add(LegendRow("r", "rename desktop"));
+        rows.Children.Add(LegendRow("Shift+r", "rename branch"));
         rows.Children.Add(LegendRow("Del", "delete desktop"));
         rows.Children.Add(LegendRow("Shift+Del", "delete branch"));
         rows.Children.Add(LegendRow("n", "new desktop in row"));

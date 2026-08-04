@@ -192,9 +192,11 @@ public sealed partial class App : Application
         _overlay.JumpTopRequested += i => JumpFromMap(() => _model!.GoToTop(i));
         _overlay.JumpBranchRequested += (g, d) => JumpFromMap(() => _model!.GoToBranchDesktop(g, d));
         _overlay.RenameRequested += RenameSelected;
+        _overlay.RenameBranchRequested += RenameBranchOnMap; // Shift+R — rename the selected branch (no-op on main)
         _overlay.DeleteDesktopRequested += DeleteSelectedDesktop;
         _overlay.DeleteBranchRequested += ConfirmRemoveBranch;
         _overlay.MoveBranchRequested += MoveBranchOnMap;     // Shift+↑↓ / a dragged branch box
+        _overlay.MoveMainRequested += MoveMainOnMap;         // Shift+↑↓ with main selected
         _overlay.MoveDesktopRequested += MoveDesktopOnMap;   // Ctrl+arrows / a dragged tile
         _overlay.NewDesktopRequested += PromptNewDesktop;
         _overlay.NewBranchRequested += () => OpenNewBranchDialog(null); // branch card over the map (with in-card "Load from template" when any exist)
@@ -712,6 +714,24 @@ public sealed partial class App : Application
             confirmLabel: "Rename", prefill: peek.Value.label, selectAll: true));
     }
 
+    // Shift+R on the map: rename the branch at `index` (main has no branch, so the overlay never raises this
+    // for it). A card over the map, prefilled + select-all; on confirm the model relabels, persists and the
+    // map redraws with the new branch name.
+    private void RenameBranchOnMap(int index)
+    {
+        if (_model is null) return;
+        if (_model.BranchNameAt(index) is not { } current) return;
+
+        _stage?.Present(new PromptContent("Rename branch",
+            "Type a new name for this branch.", "branch name",
+            name =>
+            {
+                _model.RenameBranch(index, name);
+                RefreshOverlay();
+            },
+            confirmLabel: "Rename", prefill: current, selectAll: true));
+    }
+
     // Del on the map: delete the selected desktop (with a confirm), resolving main vs. branch.
     private void DeleteSelectedDesktop(DesktopSelection sel)
     {
@@ -748,6 +768,18 @@ public sealed partial class App : Application
         int col = !was.OnMain && was.BranchIndex == index ? was.DesktopIndex
                 : moved < map.Branches.Count ? map.Branches[moved].Cursor : 0;
         _overlay.Select(new DesktopSelection(false, moved, col));
+    }
+
+    // Re-slot main itself (Shift+↑/↓ with main selected). Same as above, but the row that moved is main —
+    // keep the selection on main and on the same desktop it was showing.
+    private void MoveMainOnMap(int row)
+    {
+        if (_model is null || _overlay is null) return;
+        DesktopSelection was = _overlay.Selection;
+        if (_model.MoveMainToRow(row) is null) return;
+
+        _overlay.SetBoard(_model.BuildMap());
+        _overlay.Select(new DesktopSelection(true, -1, was.DesktopIndex));
     }
 
     // Move a desktop to another slot: along its row, into another branch, or on/off main. The model does
