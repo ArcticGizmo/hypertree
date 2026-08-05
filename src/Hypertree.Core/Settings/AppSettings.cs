@@ -19,6 +19,29 @@ public sealed class AppSettings
     /// It auto-hides while the cursor is near it so the taskbar underneath stays clickable.</summary>
     public bool ShowTaskbarLabel { get; set; } = true;
 
+    /// <summary>When true a floating, draggable panel (default top-right) lists every row of the stack in
+    /// map order — main and each branch — with the desktop a click would land on, so you can jump between
+    /// branches with the mouse. It collapses to a lone logo bubble (its header, or the toggle-switcher
+    /// hotkey). Off by default: the mouse switcher is the exception, not the norm. See <c>SwitcherWindow</c>.</summary>
+    public bool ShowSwitcher { get; set; } = false;
+
+    /// <summary>Whether the switcher is showing as the collapsed logo bubble (true) or the full list
+    /// (false). Persisted so it reopens the way you left it.</summary>
+    public bool SwitcherCollapsed { get; set; }
+
+    /// <summary>The switcher's top-left position in physical pixels while <b>expanded</b>, or null to dock it
+    /// top-right of the primary screen. Set once you drag it, so it stays put across restarts. X and Y move
+    /// together — both null (docked) or both set (explicit). The collapsed bubble keeps its own separate
+    /// position (<see cref="SwitcherCollapsedX"/>), so each state can live where it suits you.</summary>
+    public int? SwitcherX { get; set; }
+    public int? SwitcherY { get; set; }
+
+    /// <summary>The switcher's top-left position in physical pixels while <b>collapsed</b> to the bubble, or
+    /// null to dock it top-right. Kept apart from the expanded position so dragging the bubble doesn't move
+    /// the full panel and vice versa.</summary>
+    public int? SwitcherCollapsedX { get; set; }
+    public int? SwitcherCollapsedY { get; set; }
+
     /// <summary>When true, a <b>dive or surface</b> chord (the vertical, branch-changing moves) pressed
     /// while the flash is <i>not</i> on screen only raises the flash — it shows you where you are without
     /// moving. The next press (still holding the modifiers, so the flash is still up) navigates for real.

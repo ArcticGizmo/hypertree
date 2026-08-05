@@ -20,7 +20,7 @@
     <AssemblyName>htree</AssemblyName>
     <!-- Kept in step with Hypertree.App: the two ship together, so the version htree reports should
          never disagree with the tray's. -->
-    <Version>0.3.9</Version>
+    <Version>0.3.10</Version>
 
     <PublishAot>true</PublishAot>
     <!-- Nothing here formats dates or sorts by culture; skipping ICU trims both size and startup. -->

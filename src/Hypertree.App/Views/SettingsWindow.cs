@@ -53,6 +53,7 @@ internal sealed class SettingsWindow : Window
 
     private readonly ToggleSwitch _startOnLogin;
     private readonly ToggleSwitch _showTaskbarLabel;
+    private readonly ToggleSwitch _showSwitcher;
     private readonly ComboBox _mapStyle;
     private readonly ToggleSwitch _displayBeforeMoving;
     private readonly ToggleSwitch _animateNavigation;
@@ -86,7 +87,7 @@ internal sealed class SettingsWindow : Window
         _chords = new Dictionary<HotkeyCommand, HotkeyChord>(settings.ResolveHotkeys());
 
         Title = "Hypertree Settings";
-        try { Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://hypertree/Assets/icon.ico"))); } catch { }
+        try { Icon = DevChrome.AppWindowIcon(); } catch { }
         RequestedThemeVariant = ThemeVariant.Dark;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         // Fixed size; the options scroll inside (see below) once they outgrow the height. Sizing to content
@@ -99,6 +100,7 @@ internal sealed class SettingsWindow : Window
 
         _startOnLogin = Toggle(startOnLogin);
         _showTaskbarLabel = Toggle(settings.ShowTaskbarLabel);
+        _showSwitcher = Toggle(settings.ShowSwitcher);
         _mapStyle = MapStyleSelector(settings.MapStyle);
         _displayBeforeMoving = Toggle(settings.DisplayBeforeMoving);
         _animateNavigation = Toggle(settings.AnimateNavigation);
@@ -126,7 +128,7 @@ internal sealed class SettingsWindow : Window
 
         // No Save/Cancel — each control applies (and persists) the moment it changes; see ApplyLive.
         foreach (ToggleSwitch t in new[]
-                 { _startOnLogin, _showTaskbarLabel, _displayBeforeMoving,
+                 { _startOnLogin, _showTaskbarLabel, _showSwitcher, _displayBeforeMoving,
                    _animateNavigation, _sweepFromLeadingEdge, _showChangelog })
             t.IsCheckedChanged += (_, _) => ApplyLive();
         _mapStyle.SelectionChanged += (_, _) => ApplyLive();
@@ -142,6 +144,14 @@ internal sealed class SettingsWindow : Window
                     Divider(),
                     Title2("Desktop label"),
                     ToggleRow("Show the current desktop name over the taskbar", _showTaskbarLabel),
+
+                    Divider(),
+                    Title2("Switcher"),
+                    ToggleRow("Show the floating branch switcher", _showSwitcher),
+                    Hint("A draggable panel (top-right by default) listing every branch in map order with the "
+                         + "desktop a click would land on — click a name to jump there, or the desktop chip to "
+                         + "pick a different one. Click its header, or press the switcher shortcut, to collapse "
+                         + "it to a logo bubble."),
 
                     Divider(),
                     Title2("Appearance"),
@@ -226,6 +236,7 @@ internal sealed class SettingsWindow : Window
         return new AppSettings
         {
             ShowTaskbarLabel = _showTaskbarLabel.IsChecked ?? true,
+            ShowSwitcher = _showSwitcher.IsChecked ?? false,
             MapStyle = (MapStyle)Math.Max(0, _mapStyle.SelectedIndex),
             DisplayBeforeMoving = _displayBeforeMoving.IsChecked ?? true,
             AnimateNavigation = _animateNavigation.IsChecked ?? true,
@@ -233,6 +244,14 @@ internal sealed class SettingsWindow : Window
             ShowChangelogOnUpdate = _showChangelog.IsChecked ?? true,
             LastSeenVersion = _initial.LastSeenVersion, // stamped at startup, not edited here — carry through
             BranchTemplates = _initial.BranchTemplates, // not edited here — carry through untouched
+            CustomCommands = _initial.CustomCommands,   // managed from the launcher, not here — carry through
+            // The switcher's own collapse state and dragged position aren't edited here (only whether it
+            // shows); carry them so toggling any setting doesn't reset where it sits.
+            SwitcherCollapsed = _initial.SwitcherCollapsed,
+            SwitcherX = _initial.SwitcherX,
+            SwitcherY = _initial.SwitcherY,
+            SwitcherCollapsedX = _initial.SwitcherCollapsedX,
+            SwitcherCollapsedY = _initial.SwitcherCollapsedY,
             HotkeyBindings = overrides,
         };
     }

@@ -9,6 +9,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.3.10] - 2026-08-05
+
+### Added
+
+- **Branch switcher** — a floating, draggable panel listing every branch in map order, each showing the desktop a click jumps to; the desktop chip picks another when a branch has several. Collapse it to a logo bubble from its header or **`Ctrl+Alt+W`**, and right-click for **Exit**. Off by default (**Settings → Switcher**). Borrowed from Perch's "click to switch".
+
+### Fixed
+
+- Changing any setting no longer wipes your saved **custom launcher commands**.
+
+---
+
 ## [v0.3.9] - 2026-08-05
 
 ### Added

@@ -442,7 +442,18 @@ internal sealed class StageWindow : Window
         Focusable = true;
         Background = DimBg;
         TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
-        Content = new Grid { Children = { _backdropSlot, _contentSlot } };
+
+        var root = new Grid { Children = { _backdropSlot, _contentSlot } };
+        // Dev-build tell: a pink frame around the whole overlay so a test build is unmistakable. Drawn on
+        // top of both layers and click-through, so it changes nothing but the look. Release builds skip it.
+        if (DevChrome.Active)
+            root.Children.Add(new Border
+            {
+                BorderBrush = DevChrome.PinkBrush,
+                BorderThickness = new Thickness(DevChrome.BorderThickness),
+                IsHitTestVisible = false,
+            });
+        Content = root;
 
         // Backdrop clicks that no content control handled bubble up to here.
         AddHandler(PointerPressedEvent, (_, e) => { if (!e.Handled) BackgroundPressed?.Invoke(); }, RoutingStrategies.Bubble);

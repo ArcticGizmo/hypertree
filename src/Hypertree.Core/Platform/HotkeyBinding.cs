@@ -28,6 +28,10 @@ public enum HotkeyCommand
     // Open the application launcher: a spotlight over installed apps plus the user's custom commands.
     // Defaults to Ctrl+Alt+O. Appended last so existing settings.json bindings keep deserializing.
     AppLauncher,
+    // Collapse the branch switcher to its logo bubble, or expand it back to the full list. Defaults to
+    // Ctrl+Alt+W. Only does anything while "Show switcher" is on. Appended last so existing settings.json
+    // bindings keep deserializing.
+    ToggleSwitcher,
 }
 
 /// <summary>A modifier combination plus a trigger key — the shape a global hotkey registers.</summary>
@@ -61,7 +65,7 @@ public static class Hotkeys
         HotkeyCommand.Dive, HotkeyCommand.Surface, HotkeyCommand.MoveLeft, HotkeyCommand.MoveRight,
         HotkeyCommand.UndoNav, HotkeyCommand.RedoNav, HotkeyCommand.ToggleNav,
         HotkeyCommand.Peek, HotkeyCommand.CommandPalette, HotkeyCommand.OpenMap,
-        HotkeyCommand.AppLauncher,
+        HotkeyCommand.AppLauncher, HotkeyCommand.ToggleSwitcher,
     };
 
     /// <summary>The out-of-the-box chords. Ctrl+Alt+Arrow is the nav layer (M0: Win+Ctrl+Arrow is the
@@ -81,6 +85,7 @@ public static class Hotkeys
             [HotkeyCommand.CommandPalette] = new(NavMods, HotkeyKey.P),
             [HotkeyCommand.OpenMap]        = new(NavMods, HotkeyKey.M),
             [HotkeyCommand.AppLauncher]    = new(NavMods, HotkeyKey.O),
+            [HotkeyCommand.ToggleSwitcher] = new(NavMods, HotkeyKey.W),
         };
 
     private const HotkeyModifiers NavMods = HotkeyModifiers.Control | HotkeyModifiers.Alt;
@@ -98,6 +103,7 @@ public static class Hotkeys
         HotkeyCommand.CommandPalette => "Command palette",
         HotkeyCommand.OpenMap        => "Open map",
         HotkeyCommand.AppLauncher    => "App launcher",
+        HotkeyCommand.ToggleSwitcher => "Collapse / expand switcher",
         HotkeyCommand.MoveWindows    => "Move windows",
         _ => command.ToString(),
     };

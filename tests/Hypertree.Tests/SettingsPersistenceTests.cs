@@ -56,6 +56,35 @@ public class SettingsPersistenceTests
     }
 
     [Fact]
+    public void Switcher_state_round_trips()
+    {
+        var store = StoreInTempDir();
+        store.Save(new AppSettings
+        {
+            ShowSwitcher = true,
+            SwitcherCollapsed = true,
+            SwitcherX = 1820,
+            SwitcherY = 24,
+        });
+
+        AppSettings loaded = store.Load();
+        Assert.True(loaded.ShowSwitcher);
+        Assert.True(loaded.SwitcherCollapsed);
+        Assert.Equal(1820, loaded.SwitcherX);
+        Assert.Equal(24, loaded.SwitcherY);
+    }
+
+    [Fact]
+    public void Switcher_defaults_off_and_undocked()
+    {
+        var settings = new AppSettings();
+        Assert.False(settings.ShowSwitcher);
+        Assert.False(settings.SwitcherCollapsed);
+        Assert.Null(settings.SwitcherX);
+        Assert.Null(settings.SwitcherY);
+    }
+
+    [Fact]
     public void Missing_file_yields_defaults()
     {
         // A fresh store with no file loads defaults rather than throwing (MapStyle defaults to ASCII).

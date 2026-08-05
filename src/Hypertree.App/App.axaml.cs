@@ -59,6 +59,7 @@ public sealed partial class App : Application
     private readonly MapCamera _mapCamera = new();
     private DesktopId? _moveOrigin; // where the current move flow started, for cancel/restore
     private TaskbarLabel? _taskbarLabel;
+    private SwitcherWindow? _switcher;
     private TrayIcon? _tray;
     // The tray's update entry, retitled to "Update now — vX" once a check has found one (RefreshUpdateMenuItem).
     private NativeMenuItem? _updateMenuItem;
@@ -180,6 +181,21 @@ public sealed partial class App : Application
         _model.Changed += () => _taskbarLabel?.Sync();
         ApplyTaskbarLabel();
 
+        // The floating "click to switch" panel (borrowed from Perch). Off by default; it lists the stack
+        // and jumps on click. It re-reads the stack on every navigation so its list and "here" marker stay
+        // current, including switches made outside Hypertree (which route through the watcher → Changed).
+        _switcher = new SwitcherWindow(
+            () => _model!.BuildStatus(),
+            JumpFromSwitcher,
+            SaveSwitcherPosition,
+            SaveSwitcherCollapsed,
+            ExitFromSwitcher,
+            _desktops, _settings.SwitcherCollapsed,
+            _settings.SwitcherX, _settings.SwitcherY,
+            _settings.SwitcherCollapsedX, _settings.SwitcherCollapsedY);
+        _model.Changed += () => _switcher?.Sync();
+        ApplySwitcher();
+
         StartWatchingDesktops();
         StartPublishingStatus();
         StartControlServer();
@@ -194,8 +210,8 @@ public sealed partial class App : Application
         };
         // Park the taskbar pill while the overlay is up (the map already shows where you are) — this also
         // removes the topmost-z fight that made the pill flash in/out when a dialog opened.
-        _stage.Shown += () => _taskbarLabel?.SetSuppressed(true);
-        _stage.Hidden += () => _taskbarLabel?.SetSuppressed(false);
+        _stage.Shown += () => { _taskbarLabel?.SetSuppressed(true); _switcher?.SetSuppressed(true); };
+        _stage.Hidden += () => { _taskbarLabel?.SetSuppressed(false); _switcher?.SetSuppressed(false); };
 
         _overlay = new MapOverlay(_stage, _mapCamera);
         _overlay.JumpTopRequested += i => JumpFromMap(() => _model!.GoToTop(i));
@@ -391,6 +407,7 @@ public sealed partial class App : Application
         HotkeyCommand.CommandPalette => ToggleCommandPalette,
         HotkeyCommand.OpenMap        => ToggleMap,
         HotkeyCommand.AppLauncher    => ToggleAppLauncher,
+        HotkeyCommand.ToggleSwitcher => ToggleSwitcherCollapsed,
         HotkeyCommand.MoveWindows    => ToggleMoveWindows, // no default chord; only a user's kept rebinding fires this
         HotkeyCommand.Peek           => () => Peek(mods),
         HotkeyCommand.UndoNav        => () => StepHistory(back: true, mods),
@@ -1315,6 +1332,7 @@ public sealed partial class App : Application
         _settings = settings;
         _settingsStore?.Save(settings);
         ApplyTaskbarLabel();
+        ApplySwitcher();
         ApplyMapStyle();
         _startup?.SetEnabled(startOnLogin);
     }
@@ -1357,6 +1375,56 @@ public sealed partial class App : Application
         if (_settings.ShowTaskbarLabel) _taskbarLabel.Enable();
         else _taskbarLabel.Disable();
     }
+
+    // Show or hide the floating branch switcher to match the setting.
+    private void ApplySwitcher()
+    {
+        if (_switcher is null) return;
+        if (_settings.ShowSwitcher) _switcher.Enable();
+        else _switcher.Disable();
+    }
+
+    // Ctrl+Alt+W — collapse the switcher to its bubble, or expand it. A no-op when the switcher is off:
+    // the chord is registered regardless (like every command), but there's nothing to toggle.
+    private void ToggleSwitcherCollapsed()
+    {
+        if (_settings.ShowSwitcher) _switcher?.ToggleCollapsed();
+    }
+
+    // A jump from the switcher: switch to the row (a branch by id, or main when null), landing on the
+    // chosen desktop or — when null — the row's resume point. Reconcile first so a desktop deleted from
+    // Task View since the last snapshot never traps the click (mirrors the map / CLI goto path).
+    private void JumpFromSwitcher(Guid? branchId, int? desktop)
+    {
+        if (_model is null || _desktops is null) return;
+        _model.Reconcile();
+        DesktopId from = _desktops.Current;
+        if (_model.GoTo(branchId, desktop, out _) != GoToResult.Ok) return;
+        RecordVisit(from);
+        // If the map happens to be open (it suppresses the switcher, but be safe), keep it in step.
+        if (_overlay is { IsOpen: true }) _overlay.SyncToCurrent(_model.BuildMap());
+    }
+
+    // The switcher persists its own position (after a drag) and collapse state through these, folded into
+    // the same settings file everything else uses. The expanded panel and the collapsed bubble keep separate
+    // coordinates, so dragging one never moves the other.
+    private void SaveSwitcherPosition(bool collapsed, Avalonia.PixelPoint at)
+    {
+        if (collapsed) { _settings.SwitcherCollapsedX = at.X; _settings.SwitcherCollapsedY = at.Y; }
+        else { _settings.SwitcherX = at.X; _settings.SwitcherY = at.Y; }
+        _settingsStore?.Save(_settings);
+    }
+
+    private void SaveSwitcherCollapsed(bool collapsed)
+    {
+        _settings.SwitcherCollapsed = collapsed;
+        _settingsStore?.Save(_settings);
+    }
+
+    // Right-click → "Exit Hypertree": a direct shutdown, like the tray's Exit item (no overlay confirm — the
+    // menu choice is already deliberate).
+    private void ExitFromSwitcher()
+        => (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
 
     // The (branch, name) the taskbar label should show for the desktop the OS is currently on — resolved
     // by id, so it's right even after a switch made outside Hypertree. Null before startup / during teardown.
@@ -1814,6 +1882,7 @@ public sealed partial class App : Application
         _stage?.Close(); // closes the shared host + dims (map / palettes / prompts / move all live here)
         _hud?.Close();
         _taskbarLabel?.Close();
+        _switcher?.Close();
         _settingsWindow?.Close();
         _changelogWindow?.Close();
     }

@@ -35,7 +35,7 @@ internal sealed class ChangelogWindow : Window
         _onSuppress = onSuppress;
 
         Title = "Hypertree — What's new";
-        try { Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://hypertree/Assets/icon.ico"))); } catch { }
+        try { Icon = DevChrome.AppWindowIcon(); } catch { }
         RequestedThemeVariant = ThemeVariant.Dark;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         CanResize = false;
