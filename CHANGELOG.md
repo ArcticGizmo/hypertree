@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.3.11] - 2026-08-05
+
+### Fixed
+
+- The main timeline holds its place at the top of the stack instead of drifting to follow the active branch; a branch you moved above main still loads where you left it.
+
+---
+
 ## [v0.3.10] - 2026-08-05
 
 ### Added

@@ -487,6 +487,47 @@ public class NavigationModelTests
         Assert.Equal(T1, peek!.Value.id);
     }
 
+    [Fact]
+    public void Restore_without_a_persisted_slot_puts_main_first_even_when_a_branch_is_active()
+    {
+        // Old state (or a fresh install) never recorded MainSlot. Even with a non-main active branch,
+        // main must default to first (slot 0) rather than drifting down to follow the cursor's branch.
+        var ids = new[] { T0, T1, T2, D(10), D(11), D(12), D(20), D(21) };
+        var state = new PersistedState
+        {
+            MainSlot = null, ActiveBranch = 1, // cursor was inside the second branch
+            Branches =
+            {
+                new PersistedBranch { Name = "feat-1", Desktops = { PD(10, "a"), PD(11, "b"), PD(12, "c") } },
+                new PersistedBranch { Name = "feat-2", Desktops = { PD(20, "x"), PD(21, "y") } },
+            },
+        };
+        var m = new NavigationModel(new FakeDesktopController(ids, 0), new InMemoryStore(state));
+
+        Assert.Equal(0, m.BuildMap().TopPosition);              // main sits first, above both branches
+        Assert.True(m.BuildStatus().Rows[0].IsMain);
+    }
+
+    [Fact]
+    public void Restore_honours_an_explicit_zero_slot_instead_of_re_deriving_it()
+    {
+        // MainSlot == 0 is a real arrangement (main deliberately first), not "unset": it must be honoured
+        // as-is and never fall back to the active branch. Regression: a stored 0 used to be discarded.
+        var ids = new[] { T0, T1, T2, D(10), D(11), D(12), D(20), D(21) };
+        var state = new PersistedState
+        {
+            MainSlot = 0, ActiveBranch = 1,
+            Branches =
+            {
+                new PersistedBranch { Name = "feat-1", Desktops = { PD(10, "a"), PD(11, "b"), PD(12, "c") } },
+                new PersistedBranch { Name = "feat-2", Desktops = { PD(20, "x"), PD(21, "y") } },
+            },
+        };
+        var m = new NavigationModel(new FakeDesktopController(ids, 0), new InMemoryStore(state));
+
+        Assert.Equal(0, m.BuildMap().TopPosition);
+    }
+
     // ── Snapshots (capture / restore a whole named layout) ───────────────────────
 
     [Fact]

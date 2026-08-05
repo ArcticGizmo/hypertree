@@ -785,8 +785,11 @@ public sealed class NavigationModel
             if (pg.Id == Guid.Empty) _backfilledIds = true;
             _branches.Add(new Branch(pg.Name, desks, pg.LastUsedIndex, pg.Id));
         }
-        // Migrate: prefer the persisted MainSlot; fall back to the pre-pivot ActiveBranch split.
-        int slot = state.MainSlot != 0 ? state.MainSlot : state.ActiveBranch;
+        // Main defaults to first (slot 0) unless a slot was explicitly persisted, so it stays put at the top
+        // instead of drifting to follow the active branch. A stored slot — including 0, and even the
+        // pre-pivot layouts that had none — is honoured as the user's arrangement; only a genuinely absent
+        // MainSlot (fresh install, or old state that never recorded one) falls back to first.
+        int slot = state.MainSlot ?? 0;
         _mainSlot = _branches.Count == 0 ? 0 : Math.Clamp(slot, 0, _branches.Count);
         _currentBranch = _branches.Count == 0 ? 0 : Math.Clamp(state.ActiveBranch, 0, _branches.Count - 1);
     }

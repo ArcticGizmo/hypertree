@@ -9,9 +9,12 @@ public sealed class PersistedState
     /// <summary>The cursor's branch (resume point) when inside a branch.</summary>
     public int ActiveBranch { get; set; }
 
-    /// <summary>The main timeline's fixed slot in the vertical stack: how many branches render above
-    /// main. <c>Branches[0..MainSlot-1]</c> sit above main, the rest below (F2 stable pivot).</summary>
-    public int MainSlot { get; set; }
+    /// <summary>The main timeline's slot in the vertical stack: how many branches render above main.
+    /// <c>Branches[0..MainSlot-1]</c> sit above main, the rest below (F2 stable pivot). <c>null</c> means
+    /// "never set" — a fresh install, or state from a build before main had its own slot — and load defaults
+    /// main to first (slot 0) rather than letting it drift with the active branch. A stored value (including
+    /// <c>0</c>) is the user's arrangement and is honoured as-is.</summary>
+    public int? MainSlot { get; set; }
 
     public List<PersistedBranch> Branches { get; set; } = new();
 }
