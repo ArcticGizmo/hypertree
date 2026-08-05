@@ -152,6 +152,15 @@ public sealed partial class App : Application
             _startup.SetEnabled(true);
             _settingsStore.Save(_settings);
         }
+        else if (_startup.IsEnabled)
+        {
+            // Self-heal a stale autostart path: an installed copy re-asserts its own ProcessPath here, so a
+            // Run entry left pointing at an old install location — or at a build-tree copy that once wrote
+            // itself in — is corrected the next time the real install runs. The write is installed-only and
+            // idempotent (see StartupManager), so this is a no-op for a dev build and for an already-correct
+            // entry.
+            _startup.SetEnabled(true);
+        }
 
         // First launch after a version bump: collect the changelog entries newer than the version that last
         // ran here, to pop once the tray/HUD are up (see the tail of Startup). A fresh install has no

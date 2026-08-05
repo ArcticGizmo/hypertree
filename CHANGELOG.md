@@ -9,6 +9,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.3.9] - 2026-08-05
+
+### Fixed
+
+- Start-at-login only ever registers the installed copy now, so an update can't leave login relaunching an old version that then reports itself a "dev build".
+- A start-at-login entry left pointing at a previous install location self-heals the next time Hypertree runs.
+
+---
+
 ## [v0.3.8] - 2026-08-04
 
 ### Changed
