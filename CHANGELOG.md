@@ -11,6 +11,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [v0.3.9] - 2026-08-05
 
+### Added
+
+- **`Shift+M`** on the map pulls windows from other desktops onto the current one — the mirror of `m` (move away). A grid shows everything running elsewhere, each card naming its desktop; `Space` ticks, `Enter` pulls.
+
+### Changed
+
+- The move and pull grids gained a **search box** — filter windows by title, process, or desktop as you type.
+- Bigger window thumbnails in both grids, so a wall of near-identical terminals is tellable apart.
+
 ### Fixed
 
 - Start-at-login only ever registers the installed copy now, so an update can't leave login relaunching an old version that then reports itself a "dev build".

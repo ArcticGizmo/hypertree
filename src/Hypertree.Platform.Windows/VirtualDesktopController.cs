@@ -89,8 +89,23 @@ public sealed class VirtualDesktopController : IDesktopController
         return result;
     }
 
+    // The same walk, but for every desktop EXCEPT the current one — the "pull windows" picker, which
+    // brings windows from elsewhere onto the desktop you're on. Each window carries its source desktop's
+    // name for the card caption (looked up once from the desktop list). Text is best-effort.
+    public IReadOnlyList<WindowInfo> WindowsElsewhere()
+    {
+        Guid current = Current.Value;
+        var names = List().ToDictionary(d => d.Id.Value, d => d.Name);
+        var result = new List<WindowInfo>();
+        foreach ((nint hwnd, Guid g) in EnumAppWindows())
+            if (g != current)
+                result.Add(new WindowInfo(hwnd, TitleOf(hwnd), ProcessOf(hwnd),
+                    names.TryGetValue(g, out string? name) ? name : ""));
+        return result;
+    }
+
     // Walk every top-level window once, keeping only the "real" app windows (IsCountableWindow) that
-    // the documented API attributes to a concrete desktop. Shared by WindowCounts and WindowsOn.
+    // the documented API attributes to a concrete desktop. Shared by WindowCounts / WindowsOn / WindowsElsewhere.
     private List<(nint hwnd, Guid desktop)> EnumAppWindows()
     {
         var list = new List<(nint, Guid)>();

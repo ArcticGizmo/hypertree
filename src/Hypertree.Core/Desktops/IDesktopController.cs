@@ -34,6 +34,14 @@ public interface IDesktopController
     /// </summary>
     IReadOnlyList<WindowInfo> WindowsOn(DesktopId id);
 
+    /// <summary>
+    /// The application windows on every desktop <em>except</em> <see cref="Current"/> — the "pull windows"
+    /// picker, which brings a window from elsewhere onto the desktop you're on. Same "countable" windows
+    /// as <see cref="WindowsOn"/>, but each carries its source desktop's name (<see cref="WindowInfo.DesktopName"/>)
+    /// so the picker can label where it came from. Best-effort; order is enumeration order (roughly Z-order).
+    /// </summary>
+    IReadOnlyList<WindowInfo> WindowsElsewhere();
+
     /// <summary>Switch the whole monitor array to <paramref name="id"/>. No-op if already there. Also
     /// hands the foreground to a window on the destination, the way the OS's own switcher does — a bare
     /// desktop switch leaves the previous desktop's focused window as an unreachable, cloaked foreground

@@ -34,6 +34,13 @@ internal sealed class FakeDesktopController : IDesktopController
     public IReadOnlyList<WindowInfo> WindowsOn(DesktopId id)
         => Windows.TryGetValue(id, out var list) ? list : new List<WindowInfo>();
 
+    /// <summary>Windows on every seeded desktop other than <see cref="Current"/>, each stamped with its
+    /// desktop's name — the pull picker's source list.</summary>
+    public IReadOnlyList<WindowInfo> WindowsElsewhere()
+        => Windows.Where(kv => kv.Key != Current)
+                  .SelectMany(kv => kv.Value.Select(w => w with { DesktopName = GetName(kv.Key) }))
+                  .ToList();
+
     /// <summary>Every MoveWindowToDesktop call, in order — so the move flow's output is assertable.</summary>
     public List<(nint hwnd, DesktopId to)> Moves { get; } = new();
 

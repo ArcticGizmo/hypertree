@@ -93,6 +93,8 @@ internal sealed class MapOverlay : IStageContent
     public event Action? NewBranchRequested;
     /// <summary>Start the move-windows flow (m) — relocate this desktop's windows to another.</summary>
     public event Action? MoveWindowsRequested;
+    /// <summary>Start the pull-windows flow (Shift+m) — bring windows from other desktops onto this one.</summary>
+    public event Action? PullWindowsRequested;
     /// <summary>f / Ctrl+F — open the finder (jump/create spotlight) from the map.</summary>
     public event Action? FinderRequested;
     /// <summary>p — open the command palette over the map, so Esc pops back here.</summary>
@@ -216,6 +218,7 @@ internal sealed class MapOverlay : IStageContent
             case Key.R: RenameRequested?.Invoke(CurrentSelection()); e.Handled = true; break;
             case Key.N: NewDesktopRequested?.Invoke(CurrentSelection()); e.Handled = true; break;
             case Key.B: NewBranchRequested?.Invoke(); e.Handled = true; break;
+            case Key.M when e.KeyModifiers.HasFlag(KeyModifiers.Shift): PullWindowsRequested?.Invoke(); e.Handled = true; break;
             case Key.M: MoveWindowsRequested?.Invoke(); e.Handled = true; break;
             case Key.Delete:
                 if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
@@ -679,6 +682,7 @@ internal sealed class MapOverlay : IStageContent
         rows.Children.Add(LegendRow("n", "new desktop in row"));
         rows.Children.Add(LegendRow("b", "new branch"));
         rows.Children.Add(LegendRow("m", "move windows"));
+        rows.Children.Add(LegendRow("Shift+m", "pull windows here"));
         rows.Children.Add(LegendRow("f", "find a desktop"));
         rows.Children.Add(LegendRow("p", "command palette"));
         rows.Children.Add(LegendRow("v", _stage.MapStyle switch

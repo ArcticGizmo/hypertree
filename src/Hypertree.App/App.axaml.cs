@@ -210,6 +210,7 @@ public sealed partial class App : Application
         _overlay.NewDesktopRequested += PromptNewDesktop;
         _overlay.NewBranchRequested += () => OpenNewBranchDialog(null); // branch card over the map (with in-card "Load from template" when any exist)
         _overlay.MoveWindowsRequested += ToggleMoveWindows; // m — start the move-windows flow (replaces the map)
+        _overlay.PullWindowsRequested += TogglePullWindows; // Shift+m — pull windows from other desktops onto this one
         _overlay.FinderRequested += () => OpenSpotlight(); // f / Ctrl+F — finder pushed over the map; Esc pops back to it
         _overlay.CommandPaletteRequested += () => ShowCommandPalette(overCurrent: true); // p — palette over the map; Esc pops back to it
         _overlay.AppLauncherRequested += () => OpenAppLauncher(overCurrent: true); // o — launcher over the map; Esc pops back to it
@@ -693,6 +694,38 @@ public sealed partial class App : Application
         _moveOrigin = null;
         _model?.Resync();
         RefreshOverlay(); // if we opened over the map, it's about to be re-presented — give it a fresh board
+    }
+
+    // ── Pull windows from other desktops onto this one (Shift+m on the map) ─────────
+
+    // Snapshot every window on the other desktops and open the picker. Re-press toggles it closed. Unlike
+    // move there's no second phase and no origin to restore: the destination is always where we already are.
+    private void TogglePullWindows()
+    {
+        if (_model is null || _desktops is null || _stage is null) return;
+        if (_stage.Current is PullContent) { _stage.Back(); return; } // re-press cancels
+
+        _model.Reconcile();
+        var session = new WindowMoveSession(_desktops.WindowsElsewhere());
+        var content = new PullContent(session);
+        content.PullRequested += PullSelectedWindows;
+        // Launched from the map → push over it so completing/cancelling unwinds back to the map. Otherwise
+        // (hotkey / tray, no map open) it's a fresh root that dismisses to the desktop.
+        if (_overlay?.IsOpen == true) _stage.Present(content);
+        else _stage.Summon(content);
+    }
+
+    // Commit: move each selected window onto the current desktop (where we already are). The content
+    // dismisses the stage itself; we stay put and flash the now-updated window counts.
+    private void PullSelectedWindows(IReadOnlyList<nint> hwnds)
+    {
+        if (_desktops is null) return;
+        DesktopId here = _desktops.Current;
+        foreach (nint h in hwnds)
+        {
+            try { _desktops.MoveWindowToDesktop(h, here); } catch { /* window may have closed — best-effort */ }
+        }
+        RefreshOrFlash();
     }
 
     // ── Manage-map actions (r / Del / Shift+Del / n) ───────────────────────────────

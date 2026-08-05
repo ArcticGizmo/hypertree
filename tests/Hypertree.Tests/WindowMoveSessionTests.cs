@@ -82,4 +82,62 @@ public class WindowMoveSessionTests
         Assert.True(s.EnsureFocusedSelected());
         Assert.Equal(new nint[] { 11 }, s.SelectedHwnds);
     }
+
+    [Fact]
+    public void Filter_narrows_visible_by_title_or_process_case_insensitively()
+    {
+        var s = new WindowMoveSession(new[]
+        {
+            new WindowInfo(10, "Build log", "WindowsTerminal"),
+            new WindowInfo(11, "Inbox", "chrome"),
+            new WindowInfo(12, "Deploy", "WindowsTerminal"),
+        });
+
+        Assert.True(s.SetFilter("term"));           // matches process on 10 and 12
+        Assert.Equal(new nint[] { 10, 12 }, s.Visible.Select(w => w.Hwnd));
+        Assert.Equal(3, s.Windows.Count);           // full list is untouched
+
+        Assert.True(s.SetFilter("inbox"));          // matches title on 11
+        Assert.Equal(new nint[] { 11 }, s.Visible.Select(w => w.Hwnd));
+
+        Assert.True(s.SetFilter(""));               // cleared → everything visible again
+        Assert.Equal(3, s.Visible.Count);
+        Assert.False(s.SetFilter(""));              // no change → returns false
+    }
+
+    [Fact]
+    public void Filter_keeps_selection_by_handle_and_indexes_into_visible()
+    {
+        var s = new WindowMoveSession(new[]
+        {
+            new WindowInfo(10, "a", "alpha"),
+            new WindowInfo(11, "b", "beta"),
+            new WindowInfo(12, "c", "alpha"),
+        });
+        s.MoveFocus(1); s.ToggleSelected();         // tick 11
+
+        s.SetFilter("alpha");                        // hides 11; visible = [10, 12]
+        Assert.Equal(new nint[] { 10, 12 }, s.Visible.Select(w => w.Hwnd));
+        s.ToggleSelected();                          // Focus snapped to 0 (10) → tick 10
+        Assert.True(s.IsSelected(0));                // index 0 is now the visible 10
+
+        // The out-of-view tick survives the filter — both come back when cleared.
+        s.SetFilter("");
+        Assert.Equal(new nint[] { 10, 11 }, s.SelectedHwnds);
+    }
+
+    [Fact]
+    public void Filter_keeps_focus_on_the_same_window_when_it_survives()
+    {
+        var s = new WindowMoveSession(new[]
+        {
+            new WindowInfo(10, "a", "alpha"),
+            new WindowInfo(11, "b", "beta"),
+            new WindowInfo(12, "c", "beta"),
+        });
+        s.MoveFocus(2);                              // focus 12
+        s.SetFilter("beta");                         // visible = [11, 12]; focus stays on 12
+        Assert.Equal(1, s.Focus);
+        Assert.Equal(12, s.Focused!.Hwnd);
+    }
 }
