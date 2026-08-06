@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.3.13] - 2026-08-06
+
+### Fixed
+
+- **`Shift+Delete`** removing a branch now clears its desktops at once; they no longer linger on main before disappearing the next time the map opens.
+
+---
+
 ## [v0.3.12] - 2026-08-06
 
 ### Added

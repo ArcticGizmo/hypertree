@@ -2032,7 +2032,11 @@ public sealed partial class App : Application
     private void RemoveBranch(int index)
     {
         if (_model is null) return;
+        // RemoveBranch reassigns the branch's still-live desktops onto main; TearDown then destroys them in
+        // the OS. Resync re-derives the model from the live desktop list so the map reflects the destruction
+        // now — without it the destroyed desktops ghost onto main until the next reconcile wipes them.
         TearDown(_model.RemoveBranch(index));
+        _model.Resync();
         RefreshOrFlash();
     }
 
