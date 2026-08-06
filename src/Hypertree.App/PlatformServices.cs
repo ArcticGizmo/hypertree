@@ -1,6 +1,7 @@
 using Hypertree.Desktops;
 using Hypertree.Launch;
 using Hypertree.Platform;
+using Hypertree.WindowLayout;
 #if WINDOWS
 using Impl = Hypertree.Platform.Windows;
 #endif
@@ -16,6 +17,7 @@ internal static class PlatformServices
 {
 #if WINDOWS
     public static IDesktopController CreateDesktopController() => new Impl.VirtualDesktopController(new Impl.ForegroundActivator());
+    public static IWindowLayoutController CreateWindowLayoutController() => new Impl.WindowsWindowLayoutController(new Impl.ForegroundActivator());
     public static IGlobalHotkey CreateGlobalHotkey() => new Impl.GlobalHotkey();
     public static IForegroundActivator CreateForegroundActivator() => new Impl.ForegroundActivator();
     public static IStartupManager CreateStartupManager() => new Impl.StartupManager();
@@ -26,6 +28,8 @@ internal static class PlatformServices
 #else
     public static IDesktopController CreateDesktopController()
         => throw new PlatformNotSupportedException("No desktop controller for this platform yet.");
+    public static IWindowLayoutController CreateWindowLayoutController()
+        => throw new PlatformNotSupportedException("No window layout controller for this platform yet.");
     public static IGlobalHotkey CreateGlobalHotkey()
         => throw new PlatformNotSupportedException("No global hotkey for this platform yet.");
     public static IForegroundActivator CreateForegroundActivator()

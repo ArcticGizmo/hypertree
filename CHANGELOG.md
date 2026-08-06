@@ -9,6 +9,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.3.12] - 2026-08-06
+
+### Added
+
+- **Monitor layout restore** — undock and your window arrangement across monitors is remembered; redock and a notification offers to put the windows back on the right screens, only when they're actually out of place, and names how many will move.
+- Restoring puts maximised windows back across monitors, keeps your focus where it is, and covers the shuffle with a brief "Restoring positions" screen.
+
+---
+
 ## [v0.3.11] - 2026-08-05
 
 ### Fixed
