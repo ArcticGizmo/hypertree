@@ -7,6 +7,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Hypertree.Desktops;
 using Hypertree.Layout;
+using Hypertree.Settings;
 using Hypertree.Spatial;
 
 namespace Hypertree.App.Views.Scene;
@@ -27,6 +28,12 @@ internal static class SpatialPainter
     private static readonly Color Focus = Color.Parse("#6EA8FF"), Here = Color.Parse("#34D399");
     private static readonly Color WinBase = Color.Parse("#374357");
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
+    // ASCII / Metro room styling, matching AsciiPainter and MetroPainter so a room reads the same in either model.
+    private static readonly Color AsciiGround = Color.Parse("#0C0F16");
+    private static readonly Color MetroBg = Color.Parse("#0F131B"), ChipBase = Color.Parse("#111722"), ChipInk = Color.Parse("#0A0D12");
+    private static readonly FontFamily Sans = new("Inter,Segoe UI,sans-serif");
+    private const double AsciiFont = 13;
+    private const int AsciiInnerW = 9;
 
     // Base geometry (unscaled). A room is the board tile; the grid stride leaves generous gaps so rooms and
     // their hulls have room to breathe (tile is 96×72, so these strides leave ~60px between neighbours).
@@ -42,7 +49,8 @@ internal static class SpatialPainter
 
     public static Control Render(SpatialScene scene, double screenW, double screenH, double s, MapCamera camera,
                                  Action<DesktopId>? onClick = null, Action<DesktopId>? onActivate = null,
-                                 IList<(DesktopId Id, Rect Rect)>? hits = null, Guid? selectedGroup = null)
+                                 IList<(DesktopId Id, Rect Rect)>? hits = null, Guid? selectedGroup = null,
+                                 MapStyle style = MapStyle.Board)
     {
         var layout = new SpatialLayout(scene, Metrics(s));
         camera.Update(layout, screenW, screenH);
@@ -50,7 +58,8 @@ internal static class SpatialPainter
 
         var canvas = new Canvas { Width = screenW, Height = screenH, ClipToBounds = true, Background = Brushes.Transparent };
 
-        // Hulls first (behind the rooms), then their name badges, then the rooms on top.
+        // Hulls first (behind the rooms), then their name badges, then the rooms on top. The hull is the
+        // spatial stand-in for the row model's branch box / metro route, so it stays whatever the room style.
         foreach (GroupHull hull in layout.Hulls(BaseHullPad * s, BaseHullPad * s))
             PaintHull(canvas, hull, ox, oy, s, selectedGroup is { } sg && hull.Group.Id == sg);
 
@@ -58,16 +67,37 @@ internal static class SpatialPainter
         {
             DesktopId id = placed.Room.Id;
             Color groupColor = Color.Parse(scene.Groups.First(g => g.Id == placed.Room.GroupId).Color);
-            Control tile = Tile(placed.Room, groupColor, s,
-                                onClick is null ? null : () => onClick(id),
-                                onActivate is null ? null : () => onActivate(id));
-            Canvas.SetLeft(tile, placed.Rect.Left + ox);
-            Canvas.SetTop(tile, placed.Rect.Top + oy);
-            canvas.Children.Add(tile);
-            hits?.Add((id, new Rect(placed.Rect.Left + ox, placed.Rect.Top + oy, placed.Rect.Width, placed.Rect.Height)));
+            var cell = new Rect(placed.Rect.Left + ox, placed.Rect.Top + oy, placed.Rect.Width, placed.Rect.Height);
+
+            // The room glyph follows the app's Map style, so List and Spatial read as the same app.
+            switch (style)
+            {
+                case MapStyle.Metro: DrawMetroRoom(canvas, placed.Room, groupColor, cell, s); break;
+                case MapStyle.Ascii: DrawAsciiRoom(canvas, placed.Room, groupColor, cell, s); break;
+                default: DrawBoardRoom(canvas, placed.Room, groupColor, cell, s); break;
+            }
+
+            // One transparent hit target per cell drives click/double-click for every style.
+            if (onClick is not null || onActivate is not null)
+            {
+                var hit = new Border { Width = cell.Width, Height = cell.Height, Background = Brushes.Transparent, Cursor = new Cursor(StandardCursorType.Hand) };
+                hit.PointerPressed += (_, e) => { if (e.ClickCount >= 2) onActivate?.Invoke(id); else onClick?.Invoke(id); };
+                Canvas.SetLeft(hit, cell.X);
+                Canvas.SetTop(hit, cell.Y);
+                canvas.Children.Add(hit);
+            }
+            hits?.Add((id, cell));
         }
 
         return canvas;
+    }
+
+    private static void DrawBoardRoom(Canvas canvas, SpatialRoom room, Color groupColor, Rect cell, double s)
+    {
+        Control tile = Tile(room, groupColor, s);
+        Canvas.SetLeft(tile, cell.X);
+        Canvas.SetTop(tile, cell.Y);
+        canvas.Children.Add(tile);
     }
 
     /// <summary>The grid pitch at scale <paramref name="s"/> — what a drag converts pixel travel into whole
@@ -124,8 +154,7 @@ internal static class SpatialPainter
     }
 
     // A room tile: the board's screen-mockup look, but its windows/caption/border tinted to the group colour.
-    private static Control Tile(SpatialRoom room, Color groupColor, double s,
-                                Action? onClick = null, Action? onActivate = null)
+    private static Control Tile(SpatialRoom room, Color groupColor, double s)
     {
         double tileW = BaseTileW * s, screenH = BaseScrH * s, capH = BaseCapH * s;
         bool empty = room.WindowCount == 0;
@@ -162,15 +191,6 @@ internal static class SpatialPainter
         };
 
         var stack = new StackPanel { Orientation = Orientation.Vertical, Width = tileW, Children = { screen, cap } };
-        if (onClick is not null || onActivate is not null)
-        {
-            stack.Cursor = new Cursor(StandardCursorType.Hand);
-            stack.PointerPressed += (_, e) =>
-            {
-                if (e.ClickCount >= 2) onActivate?.Invoke();
-                else onClick?.Invoke();
-            };
-        }
         Control result = stack;
 
         if (room.Here)
@@ -222,4 +242,107 @@ internal static class SpatialPainter
 
     private static Color Blend(Color a, Color b, double t) => Color.FromRgb(
         (byte)(a.R * (1 - t) + b.R * t), (byte)(a.G * (1 - t) + b.G * t), (byte)(a.B * (1 - t) + b.B * t));
+
+    // ── ASCII room: a monospace box-drawing card, tinted to the group colour (mirrors AsciiPainter) ──
+
+    private static void DrawAsciiRoom(Canvas canvas, SpatialRoom room, Color groupColor, Rect cell, double s)
+    {
+        bool empty = room.WindowCount == 0;
+        Color colour = room.Selected ? Focus : room.Here ? Here : (empty ? Blend(groupColor, AsciiGround, 0.5) : groupColor);
+        var card = new TextBlock
+        {
+            Text = AsciiCard(room), FontFamily = Mono, FontSize = AsciiFont * s,
+            Foreground = new SolidColorBrush(colour), Background = new SolidColorBrush(AsciiGround),
+            LineHeight = AsciiFont * 1.28 * s,
+        };
+        card.Measure(Size.Infinity);
+        Canvas.SetLeft(card, cell.X + (cell.Width - card.DesiredSize.Width) / 2);
+        Canvas.SetTop(card, cell.Y + (cell.Height - card.DesiredSize.Height) / 2);
+        canvas.Children.Add(card);
+    }
+
+    // Three monospace lines: ┌─ label ─┐ / │ ## 4 │ / └────────┘ (double-ruled when selected, "@ " when here).
+    private static string AsciiCard(SpatialRoom room)
+    {
+        (char tl, char tr, char bl, char br, char h, char v) = room.Selected
+            ? ('╔', '╗', '╚', '╝', '═', '║') : ('┌', '┐', '└', '┘', '─', '│');
+
+        string title = Trunc((room.Here ? "@ " : "") + room.Label, AsciiInnerW - 2);
+        string topRaw = h + " " + title + " ";
+        string top = topRaw.Length >= AsciiInnerW ? topRaw[..AsciiInnerW] : topRaw + new string(h, AsciiInnerW - topRaw.Length);
+
+        string wins = room.WindowCount == 0 ? "" : new string('#', Math.Min(room.WindowCount, AsciiInnerW - 4));
+        string count = room.WindowCount.ToString();
+        int padTo = AsciiInnerW - count.Length - 1;
+        string mid = " " + wins;
+        mid = (mid.Length > padTo ? mid[..Math.Max(0, padTo)] : mid).PadRight(padTo) + count + " ";
+        if (mid.Length > AsciiInnerW) mid = mid[..AsciiInnerW];
+
+        return $"{tl}{top}{tr}\n{v}{mid}{v}\n{bl}{new string(h, AsciiInnerW)}{br}";
+    }
+
+    private static string Trunc(string t, int max) => max <= 0 ? "" : t.Length <= max ? t : t[..max];
+
+    // ── Metro room: a station donut with a label chip below, tinted to the group colour (mirrors MetroPainter) ──
+
+    private static void DrawMetroRoom(Canvas canvas, SpatialRoom room, Color groupColor, Rect cell, double s)
+    {
+        double cx = cell.X + cell.Width / 2, cy = cell.Y + cell.Height * 0.42; // station up top, chip below it
+        double rOut = 10 * s;
+        bool empty = room.WindowCount == 0, marked = room.Selected || room.Here;
+        double r = empty && !marked ? rOut * 0.66 : rOut;
+        double ring = empty && !marked ? 2.5 * s : 3.5 * s;
+
+        if (room.Here)
+        {
+            var halo = new Ellipse { Width = rOut * 3.4, Height = rOut * 3.4, Fill = new SolidColorBrush(Here) { Opacity = 0.18 } };
+            Canvas.SetLeft(halo, cx - rOut * 1.7); Canvas.SetTop(halo, cy - rOut * 1.7);
+            canvas.Children.Add(halo);
+        }
+
+        Color donut = room.Selected ? Focus : room.Here ? Here : groupColor;
+        var dot = new Ellipse
+        {
+            Width = r * 2, Height = r * 2, Fill = new SolidColorBrush(MetroBg),
+            Stroke = new SolidColorBrush(donut), StrokeThickness = ring,
+        };
+        Canvas.SetLeft(dot, cx - r); Canvas.SetTop(dot, cy - r);
+        canvas.Children.Add(dot);
+
+        if (room.Selected)
+        {
+            double fr = rOut + 6 * s;
+            var focus = new Ellipse { Width = fr * 2, Height = fr * 2, Stroke = new SolidColorBrush(Focus), StrokeThickness = 2 * s };
+            Canvas.SetLeft(focus, cx - fr); Canvas.SetTop(focus, cy - fr);
+            canvas.Children.Add(focus);
+        }
+
+        // The label chip below the station.
+        Color fill = room.Selected ? Focus : room.Here ? Here : Blend(ChipBase, groupColor, 0.13);
+        Color ink = marked ? ChipInk : Blend(groupColor, ChipBase, empty ? 0.64 : 0.48);
+        var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 * s };
+        content.Children.Add(new TextBlock
+        {
+            Text = room.Label, FontFamily = Sans, FontSize = 12.5 * s,
+            FontWeight = marked ? FontWeight.SemiBold : FontWeight.Normal,
+            Foreground = new SolidColorBrush(ink), VerticalAlignment = VerticalAlignment.Center,
+        });
+        if (!empty)
+            content.Children.Add(new TextBlock
+            {
+                Text = room.WindowCount.ToString(), FontFamily = Mono, FontSize = 10 * s, FontWeight = FontWeight.SemiBold,
+                Foreground = new SolidColorBrush(marked ? Color.FromArgb(0xB4, ChipInk.R, ChipInk.G, ChipInk.B) : Blend(groupColor, ChipBase, 0.58)),
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+        var chip = new Border
+        {
+            Background = new SolidColorBrush(fill), CornerRadius = new CornerRadius(9 * s),
+            Padding = new Thickness(9 * s, 3 * s), Child = content,
+        };
+        if (!marked) { chip.BorderBrush = new SolidColorBrush(Blend(MetroBg, groupColor, empty ? 0.3 : 0.44)); chip.BorderThickness = new Thickness(Math.Max(1, s)); }
+        chip.Measure(Size.Infinity);
+        Canvas.SetLeft(chip, cx - chip.DesiredSize.Width / 2);
+        Canvas.SetTop(chip, cy + rOut + 10 * s);
+        canvas.Children.Add(chip);
+    }
 }

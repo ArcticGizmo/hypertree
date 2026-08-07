@@ -8,6 +8,7 @@ using Hypertree.App.Views.Scene;
 using Hypertree.Desktops;
 using Hypertree.Layout;
 using Hypertree.Scopes;
+using Hypertree.Settings;
 using Hypertree.Spatial;
 
 namespace Hypertree.App;
@@ -97,6 +98,9 @@ internal static class DesignShot
         SaveSpatial(Path.Combine(outDir, "spatial-fragmented.png"), fragmented: true);
         SaveSpatial(Path.Combine(outDir, "spatial-group.png"), fragmented: false, selectedGroup: 2); // release-4.2 selected
         SaveSpatial(Path.Combine(outDir, "spatial-tidied.png"), fragmented: true, tidied: true);      // the fragmented board after Tidy
+        // The same spatial layout rendered in each Map style, so room glyphs can be checked to match the row model.
+        SaveSpatial(Path.Combine(outDir, "spatial-ascii.png"), fragmented: false, style: MapStyle.Ascii);
+        SaveSpatial(Path.Combine(outDir, "spatial-metro.png"), fragmented: false, style: MapStyle.Metro);
 
         SaveCards(outDir);
         SaveLauncher(outDir);
@@ -107,7 +111,8 @@ internal static class DesignShot
     /// four-branch data as groups, placed at explicit grid positions — so the room tiles, group hulls, name
     /// badges, and the selected/here/empty states can all be eyeballed without the tray.
     /// </summary>
-    private static void SaveSpatial(string path, bool fragmented, int? selectedGroup = null, bool tidied = false)
+    private static void SaveSpatial(string path, bool fragmented, int? selectedGroup = null, bool tidied = false,
+                                    MapStyle style = MapStyle.Board)
     {
         DesktopId D(int n) => new(new Guid($"{n:D8}-0000-0000-0000-000000000000"));
         Guid Gid(int n) => new($"{n:D8}-aaaa-0000-0000-000000000000");
@@ -143,7 +148,7 @@ internal static class DesignShot
 
         Guid? sel = selectedGroup is { } sg ? Gid(sg) : null;
         Save(SpatialPainter.Render(SpatialScene.From(source, state), ScreenW, ScreenH, 1.0, new MapCamera(),
-                                   selectedGroup: sel), path);
+                                   selectedGroup: sel, style: style), path);
     }
 
     /// <summary>

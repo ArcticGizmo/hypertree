@@ -167,7 +167,7 @@ internal sealed class SettingsWindow : Window
                     Hint("How every board is drawn — the flash, the map, previews and the move flow. "
                          + "“Board” is the screen-tile view, “Metro” a transit diagram (coloured lines and "
                          + "stations), “ASCII” a monospace terminal look. Cycle it with “v” on the map. "
-                         + "(Applies to the List model; the Spatial map has its own look.)"),
+                         + "Applies to both models — Spatial rooms take the same style, so the two stay consistent."),
 
                     Divider(),
                     Title2("Navigation"),

@@ -437,7 +437,7 @@ internal sealed class SpatialOverlay : IStageContent
         Control board = SpatialPainter.Render(display, width, height, 1.0, _camera,
             onClick: id => { _cursor = id; _selectedGroup = null; _tilePressed = true; Render(); },
             onActivate: id => JumpRoomRequested?.Invoke(id),
-            hits: _hits, selectedGroup: _selectedGroup);
+            hits: _hits, selectedGroup: _selectedGroup, style: _stage.MapStyle);
 
         _root.Children.Clear();
         _root.Children.Add(board);
