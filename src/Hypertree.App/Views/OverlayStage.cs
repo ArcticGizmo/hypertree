@@ -406,10 +406,15 @@ internal sealed class StageWindow : Window
     private static readonly IBrush DimBg = BuildDim();
 
     // The backdrop the board draws over. A soft vignette rather than a flat slab: darker in the centre —
-    // where the board (and especially the metro map's thin coloured lines) sits — fading out to the same
-    // dim it always was at the edges. Since the host is semi-transparent over the live desktop, a busy or
-    // light screen behind used to wash the centre out; pooling the dark under the content fixes the contrast
-    // without making the whole overlay heavier. Radii reach past the corners so the outer field is flat.
+    // where the board (and especially the metro map's thin coloured lines) sits — pooling off toward a dim
+    // floor at the edges. Since the host is semi-transparent over the live desktop, a busy or light screen
+    // behind used to wash the centre out; pooling the dark under the content fixes the contrast without
+    // making the whole overlay heavier. Radii reach past the corners so the outer field is flat.
+    //
+    // The edge floor is deliberately kept close to the centre (0xCC vs 0xDD, not the old 0x9E). With enough
+    // branches the board overflows and its rows fill the whole height — reaching the edges the vignette used
+    // to leave near-clear, which read as an "undimmed gap at the bottom" once content sat in it. A darker
+    // floor keeps the pooling subtle while making sure overflowing rows never fall onto washed-out backing.
     internal static RadialGradientBrush BuildDim() => new RadialGradientBrush
     {
         Center = new RelativePoint(0.5, 0.5, RelativeUnit.Relative),
@@ -419,8 +424,8 @@ internal sealed class StageWindow : Window
         GradientStops =
         {
             new GradientStop(Color.FromArgb(0xDD, 0x07, 0x08, 0x0C), 0.0),  // darker pool under the content
-            new GradientStop(Color.FromArgb(0xBE, 0x0B, 0x0C, 0x10), 0.55),
-            new GradientStop(Color.FromArgb(0x9E, 0x0E, 0x0E, 0x12), 1.0),  // = the previous flat dim, at the edges
+            new GradientStop(Color.FromArgb(0xD5, 0x0A, 0x0B, 0x0F), 0.55),
+            new GradientStop(Color.FromArgb(0xCC, 0x0D, 0x0D, 0x11), 1.0),  // dim floor — dark enough that overflow rows never wash out
         },
     };
 

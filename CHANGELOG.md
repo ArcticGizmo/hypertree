@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.3.14] - 2026-08-07
+
+### Fixed
+
+- The map dimming stays dark to the edges, so overflowing branches no longer sit on a washed-out gap at the bottom.
+
+---
+
 ## [v0.3.13] - 2026-08-06
 
 ### Fixed
