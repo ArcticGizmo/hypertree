@@ -260,6 +260,16 @@ public sealed partial class App : Application
         _spatialOverlay.JumpRoomRequested += id => JumpFromMap(() => JumpToId(id));
         _spatialOverlay.SwapModelRequested += SwapMapModel; // Tab — swap back to the row map
         _spatialOverlay.SpatialStateChanged += () => _spatialStore?.Save(_spatial); // a move or recolour is written to spatial.json
+        _spatialOverlay.DeleteRoomRequested += id =>       // Del — reuse the row map's confirm/teardown flow
+        {
+            if (_model?.Locate(id) is { } at)
+                DeleteSelectedDesktop(new DesktopSelection(at.onMain, at.branchIndex, at.desktopIndex));
+        };
+        _spatialOverlay.DeleteGroupRequested += g =>       // Shift+Del — a group is a branch
+        {
+            int i = _model?.IndexOfBranch(g) ?? -1;
+            if (i >= 0) ConfirmRemoveBranch(i);
+        };
 
         _stage.Prewarm(); // size the overlay host now, so the first summon doesn't render at the top-left then jump
 
@@ -951,7 +961,9 @@ public sealed partial class App : Application
     // map shows the update the next time the stage unwinds back to it (after an action completes on a card).
     private void RefreshOverlay()
     {
-        if (_model is not null) _overlay?.SetBoard(_model.BuildMap());
+        if (_model is null) return;
+        _overlay?.SetBoard(_model.BuildMap()); // row: redraws if open, else stashes for the next present
+        if (_spatialOverlay is { IsOpen: true }) _spatialOverlay.SetSource(_model.BuildSpatialSource(), _spatial);
     }
 
     // ── Move windows to another desktop (m on the map) ──────────────────────────────
@@ -1858,7 +1870,11 @@ public sealed partial class App : Application
     {
         if (_model is null) return;
         NavMap map = _model.BuildMap();
-        if (_stage is not null && _stage.HasDurableBase) _overlay?.SetBoard(map);
+        if (_stage is not null && _stage.HasDurableBase)
+        {
+            _overlay?.SetBoard(map);
+            if (_spatialOverlay is { IsOpen: true }) _spatialOverlay.SetSource(_model.BuildSpatialSource(), _spatial);
+        }
         // A result flash, not a gesture — just times out. It appears over a bare desktop, so it fades up too.
         else _hud?.Flash(map, HotkeyModifiers.None, style: _settings.MapStyle,
                          fade: WindowFx.SystemAnimationsEnabled());

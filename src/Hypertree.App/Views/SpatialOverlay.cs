@@ -40,6 +40,7 @@ internal sealed class SpatialOverlay : IStageContent
     private Guid? _selectedGroup; // the active group (g cycles it); its whole set moves as one
     private bool _groupsPanel;    // the ⇧G groups-and-colours panel is showing
     private Guid? _paletteFor;    // which group's colour palette is expanded in the panel
+    private Dictionary<string, GridPos>? _tidyUndo; // positions before the last tidy, for Ctrl+Z
     private bool _initialised;
 
     // The last render's room hit-rects (screen space) and scene, so a drag can hit-test and read effective
@@ -54,6 +55,10 @@ internal sealed class SpatialOverlay : IStageContent
     /// <summary>A move or a recolour changed the spatial state: it's already written to the shared
     /// <see cref="SpatialState"/>; App just persists it to spatial.json.</summary>
     public event Action? SpatialStateChanged;
+    /// <summary>Del — remove the room (the desktop). App resolves the id and runs its confirm/teardown.</summary>
+    public event Action<DesktopId>? DeleteRoomRequested;
+    /// <summary>Shift+Del — remove a whole group (a branch). App resolves the group id to a branch.</summary>
+    public event Action<Guid>? DeleteGroupRequested;
 
     public SpatialOverlay(OverlayStage stage, MapCamera camera)
     {
@@ -124,6 +129,7 @@ internal sealed class SpatialOverlay : IStageContent
             case Key.Right when e.KeyModifiers == KeyModifiers.Control: MoveActive(1, 0); e.Handled = true; return;
             case Key.Up when e.KeyModifiers == KeyModifiers.Control: MoveActive(0, -1); e.Handled = true; return;
             case Key.Down when e.KeyModifiers == KeyModifiers.Control: MoveActive(0, 1); e.Handled = true; return;
+            case Key.Z when e.KeyModifiers == KeyModifiers.Control: Undo(); e.Handled = true; return;
         }
 
         switch (e.Key)
@@ -133,6 +139,10 @@ internal sealed class SpatialOverlay : IStageContent
             case Key.Enter: if (_cursor is { } c) JumpRoomRequested?.Invoke(c); e.Handled = true; break;
             case Key.G when e.KeyModifiers.HasFlag(KeyModifiers.Shift): ToggleGroupsPanel(); e.Handled = true; break;
             case Key.G: CycleGroup(); e.Handled = true; break;
+            case Key.T: Tidy(); e.Handled = true; break;
+            case Key.Delete when e.KeyModifiers.HasFlag(KeyModifiers.Shift): DeleteGroup(); e.Handled = true; break;
+            case Key.Delete: DeleteCursorRoom(); e.Handled = true; break;
+            case Key.Back: DeleteCursorRoom(); e.Handled = true; break;
             case Key.Left: Nudge(-1, 0); e.Handled = true; break;
             case Key.Right: Nudge(1, 0); e.Handled = true; break;
             case Key.Up: Nudge(0, -1); e.Handled = true; break;
@@ -218,6 +228,47 @@ internal sealed class SpatialOverlay : IStageContent
         _paletteFor = null;
         SpatialStateChanged?.Invoke();
         Render();
+    }
+
+    // ── Tidy (t) & undo (Ctrl+Z) ───────────────────────────────────────────────
+    // t reunites drifted groups — a selected group on its own, else the whole map — moving each fragment as
+    // a rigid block so shapes survive. It snapshots first so Ctrl+Z puts everything back.
+
+    private void Tidy()
+    {
+        if (_displayed is null) return;
+        _tidyUndo = new Dictionary<string, GridPos>(_state.Positions);  // snapshot for a one-step undo
+        IReadOnlyDictionary<DesktopId, GridPos> moves = _selectedGroup is { } g
+            ? SpatialTidy.Group(_displayed, g)
+            : SpatialTidy.All(_displayed);
+        foreach ((DesktopId id, GridPos pos) in moves) _state.SetPosition(id.Value, pos);
+        SpatialStateChanged?.Invoke();
+        Render();
+    }
+
+    private void Undo()
+    {
+        if (_tidyUndo is null) return;
+        _state.Positions = new Dictionary<string, GridPos>(_tidyUndo);  // restore the pre-tidy layout
+        _tidyUndo = null;
+        SpatialStateChanged?.Invoke();
+        Render();
+    }
+
+    // ── Delete (Del / Shift+Del) ────────────────────────────────────────────────
+    // Deleting is a real desktop teardown, so it goes through App (confirm + destroy). Spatially the hole
+    // just stays — positions are independent, so no neighbour reflows.
+
+    private void DeleteCursorRoom()
+    {
+        if (_cursor is { } id && RoomOf(id) is not null) DeleteRoomRequested?.Invoke(id);
+    }
+
+    private void DeleteGroup()
+    {
+        // The group to remove: the selected one, else the cursor's. main (the ungrouped bucket) can't be removed.
+        Guid? group = _selectedGroup ?? (_cursor is { } id ? RoomOf(id)?.GroupId : null);
+        if (group is { } g && g != Guid.Empty) DeleteGroupRequested?.Invoke(g);
     }
 
     // ── Moving rooms, blocks & groups ──────────────────────────────────────────
@@ -398,6 +449,9 @@ internal sealed class SpatialOverlay : IStageContent
         rows.Children.Add(LegendRow("Ctrl+Shift+←→↑↓", "move the block"));
         rows.Children.Add(LegendRow("g", "select a group"));
         rows.Children.Add(LegendRow("Shift+g", "groups & colours"));
+        rows.Children.Add(LegendRow("t", "tidy up (reunite groups)"));
+        rows.Children.Add(LegendRow("Del", "remove room · Shift+Del group"));
+        rows.Children.Add(LegendRow("Ctrl+z", "undo the last tidy"));
         rows.Children.Add(LegendRow("Tab", "back to the list view"));
         rows.Children.Add(LegendRow("Esc", "close"));
         rows.Children.Add(new TextBlock

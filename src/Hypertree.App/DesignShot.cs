@@ -96,6 +96,7 @@ internal static class DesignShot
         SaveSpatial(Path.Combine(outDir, "spatial-top.png"), fragmented: false);
         SaveSpatial(Path.Combine(outDir, "spatial-fragmented.png"), fragmented: true);
         SaveSpatial(Path.Combine(outDir, "spatial-group.png"), fragmented: false, selectedGroup: 2); // release-4.2 selected
+        SaveSpatial(Path.Combine(outDir, "spatial-tidied.png"), fragmented: true, tidied: true);      // the fragmented board after Tidy
 
         SaveCards(outDir);
         SaveLauncher(outDir);
@@ -106,7 +107,7 @@ internal static class DesignShot
     /// four-branch data as groups, placed at explicit grid positions — so the room tiles, group hulls, name
     /// badges, and the selected/here/empty states can all be eyeballed without the tray.
     /// </summary>
-    private static void SaveSpatial(string path, bool fragmented, int? selectedGroup = null)
+    private static void SaveSpatial(string path, bool fragmented, int? selectedGroup = null, bool tidied = false)
     {
         DesktopId D(int n) => new(new Guid($"{n:D8}-0000-0000-0000-000000000000"));
         Guid Gid(int n) => new($"{n:D8}-aaaa-0000-0000-000000000000");
@@ -134,6 +135,11 @@ internal static class DesignShot
         P(40, 6, 3);                                              // spike, a lone room
         if (!fragmented) { P(20, 6, 0); P(21, 7, 0); P(22, 6, 1); P(23, 7, 1); } // release-4.2 as a 2×2 block
         else { P(20, 6, 0); P(21, 7, 0); P(22, -2, 4); P(23, -1, 4); }           // …split into two fragments
+
+        // Apply Tidy to the (fragmented) layout so the shot shows the reassembled, packed result.
+        if (tidied)
+            foreach (KeyValuePair<DesktopId, GridPos> kv in SpatialTidy.All(SpatialScene.From(source, state)))
+                state.SetPosition(kv.Key.Value, kv.Value);
 
         Guid? sel = selectedGroup is { } sg ? Gid(sg) : null;
         Save(SpatialPainter.Render(SpatialScene.From(source, state), ScreenW, ScreenH, 1.0, new MapCamera(),
