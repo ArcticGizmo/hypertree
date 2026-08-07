@@ -242,8 +242,8 @@ internal sealed class SpatialOverlay : IStageContent
             ? SpatialTidy.Group(_displayed, g)
             : SpatialTidy.All(_displayed);
         foreach ((DesktopId id, GridPos pos) in moves) _state.SetPosition(id.Value, pos);
-        SpatialStateChanged?.Invoke();
-        Render();
+        // Tidying one group can push its block onto another group's cells; resolve that (All never overlaps).
+        Commit(moves.Keys.ToHashSet());
     }
 
     private void Undo()
@@ -287,14 +287,23 @@ internal sealed class SpatialOverlay : IStageContent
     {
         if (_cursor is not { } id || RoomOf(id) is not { } room) return;
         _state.SetPosition(id.Value, room.Pos.Offset(dx, dy));
-        SpatialStateChanged?.Invoke();
-        Render();
+        Commit(new HashSet<DesktopId> { id });
     }
 
     private void MoveRooms(IReadOnlyList<SpatialRoom> rooms, int dx, int dy)
     {
         if (rooms.Count == 0) return;
         foreach (SpatialRoom r in rooms) _state.SetPosition(r.Id.Value, r.Pos.Offset(dx, dy));
+        Commit(rooms.Select(r => r.Id).ToHashSet());
+    }
+
+    // Finish a move: the moved rooms have their new positions in the state; bump any rooms they landed on to
+    // the nearest free cell (no invisible stacking), then persist and redraw.
+    private void Commit(IReadOnlySet<DesktopId> moved)
+    {
+        SpatialScene scene = Scene();
+        var fixes = SpatialPlacement.ResolveOverlaps(scene.Rooms.Select(r => (r.Id, r.Pos)).ToList(), moved);
+        foreach ((DesktopId id, GridPos pos) in fixes) _state.SetPosition(id.Value, pos);
         SpatialStateChanged?.Invoke();
         Render();
     }
@@ -383,10 +392,14 @@ internal sealed class SpatialOverlay : IStageContent
     private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
         bool moved = _dragging && _appliedDelta != (0, 0);
+        var movedIds = new HashSet<DesktopId>(_dragBase.Keys);
         e.Pointer.Capture(null);
-        _grab = null;
-        _dragging = false;
-        if (moved) { SpatialStateChanged?.Invoke(); Render(); }    // positions are already whole cells — just commit
+        if (moved)                                             // positions are whole cells already
+        {
+            _grab = null; _dragging = false;
+            _dragBase.Clear(); _dragOriginal.Clear();
+            Commit(movedIds);                                  // bump anything the drop landed on, persist, redraw
+        }
         else CancelDrag();                                     // a click that never dragged: restore any provisional
     }
 

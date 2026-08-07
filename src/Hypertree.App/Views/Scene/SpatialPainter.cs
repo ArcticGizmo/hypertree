@@ -28,9 +28,10 @@ internal static class SpatialPainter
     private static readonly Color WinBase = Color.Parse("#374357");
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
 
-    // Base geometry (unscaled). A room is the board tile; the grid stride leaves gaps for hulls to breathe.
+    // Base geometry (unscaled). A room is the board tile; the grid stride leaves generous gaps so rooms and
+    // their hulls have room to breathe (tile is 96×72, so these strides leave ~60px between neighbours).
     private const double BaseTileW = 96, BaseScrH = 50, BaseCapH = 22;
-    private const double BaseStrideX = 130, BaseStrideY = 112, BaseHullPad = 15;
+    private const double BaseStrideX = 158, BaseStrideY = 140, BaseHullPad = 16;
     private static double TileH => BaseScrH + BaseCapH; // 72
 
     /// <summary>The spatial metrics — a near-square grid, unlike the tall row pitch, since 2-D placement
@@ -84,12 +85,13 @@ internal static class SpatialPainter
         LayoutRect r = hull.Rect;
 
         // A selected group lifts to a stronger fill and a blue selection stroke, the same accent the room
-        // selection uses, so "this group is active" reads at a glance.
+        // selection uses, so "this group is active" reads at a glance. Resting fills are kept very faint —
+        // the hull should whisper the grouping, not colour-wash the rooms inside it.
         var rect = new Rectangle
         {
             Width = r.Width, Height = r.Height, RadiusX = 20 * s, RadiusY = 20 * s,
-            Fill = new SolidColorBrush(c, selected ? 0.15 : main ? 0.04 : 0.085),
-            Stroke = new SolidColorBrush(selected ? Focus : c, selected ? 1.0 : main ? 0.22 : 0.42),
+            Fill = new SolidColorBrush(c, selected ? 0.11 : main ? 0.02 : 0.045),
+            Stroke = new SolidColorBrush(selected ? Focus : c, selected ? 1.0 : main ? 0.18 : 0.34),
             StrokeThickness = Math.Max(1, (selected ? 1.8 : 1.1) * s),
         };
         if (main && !selected) rect.StrokeDashArray = new AvaloniaList<double> { 2, 4 };
