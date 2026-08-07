@@ -7,6 +7,7 @@ using Avalonia.Media;
 using Hypertree.App.Views.Scene;
 using Hypertree.Desktops;
 using Hypertree.Layout;
+using Hypertree.Settings;
 using Hypertree.Spatial;
 
 namespace Hypertree.App.Views;
@@ -52,6 +53,9 @@ internal sealed class SpatialOverlay : IStageContent
     public event Action<DesktopId>? JumpRoomRequested;
     /// <summary>Tab — swap back to the row map. App flips the persisted model and re-opens.</summary>
     public event Action? SwapModelRequested;
+    /// <summary>v — cycle the whole-app Map style (Board → Metro → ASCII). App persists it and pushes it back,
+    /// so the room glyphs follow and List stays consistent.</summary>
+    public event Action? ViewStyleToggleRequested;
     /// <summary>A move or a recolour changed the spatial state: it's already written to the shared
     /// <see cref="SpatialState"/>; App just persists it to spatial.json.</summary>
     public event Action? SpatialStateChanged;
@@ -139,6 +143,7 @@ internal sealed class SpatialOverlay : IStageContent
             case Key.Enter: if (_cursor is { } c) JumpRoomRequested?.Invoke(c); e.Handled = true; break;
             case Key.G when e.KeyModifiers.HasFlag(KeyModifiers.Shift): ToggleGroupsPanel(); e.Handled = true; break;
             case Key.G: CycleGroup(); e.Handled = true; break;
+            case Key.V: ViewStyleToggleRequested?.Invoke(); e.Handled = true; break;
             case Key.T: Tidy(); e.Handled = true; break;
             case Key.Delete when e.KeyModifiers.HasFlag(KeyModifiers.Shift): DeleteGroup(); e.Handled = true; break;
             case Key.Delete: DeleteCursorRoom(); e.Handled = true; break;
@@ -459,6 +464,12 @@ internal sealed class SpatialOverlay : IStageContent
         rows.Children.Add(LegendRow("g", "select a group"));
         rows.Children.Add(LegendRow("Shift+g", "groups & colours"));
         rows.Children.Add(LegendRow("t", "tidy up (reunite groups)"));
+        rows.Children.Add(LegendRow("v", _stage.MapStyle switch
+        {
+            MapStyle.Board => "metro view",
+            MapStyle.Metro => "ascii view",
+            _ => "board view",
+        }));
         rows.Children.Add(LegendRow("Del", "remove room · Shift+Del group"));
         rows.Children.Add(LegendRow("Ctrl+z", "undo the last tidy"));
         rows.Children.Add(LegendRow("Tab", "back to the list view"));

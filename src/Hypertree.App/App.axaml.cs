@@ -259,6 +259,7 @@ public sealed partial class App : Application
         _spatialOverlay = new SpatialOverlay(_stage, _mapCamera);
         _spatialOverlay.JumpRoomRequested += id => JumpFromMap(() => JumpToId(id));
         _spatialOverlay.SwapModelRequested += SwapMapModel; // Tab — swap back to the row map
+        _spatialOverlay.ViewStyleToggleRequested += ToggleMapStyle; // v — cycle board ↔ metro ↔ ascii (app-wide)
         _spatialOverlay.SpatialStateChanged += () => _spatialStore?.Save(_spatial); // a move or recolour is written to spatial.json
         _spatialOverlay.DeleteRoomRequested += id =>       // Del — reuse the row map's confirm/teardown flow
         {
@@ -1708,12 +1709,17 @@ public sealed partial class App : Application
     {
         if (_stage is null || _stage.MapStyle == _settings.MapStyle) return;
         _stage.MapStyle = _settings.MapStyle;
-        _mapCamera.Reframe(); // the new theme's metrics invalidate the carried pixel offset — reframe the selection
+        // A row theme changes tile metrics, so the carried pixel offset is stale — reframe. The spatial map's
+        // metrics are style-independent (only the room glyph changes), so leave its camera put when it's open.
+        if (_spatialOverlay is not { IsOpen: true }) _mapCamera.Reframe();
         // While the Settings window is open it sits above the stage; re-rendering the map here would end in
         // _stage.BringToFront() and steal the top of the z-order from it. Defer the map repaint to the
         // Settings Closed handler; refreshing a card backdrop (no z-order change) is safe either way.
-        if (_settingsWindow is null && _overlay is { IsOpen: true } && _model is not null)
-            _overlay.SetBoard(_model.BuildMap());
+        if (_settingsWindow is null && _model is not null)
+        {
+            if (_overlay is { IsOpen: true }) _overlay.SetBoard(_model.BuildMap());
+            else if (_spatialOverlay is { IsOpen: true }) _spatialOverlay.SetSource(_model.BuildSpatialSource(), _spatial);
+        }
         _stage.RefreshBackdrop();
     }
 
