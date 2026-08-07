@@ -7,7 +7,7 @@ namespace Hypertree.Layout;
 /// Rows stack on a uniform pitch: row <c>r</c> is centred at <c>y = r · RowPitch</c>. See
 /// docs/design/scene-camera.md.
 /// </summary>
-public sealed class SceneLayout
+public sealed class SceneLayout : ICameraLayout
 {
     private readonly SceneMetrics _m;
     private readonly LayoutRect[][] _cells; // [row][col] → world rect

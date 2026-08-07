@@ -35,7 +35,7 @@ public sealed class MapCamera
 
     /// <summary>Recompute both offsets for the current selection and viewport. Idempotent while the
     /// selection stays on screen (the dead zone), so calling it every render doesn't drift.</summary>
-    public void Update(SceneLayout layout, double viewW, double viewH)
+    public void Update(ICameraLayout layout, double viewW, double viewH)
     {
         LayoutRect sel = layout.SelectionRect;
         (double xLo, double xHi) = layout.WorldX();

@@ -5,8 +5,10 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Hypertree.App.Views;
 using Hypertree.App.Views.Scene;
+using Hypertree.Desktops;
 using Hypertree.Layout;
 using Hypertree.Scopes;
+using Hypertree.Spatial;
 
 namespace Hypertree.App;
 
@@ -88,8 +90,51 @@ internal static class DesignShot
         SaveMetroBackdrop(backdropMap, Path.Combine(outDir, "metro-backdrop-flat.png"), vignette: false);
         SaveMetroBackdrop(backdropMap, Path.Combine(outDir, "metro-backdrop-vignette.png"), vignette: true);
 
+        // The spatial map: the same desktops as the busy board, but placed freely in 2-D as rooms inside
+        // group hulls. "top" is a tidy hand-arrangement; "fragmented" flings half of release-4.2 away so a
+        // group splits into two hulls (the ⚡-fragments state Tidy will later reunite).
+        SaveSpatial(Path.Combine(outDir, "spatial-top.png"), fragmented: false);
+        SaveSpatial(Path.Combine(outDir, "spatial-fragmented.png"), fragmented: true);
+
         SaveCards(outDir);
         SaveLauncher(outDir);
+    }
+
+    /// <summary>
+    /// The spatial map rendered offscreen, over the same dark ground. Builds a scene by hand — the busy
+    /// four-branch data as groups, placed at explicit grid positions — so the room tiles, group hulls, name
+    /// badges, and the selected/here/empty states can all be eyeballed without the tray.
+    /// </summary>
+    private static void SaveSpatial(string path, bool fragmented)
+    {
+        DesktopId D(int n) => new(new Guid($"{n:D8}-0000-0000-0000-000000000000"));
+        Guid Gid(int n) => new($"{n:D8}-aaaa-0000-0000-000000000000");
+        SpatialDesktop Desk(int id, string label, int win, bool sel = false, bool here = false)
+            => new(D(id), label, sel, here, win);
+
+        var source = new SpatialSource(new[]
+        {
+            new SpatialGroupSource(Guid.Empty, "main", IsMain: true, new[]
+                { Desk(0, "Home", 4), Desk(1, "Comms", 2), Desk(2, "Web", 7, sel: true, here: true), Desk(3, "Notes", 0) }),
+            new SpatialGroupSource(Gid(1), "FEAT-123", IsMain: false, new[]
+                { Desk(10, "SPA", 3), Desk(11, "API", 1), Desk(12, "Mobile", 0) }),
+            new SpatialGroupSource(Gid(2), "release-4.2", IsMain: false, new[]
+                { Desk(20, "build", 2), Desk(21, "test", 5), Desk(22, "docs", 1), Desk(23, "ship", 0) }),
+            new SpatialGroupSource(Gid(3), "hotfix", IsMain: false, new[]
+                { Desk(30, "db", 1), Desk(31, "api", 0) }),
+            new SpatialGroupSource(Gid(4), "spike", IsMain: false, new[] { Desk(40, "scratch", 2) }),
+        });
+
+        var state = new SpatialState();
+        void P(int id, int x, int y) => state.SetPosition(D(id).Value, new GridPos(x, y));
+        P(0, 1, 2); P(1, 2, 2); P(2, 3, 2); P(3, 4, 2);          // main across the middle
+        P(10, 1, 0); P(11, 2, 0); P(12, 3, 0);                    // FEAT-123 up and to the left
+        P(30, 1, 4); P(31, 2, 4);                                 // hotfix down low
+        P(40, 6, 3);                                              // spike, a lone room
+        if (!fragmented) { P(20, 6, 0); P(21, 7, 0); P(22, 6, 1); P(23, 7, 1); } // release-4.2 as a 2×2 block
+        else { P(20, 6, 0); P(21, 7, 0); P(22, -2, 4); P(23, -1, 4); }           // …split into two fragments
+
+        Save(SpatialPainter.Render(SpatialScene.From(source, state), ScreenW, ScreenH, 1.0, new MapCamera()), path);
     }
 
     /// <summary>
