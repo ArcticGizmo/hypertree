@@ -37,6 +37,9 @@ internal sealed class SpatialOverlay : IStageContent
     private SpatialSource _source = new(Array.Empty<SpatialGroupSource>());
     private SpatialState _state = new();
     private DesktopId? _cursor;   // the blue selection; null until homed onto the current desktop
+    private Guid? _selectedGroup; // the active group (g cycles it); its whole set moves as one
+    private bool _groupsPanel;    // the ⇧G groups-and-colours panel is showing
+    private Guid? _paletteFor;    // which group's colour palette is expanded in the panel
     private bool _initialised;
 
     // The last render's room hit-rects (screen space) and scene, so a drag can hit-test and read effective
@@ -48,9 +51,9 @@ internal sealed class SpatialOverlay : IStageContent
     public event Action<DesktopId>? JumpRoomRequested;
     /// <summary>Tab — swap back to the row map. App flips the persisted model and re-opens.</summary>
     public event Action? SwapModelRequested;
-    /// <summary>A room or block was moved: its new positions are already written to the shared
+    /// <summary>A move or a recolour changed the spatial state: it's already written to the shared
     /// <see cref="SpatialState"/>; App just persists it to spatial.json.</summary>
-    public event Action? PositionsChanged;
+    public event Action? SpatialStateChanged;
 
     public SpatialOverlay(OverlayStage stage, MapCamera camera)
     {
@@ -117,22 +120,32 @@ internal sealed class SpatialOverlay : IStageContent
             case Key.Right when e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift): MoveBlock(1, 0); e.Handled = true; return;
             case Key.Up when e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift): MoveBlock(0, -1); e.Handled = true; return;
             case Key.Down when e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift): MoveBlock(0, 1); e.Handled = true; return;
-            case Key.Left when e.KeyModifiers == KeyModifiers.Control: MoveRoom(-1, 0); e.Handled = true; return;
-            case Key.Right when e.KeyModifiers == KeyModifiers.Control: MoveRoom(1, 0); e.Handled = true; return;
-            case Key.Up when e.KeyModifiers == KeyModifiers.Control: MoveRoom(0, -1); e.Handled = true; return;
-            case Key.Down when e.KeyModifiers == KeyModifiers.Control: MoveRoom(0, 1); e.Handled = true; return;
+            case Key.Left when e.KeyModifiers == KeyModifiers.Control: MoveActive(-1, 0); e.Handled = true; return;
+            case Key.Right when e.KeyModifiers == KeyModifiers.Control: MoveActive(1, 0); e.Handled = true; return;
+            case Key.Up when e.KeyModifiers == KeyModifiers.Control: MoveActive(0, -1); e.Handled = true; return;
+            case Key.Down when e.KeyModifiers == KeyModifiers.Control: MoveActive(0, 1); e.Handled = true; return;
         }
 
         switch (e.Key)
         {
-            case Key.Escape: Close(); e.Handled = true; break;
+            case Key.Escape: OnEscape(); e.Handled = true; break;
             case Key.Tab: SwapModelRequested?.Invoke(); e.Handled = true; break;
             case Key.Enter: if (_cursor is { } c) JumpRoomRequested?.Invoke(c); e.Handled = true; break;
+            case Key.G when e.KeyModifiers.HasFlag(KeyModifiers.Shift): ToggleGroupsPanel(); e.Handled = true; break;
+            case Key.G: CycleGroup(); e.Handled = true; break;
             case Key.Left: Nudge(-1, 0); e.Handled = true; break;
             case Key.Right: Nudge(1, 0); e.Handled = true; break;
             case Key.Up: Nudge(0, -1); e.Handled = true; break;
             case Key.Down: Nudge(0, 1); e.Handled = true; break;
         }
+    }
+
+    // Esc peels back one layer at a time: the groups panel, then a group selection, then the map itself.
+    private void OnEscape()
+    {
+        if (_groupsPanel) { _groupsPanel = false; _paletteFor = null; Render(); }
+        else if (_selectedGroup is not null) { _selectedGroup = null; Render(); }
+        else Close();
     }
 
     // ── Selection ──────────────────────────────────────────────────────────────
@@ -170,19 +183,68 @@ internal sealed class SpatialOverlay : IStageContent
             int d = Math.Abs(ox) + Math.Abs(oy);
             if (d < bestScore) { bestScore = d; best = r; }
         }
-        if (best is not null) { _cursor = best.Id; Render(); }
+        // Plain navigation exits group mode: the room is now the active unit again.
+        if (best is not null) { _cursor = best.Id; _selectedGroup = null; Render(); }
     }
 
-    // ── Moving rooms & blocks ──────────────────────────────────────────────────
+    // ── Groups (select, cycle, recolour) ───────────────────────────────────────
+
+    // g — step through the groups (main included), lighting the whole set and framing it. While a group is
+    // selected it is the active unit: Ctrl+arrows and a drag move it whole.
+    private void CycleGroup()
+    {
+        if (_displayed is null || _displayed.Groups.Count == 0) return;
+        var ids = _displayed.Groups.Select(g => g.Id).ToList();
+        int at = _selectedGroup is { } g ? ids.IndexOf(g) : -1;
+        _selectedGroup = ids[(at + 1) % ids.Count];
+        // Frame the group by homing the cursor onto its first room, so the camera keeps it in view.
+        if (_displayed.Rooms.FirstOrDefault(r => r.GroupId == _selectedGroup) is { } first) _cursor = first.Id;
+        Render();
+    }
+
+    private IReadOnlyList<SpatialRoom> GroupRooms(Guid group)
+        => _displayed?.Rooms.Where(r => r.GroupId == group).ToList() ?? (IReadOnlyList<SpatialRoom>)Array.Empty<SpatialRoom>();
+
+    private void ToggleGroupsPanel()
+    {
+        _groupsPanel = !_groupsPanel;
+        _paletteFor = null;
+        Render();
+    }
+
+    private void Recolour(Guid group, string hex)
+    {
+        _state.SetColor(group, hex);
+        _paletteFor = null;
+        SpatialStateChanged?.Invoke();
+        Render();
+    }
+
+    // ── Moving rooms, blocks & groups ──────────────────────────────────────────
     // Movement writes grid positions straight into the shared SpatialState (so the change is live) and
-    // raises PositionsChanged for App to persist. Effective positions come from the displayed scene, so a
+    // raises SpatialStateChanged for App to persist. Effective positions come from the displayed scene, so a
     // never-placed room materialises its default (row-layout) slot the moment it's first moved.
+
+    // Ctrl+arrows: move the active unit — the whole selected group if one is selected, else the single room.
+    private void MoveActive(int dx, int dy)
+    {
+        if (_selectedGroup is { } g) MoveRooms(GroupRooms(g), dx, dy);
+        else MoveRoom(dx, dy);
+    }
 
     private void MoveRoom(int dx, int dy)
     {
         if (_cursor is not { } id || RoomOf(id) is not { } room) return;
         _state.SetPosition(id.Value, room.Pos.Offset(dx, dy));
-        PositionsChanged?.Invoke();
+        SpatialStateChanged?.Invoke();
+        Render();
+    }
+
+    private void MoveRooms(IReadOnlyList<SpatialRoom> rooms, int dx, int dy)
+    {
+        if (rooms.Count == 0) return;
+        foreach (SpatialRoom r in rooms) _state.SetPosition(r.Id.Value, r.Pos.Offset(dx, dy));
+        SpatialStateChanged?.Invoke();
         Render();
     }
 
@@ -190,7 +252,7 @@ internal sealed class SpatialOverlay : IStageContent
     {
         if (_cursor is not { } id || RoomOf(id) is null) return;
         foreach (SpatialRoom r in Fragment(id)) _state.SetPosition(r.Id.Value, r.Pos.Offset(dx, dy));
-        PositionsChanged?.Invoke();
+        SpatialStateChanged?.Invoke();
         Render();
     }
 
@@ -215,7 +277,7 @@ internal sealed class SpatialOverlay : IStageContent
     private const double DragThreshold = 6;
     private bool _tilePressed;                                   // the press bubbling up started on a tile
     private DesktopId? _grab;                                    // the room picked up
-    private bool _dragging, _dragBlock;
+    private bool _dragging;
     private Point _pressAt;
     private (int X, int Y) _appliedDelta;
     private readonly Dictionary<DesktopId, GridPos?> _dragOriginal = new(); // stored pos before the drag (null = was unplaced)
@@ -231,12 +293,17 @@ internal sealed class SpatialOverlay : IStageContent
         if (!onTile || _cursor is not { } id || RoomOf(id) is null) return;
 
         _grab = id;
-        _dragBlock = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         _pressAt = e.GetPosition(_root);
         _appliedDelta = (0, 0);
         _dragOriginal.Clear();
         _dragBase.Clear();
-        foreach (SpatialRoom r in _dragBlock ? Fragment(id) : new[] { RoomOf(id)! })
+        // What the drag carries: the whole group if this room is in the selected one, else its block on
+        // ⇧-drag, else just the room.
+        IEnumerable<SpatialRoom> set =
+            _selectedGroup is { } g && RoomOf(id)!.GroupId == g ? GroupRooms(g)
+            : e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? Fragment(id)
+            : new[] { RoomOf(id)! };
+        foreach (SpatialRoom r in set)
         {
             _dragBase[r.Id] = r.Pos;
             _dragOriginal[r.Id] = _state.Position(r.Id.Value);
@@ -268,7 +335,7 @@ internal sealed class SpatialOverlay : IStageContent
         e.Pointer.Capture(null);
         _grab = null;
         _dragging = false;
-        if (moved) { PositionsChanged?.Invoke(); Render(); }    // positions are already whole cells — just commit
+        if (moved) { SpatialStateChanged?.Invoke(); Render(); }    // positions are already whole cells — just commit
         else CancelDrag();                                     // a click that never dragged: restore any provisional
     }
 
@@ -304,13 +371,14 @@ internal sealed class SpatialOverlay : IStageContent
 
         _hits.Clear();
         Control board = SpatialPainter.Render(display, width, height, 1.0, _camera,
-            onClick: id => { _cursor = id; _tilePressed = true; Render(); },
+            onClick: id => { _cursor = id; _selectedGroup = null; _tilePressed = true; Render(); },
             onActivate: id => JumpRoomRequested?.Invoke(id),
-            hits: _hits);
+            hits: _hits, selectedGroup: _selectedGroup);
 
         _root.Children.Clear();
         _root.Children.Add(board);
         _root.Children.Add(BuildLegend());
+        if (_groupsPanel) _root.Children.Add(BuildGroupsPanel(display));
 
         _stage.BringToFront();
     }
@@ -326,8 +394,10 @@ internal sealed class SpatialOverlay : IStageContent
         rows.Children.Add(LegendRow("←→↑↓", "select the nearest room"));
         rows.Children.Add(LegendRow("Enter", "switch to selected"));
         rows.Children.Add(LegendRow("Ctrl+Alt+←→↑↓", "switch to a desktop"));
-        rows.Children.Add(LegendRow("Ctrl+←→↑↓", "move the room"));
+        rows.Children.Add(LegendRow("Ctrl+←→↑↓", "move the room / group"));
         rows.Children.Add(LegendRow("Ctrl+Shift+←→↑↓", "move the block"));
+        rows.Children.Add(LegendRow("g", "select a group"));
+        rows.Children.Add(LegendRow("Shift+g", "groups & colours"));
         rows.Children.Add(LegendRow("Tab", "back to the list view"));
         rows.Children.Add(LegendRow("Esc", "close"));
         rows.Children.Add(new TextBlock
@@ -374,5 +444,105 @@ internal sealed class SpatialOverlay : IStageContent
         grid.Children.Add(cap);
         grid.Children.Add(label);
         return grid;
+    }
+
+    // ── Groups & colours panel (top-right, ⇧G) ─────────────────────────────────
+
+    private Control BuildGroupsPanel(SpatialScene scene)
+    {
+        var rows = new StackPanel { Spacing = 4, MinWidth = 210 };
+        rows.Children.Add(new TextBlock
+        {
+            Text = "Groups", FontSize = 13, FontWeight = FontWeight.SemiBold, Foreground = Fg,
+            Margin = new Avalonia.Thickness(0, 0, 0, 2),
+        });
+        rows.Children.Add(new TextBlock
+        {
+            Text = "click a swatch to recolour — colours are stable", FontSize = 10.5, Foreground = FgDim,
+            Margin = new Avalonia.Thickness(0, 0, 0, 6), TextWrapping = TextWrapping.Wrap,
+        });
+
+        foreach (SpatialGroup g in scene.Groups)
+        {
+            rows.Children.Add(GroupRow(g, scene.Rooms.Count(r => r.GroupId == g.Id)));
+            if (_paletteFor == g.Id && !g.IsMain) rows.Children.Add(PaletteRow(g.Id));
+        }
+
+        var panel = new Border
+        {
+            Background = new SolidColorBrush(LegendBg),
+            CornerRadius = new Avalonia.CornerRadius(12), Padding = new Avalonia.Thickness(14, 12),
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Avalonia.Thickness(0, 24, 24, 0), Child = rows,
+        };
+        panel.PointerPressed += (_, e) => e.Handled = true; // operating the panel never drags/deselects behind it
+        return panel;
+    }
+
+    private Control GroupRow(SpatialGroup g, int count)
+    {
+        Color c = Color.Parse(g.Color);
+        var swatch = new Border
+        {
+            Width = 15, Height = 15, Background = new SolidColorBrush(c),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)), BorderThickness = new Avalonia.Thickness(1),
+            CornerRadius = new Avalonia.CornerRadius(g.IsMain ? 8 : 4), // main reads as the round "default" chip
+            VerticalAlignment = VerticalAlignment.Center,
+            Cursor = g.IsMain ? null : new Cursor(StandardCursorType.Hand),
+        };
+        Guid id = g.Id;
+        if (!g.IsMain)
+            swatch.PointerPressed += (_, e) => { e.Handled = true; _paletteFor = _paletteFor == id ? null : id; Render(); };
+
+        var name = new TextBlock
+        {
+            Text = g.IsMain ? "main" : g.Name, FontFamily = Mono, FontSize = 11.5,
+            Foreground = new SolidColorBrush(g.IsMain ? Color.Parse("#9AA6B8") : c),
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Avalonia.Thickness(9, 0, 0, 0),
+        };
+        var tally = new TextBlock
+        {
+            Text = count.ToString(), FontFamily = Mono, FontSize = 11, Foreground = FgDim,
+            VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right,
+        };
+        Grid.SetColumn(swatch, 0); Grid.SetColumn(name, 1); Grid.SetColumn(tally, 2);
+
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+        grid.Children.Add(swatch); grid.Children.Add(name); grid.Children.Add(tally);
+
+        var row = new Border
+        {
+            Padding = new Avalonia.Thickness(6, 5), CornerRadius = new Avalonia.CornerRadius(7),
+            Background = _selectedGroup == id ? new SolidColorBrush(Color.FromArgb(0x1F, 0x6E, 0xA8, 0xFF)) : Brushes.Transparent,
+            Cursor = new Cursor(StandardCursorType.Hand), Child = grid,
+        };
+        row.PointerPressed += (_, e) =>
+        {
+            if (e.Handled) return; // the swatch was clicked
+            e.Handled = true;
+            _selectedGroup = id;
+            if (Scene().Rooms.FirstOrDefault(r => r.GroupId == id) is { } first) _cursor = first.Id;
+            Render();
+        };
+        return row;
+    }
+
+    private Control PaletteRow(Guid group)
+    {
+        var wrap = new WrapPanel { Margin = new Avalonia.Thickness(24, 2, 0, 6) };
+        foreach (string hex in SpatialPalette.Colors)
+        {
+            string h = hex;
+            var chip = new Border
+            {
+                Width = 17, Height = 17, Margin = new Avalonia.Thickness(0, 0, 6, 0),
+                Background = new SolidColorBrush(Color.Parse(h)), CornerRadius = new Avalonia.CornerRadius(5),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(0x60, 0, 0, 0)), BorderThickness = new Avalonia.Thickness(1),
+                Cursor = new Cursor(StandardCursorType.Hand),
+            };
+            chip.PointerPressed += (_, e) => { e.Handled = true; Recolour(group, h); };
+            wrap.Children.Add(chip);
+        }
+        return wrap;
     }
 }

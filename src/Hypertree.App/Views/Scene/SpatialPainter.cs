@@ -41,7 +41,7 @@ internal static class SpatialPainter
 
     public static Control Render(SpatialScene scene, double screenW, double screenH, double s, MapCamera camera,
                                  Action<DesktopId>? onClick = null, Action<DesktopId>? onActivate = null,
-                                 IList<(DesktopId Id, Rect Rect)>? hits = null)
+                                 IList<(DesktopId Id, Rect Rect)>? hits = null, Guid? selectedGroup = null)
     {
         var layout = new SpatialLayout(scene, Metrics(s));
         camera.Update(layout, screenW, screenH);
@@ -51,7 +51,7 @@ internal static class SpatialPainter
 
         // Hulls first (behind the rooms), then their name badges, then the rooms on top.
         foreach (GroupHull hull in layout.Hulls(BaseHullPad * s, BaseHullPad * s))
-            PaintHull(canvas, hull, ox, oy, s);
+            PaintHull(canvas, hull, ox, oy, s, selectedGroup is { } sg && hull.Group.Id == sg);
 
         foreach (PlacedRoom placed in layout.Rooms)
         {
@@ -77,19 +77,22 @@ internal static class SpatialPainter
         return (m.CellStride, m.RowPitch);
     }
 
-    private static void PaintHull(Canvas canvas, GroupHull hull, double ox, double oy, double s)
+    private static void PaintHull(Canvas canvas, GroupHull hull, double ox, double oy, double s, bool selected)
     {
         Color c = Color.Parse(hull.Group.Color);
         bool main = hull.Group.IsMain; // the ungrouped bucket: barely-there, dashed, no deliberate grouping
         LayoutRect r = hull.Rect;
 
+        // A selected group lifts to a stronger fill and a blue selection stroke, the same accent the room
+        // selection uses, so "this group is active" reads at a glance.
         var rect = new Rectangle
         {
             Width = r.Width, Height = r.Height, RadiusX = 20 * s, RadiusY = 20 * s,
-            Fill = new SolidColorBrush(c, main ? 0.04 : 0.085),
-            Stroke = new SolidColorBrush(c, main ? 0.22 : 0.42), StrokeThickness = Math.Max(1, 1.1 * s),
+            Fill = new SolidColorBrush(c, selected ? 0.15 : main ? 0.04 : 0.085),
+            Stroke = new SolidColorBrush(selected ? Focus : c, selected ? 1.0 : main ? 0.22 : 0.42),
+            StrokeThickness = Math.Max(1, (selected ? 1.8 : 1.1) * s),
         };
-        if (main) rect.StrokeDashArray = new AvaloniaList<double> { 2, 4 };
+        if (main && !selected) rect.StrokeDashArray = new AvaloniaList<double> { 2, 4 };
         Canvas.SetLeft(rect, r.Left + ox);
         Canvas.SetTop(rect, r.Top + oy);
         canvas.Children.Add(rect);
