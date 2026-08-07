@@ -259,6 +259,7 @@ public sealed partial class App : Application
         _spatialOverlay = new SpatialOverlay(_stage, _mapCamera);
         _spatialOverlay.JumpRoomRequested += id => JumpFromMap(() => JumpToId(id));
         _spatialOverlay.SwapModelRequested += SwapMapModel; // Tab — swap back to the row map
+        _spatialOverlay.PositionsChanged += () => _spatialStore?.Save(_spatial); // a moved room/block is written to spatial.json
 
         _stage.Prewarm(); // size the overlay host now, so the first summon doesn't render at the top-left then jump
 

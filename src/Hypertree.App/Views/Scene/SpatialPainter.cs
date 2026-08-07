@@ -40,7 +40,8 @@ internal static class SpatialPainter
         RowPitch: BaseStrideY * s, RowHeight: TileH * s);
 
     public static Control Render(SpatialScene scene, double screenW, double screenH, double s, MapCamera camera,
-                                 Action<DesktopId>? onClick = null, Action<DesktopId>? onActivate = null)
+                                 Action<DesktopId>? onClick = null, Action<DesktopId>? onActivate = null,
+                                 IList<(DesktopId Id, Rect Rect)>? hits = null)
     {
         var layout = new SpatialLayout(scene, Metrics(s));
         camera.Update(layout, screenW, screenH);
@@ -62,9 +63,18 @@ internal static class SpatialPainter
             Canvas.SetLeft(tile, placed.Rect.Left + ox);
             Canvas.SetTop(tile, placed.Rect.Top + oy);
             canvas.Children.Add(tile);
+            hits?.Add((id, new Rect(placed.Rect.Left + ox, placed.Rect.Top + oy, placed.Rect.Width, placed.Rect.Height)));
         }
 
         return canvas;
+    }
+
+    /// <summary>The grid pitch at scale <paramref name="s"/> — what a drag converts pixel travel into whole
+    /// cell steps against.</summary>
+    public static (double X, double Y) Stride(double s)
+    {
+        SceneMetrics m = Metrics(s);
+        return (m.CellStride, m.RowPitch);
     }
 
     private static void PaintHull(Canvas canvas, GroupHull hull, double ox, double oy, double s)
