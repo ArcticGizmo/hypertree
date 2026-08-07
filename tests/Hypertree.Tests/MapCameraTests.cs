@@ -79,6 +79,23 @@ public class MapCameraTests
     }
 
     [Fact]
+    public void A_top_edge_selection_keeps_a_gutter_when_edge_padding_is_set()
+    {
+        // Selection at the content's very start. With no padding it would pin flush (maxOffset = -Lo = 0);
+        // an 80px edge pad lets the content top sit 80 down, leaving a gutter above the first marker.
+        double result = MapCamera.Axis(offset: 0, framed: true, selLo: 0, selHi: 40, contentLo: Lo, contentHi: Hi, view: View, margin: Margin, edgePad: 80);
+        Assert.Equal(80, result, precision: 6); // clamped to maxOffset = -contentLo + edgePad = 0 + 80
+    }
+
+    [Fact]
+    public void A_bottom_edge_selection_keeps_a_gutter_when_edge_padding_is_set()
+    {
+        // Mirror of the top: selection at the content's very end keeps a gutter below rather than pinning flush.
+        double result = MapCamera.Axis(offset: 0, framed: true, selLo: 960, selHi: 1000, contentLo: Lo, contentHi: Hi, view: View, margin: Margin, edgePad: 80);
+        Assert.Equal(-580, result, precision: 6); // clamped to minOffset = view - contentHi - edgePad = 500 - 1000 - 80
+    }
+
+    [Fact]
     public void First_framing_centres_the_selection()
     {
         double result = MapCamera.Axis(offset: 0, framed: false, selLo: 400, selHi: 460, contentLo: Lo, contentHi: Hi, view: View, margin: Margin);

@@ -4,7 +4,9 @@ namespace Hypertree.Layout;
 /// The shared map camera: a world→screen <b>offset</b> per axis (<c>screen = world + offset</c>) that keeps
 /// the selection in view without moving unless it must. Navigating moves the cursor over a stationary map;
 /// the camera pans — by the minimum needed, leaving a marker and a half of context — only when the selection
-/// reaches the edge, and holds still (a dead zone) while it's comfortably on screen. When the whole map fits an
+/// reaches the edge, and holds still (a dead zone) while it's comfortably on screen. Vertically it also keeps a
+/// one-row gutter beyond the first and last rows, so the top/bottom of the stack never pins flush against the
+/// viewport edge. When the whole map fits an
 /// axis, that axis is centred and pinned, so the cursor moves within a fixed frame. One instance is shared
 /// by the interactive map and the transient flash, so the two stay in step. See docs/design/scene-camera.md.
 /// </summary>
@@ -14,6 +16,11 @@ public sealed class MapCamera
     // horizontally, a row pitch vertically). Capped per axis to the room around the selection so the dead
     // zone is always satisfiable — see Axis.
     private const double EdgeMarginMarkers = 1.5;
+
+    // A gutter kept beyond the first and last rows so the top/bottom of the stack never pins flush against the
+    // viewport edge — one row pitch of breathing room around the selection cursor. Vertical only; horizontally
+    // the content still pins to the edge (no gutter), so column 0 stays anchored.
+    private const double EdgeGutterMarkers = 1.0;
 
     private double _offX, _offY;
     private bool _framed;
@@ -35,7 +42,8 @@ public sealed class MapCamera
         (double yLo, double yHi) = layout.WorldY();
 
         _offX = Axis(_offX, _framed, sel.Left, sel.Right, xLo, xHi, viewW, layout.Metrics.CellStride * EdgeMarginMarkers);
-        _offY = Axis(_offY, _framed, sel.Top, sel.Bottom, yLo, yHi, viewH, layout.Metrics.RowPitch * EdgeMarginMarkers);
+        _offY = Axis(_offY, _framed, sel.Top, sel.Bottom, yLo, yHi, viewH, layout.Metrics.RowPitch * EdgeMarginMarkers,
+                     layout.Metrics.RowPitch * EdgeGutterMarkers);
         _framed = true;
     }
 
@@ -44,15 +52,18 @@ public sealed class MapCamera
     /// offset given the current one, the selection's span <c>[selLo, selHi]</c>, the content span
     /// <c>[contentLo, contentHi]</c>, the viewport length <paramref name="view"/>, and the follow
     /// <paramref name="margin"/> (capped here to the room around the selection). <paramref name="framed"/> is
-    /// false only for the first framing after a <see cref="Reframe"/>.
+    /// false only for the first framing after a <see cref="Reframe"/>. <paramref name="edgePad"/> lets the
+    /// content sit that far beyond each viewport edge, so the first and last markers keep a gutter instead of
+    /// pinning flush; zero (the default) restores the strict "no blank gutter" behaviour.
     /// </summary>
     public static double Axis(double offset, bool framed, double selLo, double selHi,
-                              double contentLo, double contentHi, double view, double margin)
+                              double contentLo, double contentHi, double view, double margin, double edgePad = 0)
     {
         double contentSpan = contentHi - contentLo;
 
         // Fits: centre the whole content and pin it. Independent of the cursor, so moving the selection
-        // walks it across a stationary, centred map — never a pan.
+        // walks it across a stationary, centred map — never a pan. (Already gutter'd by the centring, so
+        // edgePad is only relevant to the overflow case below.)
         if (contentSpan <= view)
             return (view - contentSpan) / 2 - contentLo;
 
@@ -63,10 +74,11 @@ public sealed class MapCamera
         double selSpan = selHi - selLo;
         margin = Math.Min(margin, Math.Max(0, (view - selSpan) / 2));
 
-        // The offset range that keeps the content covering the viewport with no blank gutter at either end.
-        // contentSpan > view here, so minOffset < maxOffset.
-        double minOffset = view - contentHi; // content's right edge pinned to the viewport's right
-        double maxOffset = -contentLo;        // content's left edge pinned to the viewport's left
+        // The offset range that keeps the content covering the viewport. edgePad opens a deliberate gutter of
+        // that size beyond each end, so the first/last markers aren't flush against the edge; with edgePad 0
+        // the content pins with no blank gutter at either end. contentSpan > view, so minOffset < maxOffset.
+        double minOffset = view - contentHi - edgePad; // content's far edge (plus a gutter) at the viewport's far side
+        double maxOffset = -contentLo + edgePad;        // content's near edge (plus a gutter) at the viewport's near side
 
         double result;
         if (!framed)

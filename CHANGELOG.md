@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.3.15] - 2026-08-07
+
+### Fixed
+
+- The map keeps a row of breathing room above and below the selected desktop, so the top and bottom branches no longer sit flush against the screen edge.
+
+---
+
 ## [v0.3.14] - 2026-08-07
 
 ### Fixed
