@@ -50,7 +50,7 @@ internal static class SpatialPainter
     public static Control Render(SpatialScene scene, double screenW, double screenH, double s, MapCamera camera,
                                  Action<DesktopId>? onClick = null, Action<DesktopId>? onActivate = null,
                                  IList<(DesktopId Id, Rect Rect)>? hits = null, Guid? selectedGroup = null,
-                                 MapStyle style = MapStyle.Board)
+                                 MapStyle style = MapStyle.Board, IDictionary<DesktopId, Control>? roomHosts = null)
     {
         var layout = new SpatialLayout(scene, Metrics(s));
         camera.Update(layout, screenW, screenH);
@@ -63,41 +63,72 @@ internal static class SpatialPainter
         foreach (GroupHull hull in layout.Hulls(BaseHullPad * s, BaseHullPad * s))
             PaintHull(canvas, hull, ox, oy, s, selectedGroup is { } sg && hull.Group.Id == sg);
 
+        // Cells holding more than one room — flagged so a stack shows a warning instead of hiding silently.
+        var overlapping = layout.Rooms.GroupBy(r => r.Room.Pos).Where(g => g.Count() > 1)
+                                .SelectMany(g => g).Select(r => r.Room.Id).ToHashSet();
+
         foreach (PlacedRoom placed in layout.Rooms)
         {
             DesktopId id = placed.Room.Id;
             Color groupColor = Color.Parse(scene.Groups.First(g => g.Id == placed.Room.GroupId).Color);
             var cell = new Rect(placed.Rect.Left + ox, placed.Rect.Top + oy, placed.Rect.Width, placed.Rect.Height);
 
-            // The room glyph follows the app's Map style, so List and Spatial read as the same app.
-            switch (style)
+            // Each room lives in its own host canvas positioned at its cell, so a drag can move the host
+            // without re-rendering the board (a re-render mid-drag would drop the pointer capture). The glyph
+            // is drawn in the host's local coordinates.
+            var host = new Canvas { Width = cell.Width, Height = cell.Height };
+            var local = new Rect(0, 0, cell.Width, cell.Height);
+            switch (style) // the room glyph follows the app's Map style, so List and Spatial read as one app
             {
-                case MapStyle.Metro: DrawMetroRoom(canvas, placed.Room, groupColor, cell, s); break;
-                case MapStyle.Ascii: DrawAsciiRoom(canvas, placed.Room, groupColor, cell, s); break;
-                default: DrawBoardRoom(canvas, placed.Room, groupColor, cell, s); break;
+                case MapStyle.Metro: DrawMetroRoom(host, placed.Room, groupColor, local, s); break;
+                case MapStyle.Ascii: DrawAsciiRoom(host, placed.Room, groupColor, local, s); break;
+                default: DrawBoardRoom(host, placed.Room, groupColor, local, s); break;
             }
+            if (overlapping.Contains(id)) AddOverlapBadge(host, local, s);
 
-            // One transparent hit target per cell drives click/double-click for every style.
             if (onClick is not null || onActivate is not null)
             {
                 var hit = new Border { Width = cell.Width, Height = cell.Height, Background = Brushes.Transparent, Cursor = new Cursor(StandardCursorType.Hand) };
                 hit.PointerPressed += (_, e) => { if (e.ClickCount >= 2) onActivate?.Invoke(id); else onClick?.Invoke(id); };
-                Canvas.SetLeft(hit, cell.X);
-                Canvas.SetTop(hit, cell.Y);
-                canvas.Children.Add(hit);
+                host.Children.Add(hit); // topmost within the host, so it catches the press for every style
             }
+
+            Canvas.SetLeft(host, cell.X);
+            Canvas.SetTop(host, cell.Y);
+            canvas.Children.Add(host);
+            if (roomHosts is not null) roomHosts[id] = host;
             hits?.Add((id, cell));
         }
 
         return canvas;
     }
 
-    private static void DrawBoardRoom(Canvas canvas, SpatialRoom room, Color groupColor, Rect cell, double s)
+    private static void DrawBoardRoom(Canvas host, SpatialRoom room, Color groupColor, Rect cell, double s)
     {
         Control tile = Tile(room, groupColor, s);
         Canvas.SetLeft(tile, cell.X);
         Canvas.SetTop(tile, cell.Y);
-        canvas.Children.Add(tile);
+        host.Children.Add(tile);
+    }
+
+    // A small amber "!" badge at the room's top-right — the map's way of saying "another room is stacked on
+    // this cell" now that a move never shoves things aside on its own.
+    private static void AddOverlapBadge(Canvas host, Rect cell, double s)
+    {
+        var badge = new Border
+        {
+            Width = 17 * s, Height = 17 * s, CornerRadius = new CornerRadius(9 * s),
+            Background = new SolidColorBrush(Color.Parse("#F59E0B")),
+            BorderBrush = new SolidColorBrush(Color.Parse("#0D0D11")), BorderThickness = new Thickness(1.5 * s),
+            Child = new TextBlock
+            {
+                Text = "!", FontSize = 11 * s, FontWeight = FontWeight.Bold, Foreground = new SolidColorBrush(Color.Parse("#1A1206")),
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+        Canvas.SetLeft(badge, cell.Width - 20 * s);
+        Canvas.SetTop(badge, -5 * s);
+        host.Children.Add(badge);
     }
 
     /// <summary>The grid pitch at scale <paramref name="s"/> — what a drag converts pixel travel into whole

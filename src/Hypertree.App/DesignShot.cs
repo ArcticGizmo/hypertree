@@ -101,6 +101,7 @@ internal static class DesignShot
         // The same spatial layout rendered in each Map style, so room glyphs can be checked to match the row model.
         SaveSpatial(Path.Combine(outDir, "spatial-ascii.png"), fragmented: false, style: MapStyle.Ascii);
         SaveSpatial(Path.Combine(outDir, "spatial-metro.png"), fragmented: false, style: MapStyle.Metro);
+        SaveSpatial(Path.Combine(outDir, "spatial-overlap.png"), fragmented: false, overlap: true); // two rooms on one cell
 
         SaveCards(outDir);
         SaveLauncher(outDir);
@@ -112,7 +113,7 @@ internal static class DesignShot
     /// badges, and the selected/here/empty states can all be eyeballed without the tray.
     /// </summary>
     private static void SaveSpatial(string path, bool fragmented, int? selectedGroup = null, bool tidied = false,
-                                    MapStyle style = MapStyle.Board)
+                                    MapStyle style = MapStyle.Board, bool overlap = false)
     {
         DesktopId D(int n) => new(new Guid($"{n:D8}-0000-0000-0000-000000000000"));
         Guid Gid(int n) => new($"{n:D8}-aaaa-0000-0000-000000000000");
@@ -140,6 +141,7 @@ internal static class DesignShot
         P(40, 6, 3);                                              // spike, a lone room
         if (!fragmented) { P(20, 6, 0); P(21, 7, 0); P(22, 6, 1); P(23, 7, 1); } // release-4.2 as a 2×2 block
         else { P(20, 6, 0); P(21, 7, 0); P(22, -2, 4); P(23, -1, 4); }           // …split into two fragments
+        if (overlap) P(22, 6, 0);                                                 // drop docs onto build's cell
 
         // Apply Tidy to the (fragmented) layout so the shot shows the reassembled, packed result.
         if (tidied)

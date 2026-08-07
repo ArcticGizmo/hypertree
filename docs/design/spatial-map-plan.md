@@ -129,6 +129,15 @@ behaviour; each is a look-and-feel pass best done against the live app.
 
 ---
 
+## Post-review refinements (from live use)
+- **Roomier grid** and **whisper-faint hulls** (the grouping should not colour-wash the rooms).
+- **Drag** moves the room's visual *host* directly rather than re-rendering the board each cell-crossing — a
+  re-render mid-drag dropped the pointer capture, which made the room snap back on release.
+- **Overlaps are indicated, not auto-resolved.** An earlier version shoved neighbouring rooms to free cells
+  after every move, which made keyboard moves across other groups scatter the map. Now a move never displaces
+  anything; if two rooms share a cell the map shows an amber **!** marker on that room. (The auto-resolve
+  helper `SpatialPlacement` was removed.) A future *manual* "resolve overlaps" command could layer back on top.
+
 ## Open questions (deferred, agreed to revisit)
 1. **Tidy determinism** — tidy currently anchors the largest fragment in place. A remembered per-group
    *home anchor* would make tidy land a group in the same spot every time. Revisit in M5.
