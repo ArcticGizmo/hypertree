@@ -1,4 +1,5 @@
 using Hypertree.Desktops;
+using Hypertree.Spatial;
 using Hypertree.Status;
 using Hypertree.Store;
 
@@ -133,6 +134,47 @@ public sealed class NavigationModel
         }
 
         return new NavMap(top, _topRow.Count == 0 ? 0 : _topIndex, _onMain, branches, Math.Clamp(_mainSlot, 0, _branches.Count));
+    }
+
+    /// <summary>
+    /// The id-carrying structural snapshot the <b>spatial</b> map is built from — the spatial twin of
+    /// <see cref="BuildMap"/>. Same selection/here/window-count facts, but it keeps the <see cref="Branch.Id"/>
+    /// and <see cref="DesktopId"/> that spatial state is keyed by (colour per group, position per desktop),
+    /// which <see cref="NavMap"/> deliberately drops. Groups are emitted in the same draw order the rows use
+    /// — branches above main, main (as the <see cref="Guid.Empty"/> "ungrouped" bucket), branches below — so
+    /// the default spatial layout mirrors the row stack. Like <see cref="BuildMap"/>, it walks window counts,
+    /// so it's a summon-time build, not a per-keystroke one.
+    /// </summary>
+    public SpatialSource BuildSpatialSource(DesktopId? cameFrom = null)
+    {
+        IReadOnlyDictionary<DesktopId, int> counts = _desktops.WindowCounts();
+        int Windows(DesktopId id) => counts.TryGetValue(id, out int n) ? n : 0;
+        bool CameFrom(DesktopId id) => cameFrom == id;
+
+        SpatialGroupSource MainGroup() => new(Guid.Empty, "main", IsMain: true,
+            _topRow.Select((d, i) => new SpatialDesktop(
+                d.Id, d.Label, _onMain && i == _topIndex, CameFrom(d.Id), Windows(d.Id))).ToList());
+
+        SpatialGroupSource BranchGroup(int gi)
+        {
+            Branch g = _branches[gi];
+            bool current = !_onMain && gi == _currentBranch;
+            var desks = new List<SpatialDesktop>(g.Desktops.Count);
+            for (int j = 0; j < g.Desktops.Count; j++)
+            {
+                DesktopRef d = g.Desktops[j];
+                desks.Add(new SpatialDesktop(d.Id, d.Label, current && j == g.LastUsedIndex,
+                                             CameFrom(d.Id), Windows(d.Id)));
+            }
+            return new SpatialGroupSource(g.Id, g.Name, IsMain: false, desks);
+        }
+
+        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
+        var groups = new List<SpatialGroupSource>(_branches.Count + 1);
+        for (int i = 0; i < slot; i++) groups.Add(BranchGroup(i));
+        groups.Add(MainGroup());
+        for (int i = slot; i < _branches.Count; i++) groups.Add(BranchGroup(i));
+        return new SpatialSource(groups);
     }
 
     /// <summary>
