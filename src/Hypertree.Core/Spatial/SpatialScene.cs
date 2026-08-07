@@ -29,10 +29,15 @@ public sealed record SpatialGroup(
 ///   neutral).</item>
 /// </list>
 /// Anything the user has explicitly set wins over the default.
+///
+/// The optional <paramref name="cursor"/> drives the interactive map's <b>blue selection</b>: when given,
+/// that desktop is the selected one and the model's own current desktop becomes the green "here" marker
+/// (so the two read apart, exactly as the row map does). Omit it — the design/flash case — and the source's
+/// own selection/here flags are used as-is.
 /// </summary>
 public sealed record SpatialScene(IReadOnlyList<SpatialGroup> Groups, IReadOnlyList<SpatialRoom> Rooms)
 {
-    public static SpatialScene From(SpatialSource source, SpatialState state)
+    public static SpatialScene From(SpatialSource source, SpatialState state, DesktopId? cursor = null)
     {
         var groups = new List<SpatialGroup>(source.Groups.Count);
         var rooms = new List<SpatialRoom>();
@@ -49,8 +54,12 @@ public sealed record SpatialScene(IReadOnlyList<SpatialGroup> Groups, IReadOnlyL
             {
                 SpatialDesktop d = g.Desktops[di];
                 GridPos pos = state.Position(d.Id.Value) ?? new GridPos(di, gi); // stored wins; else row layout
+                // With a cursor, it is the blue selection and the model's current desktop is the green here;
+                // without one, fall back to the source's own flags (design/flash surfaces).
+                bool selected = cursor is { } c ? d.Id == c : d.Selected;
+                bool here = cursor is not null ? d.Selected : d.Here;
                 rooms.Add(new SpatialRoom(d.Id, d.Label, pos, g.Id, g.IsMain,
-                                          d.Selected, d.Here, d.WindowCount));
+                                          selected, here, d.WindowCount));
                 members.Add(d.Id);
             }
 

@@ -84,6 +84,20 @@ public class SpatialSceneTests
     }
 
     [Fact]
+    public void A_cursor_drives_the_blue_selection_and_the_current_desktop_becomes_here()
+    {
+        // Sample() marks main/a (id 0) as the current desktop. Put the interactive cursor on feat/x (id 10).
+        SpatialScene scene = SpatialScene.From(Sample(), new SpatialState(), D(10));
+
+        Assert.True(Room(scene, 10).Selected);   // the cursor is the blue selection
+        Assert.False(Room(scene, 10).Here);
+        Assert.True(Room(scene, 0).Here);        // the model's current desktop becomes the green "here"
+        Assert.False(Room(scene, 0).Selected);
+        Assert.Single(scene.Rooms, r => r.Selected);
+        Assert.Single(scene.Rooms, r => r.Here);
+    }
+
+    [Fact]
     public void Id_derived_group_colour_is_stable_across_reordering()
     {
         // The same branch id must map to the same default hue regardless of its position in the source.

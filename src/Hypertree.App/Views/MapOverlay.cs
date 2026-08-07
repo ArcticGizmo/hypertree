@@ -104,6 +104,9 @@ internal sealed class MapOverlay : IStageContent
     /// <summary>v — flip the whole-app board style (board ↔ metro). App owns the setting: it persists the
     /// change and pushes the new style back onto the stage, so every surface follows, not just this map.</summary>
     public event Action? ViewStyleToggleRequested;
+    /// <summary>Tab — swap to the spatial map model. App flips the persisted <c>MapModel</c> and re-opens the
+    /// map in the other model, sharing the camera so the view doesn't teleport.</summary>
+    public event Action? SwapModelRequested;
 
     public MapOverlay(OverlayStage stage, MapCamera camera)
     {
@@ -199,6 +202,7 @@ internal sealed class MapOverlay : IStageContent
             case Key.Right when e.KeyModifiers == KeyModifiers.Control: MoveDesktopAlongRow(+1); e.Handled = true; break;
 
             case Key.Escape: e.Handled = true; Close(); break;
+            case Key.Tab: SwapModelRequested?.Invoke(); e.Handled = true; break;
             case Key.Enter: JumpToSelection(); e.Handled = true; break;
             case Key.Left: MoveCol(-1); e.Handled = true; break;
             case Key.Right: MoveCol(+1); e.Handled = true; break;
@@ -691,6 +695,7 @@ internal sealed class MapOverlay : IStageContent
             MapStyle.Metro => "ascii view",
             _ => "board view",
         }));
+        rows.Children.Add(LegendRow("Tab", "spatial view"));
         rows.Children.Add(LegendRow("Esc", "close"));
         rows.Children.Add(new TextBlock
         {

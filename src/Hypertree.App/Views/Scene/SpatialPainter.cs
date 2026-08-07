@@ -2,8 +2,10 @@ using Avalonia;
 using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Hypertree.Desktops;
 using Hypertree.Layout;
 using Hypertree.Spatial;
 
@@ -37,7 +39,8 @@ internal static class SpatialPainter
         CellStride: BaseStrideX * s, CellWidth: BaseTileW * s, CellHeight: TileH * s,
         RowPitch: BaseStrideY * s, RowHeight: TileH * s);
 
-    public static Control Render(SpatialScene scene, double screenW, double screenH, double s, MapCamera camera)
+    public static Control Render(SpatialScene scene, double screenW, double screenH, double s, MapCamera camera,
+                                 Action<DesktopId>? onClick = null, Action<DesktopId>? onActivate = null)
     {
         var layout = new SpatialLayout(scene, Metrics(s));
         camera.Update(layout, screenW, screenH);
@@ -51,8 +54,11 @@ internal static class SpatialPainter
 
         foreach (PlacedRoom placed in layout.Rooms)
         {
+            DesktopId id = placed.Room.Id;
             Color groupColor = Color.Parse(scene.Groups.First(g => g.Id == placed.Room.GroupId).Color);
-            Control tile = Tile(placed.Room, groupColor, s);
+            Control tile = Tile(placed.Room, groupColor, s,
+                                onClick is null ? null : () => onClick(id),
+                                onActivate is null ? null : () => onActivate(id));
             Canvas.SetLeft(tile, placed.Rect.Left + ox);
             Canvas.SetTop(tile, placed.Rect.Top + oy);
             canvas.Children.Add(tile);
@@ -103,7 +109,8 @@ internal static class SpatialPainter
     }
 
     // A room tile: the board's screen-mockup look, but its windows/caption/border tinted to the group colour.
-    private static Control Tile(SpatialRoom room, Color groupColor, double s)
+    private static Control Tile(SpatialRoom room, Color groupColor, double s,
+                                Action? onClick = null, Action? onActivate = null)
     {
         double tileW = BaseTileW * s, screenH = BaseScrH * s, capH = BaseCapH * s;
         bool empty = room.WindowCount == 0;
@@ -140,6 +147,15 @@ internal static class SpatialPainter
         };
 
         var stack = new StackPanel { Orientation = Orientation.Vertical, Width = tileW, Children = { screen, cap } };
+        if (onClick is not null || onActivate is not null)
+        {
+            stack.Cursor = new Cursor(StandardCursorType.Hand);
+            stack.PointerPressed += (_, e) =>
+            {
+                if (e.ClickCount >= 2) onActivate?.Invoke();
+                else onClick?.Invoke();
+            };
+        }
         Control result = stack;
 
         if (room.Here)
