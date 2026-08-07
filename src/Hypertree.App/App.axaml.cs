@@ -919,12 +919,25 @@ public sealed partial class App : Application
         if (_settings.MapModel == MapModel.Spatial)
         {
             _mapCamera.Reframe();
-            _spatialOverlay?.Open(_model.BuildSpatialSource(), _spatial);
+            SpatialSource source = _model.BuildSpatialSource();
+            PruneSpatial(source); // forget positions for desktops that no longer exist, so spatial.json doesn't grow
+            _spatialOverlay?.Open(source, _spatial);
         }
         else
         {
             _overlay?.Open(_model.BuildMap());
         }
+    }
+
+    // Drop stored positions for desktops the source no longer contains (deleted since they were placed).
+    // GUIDs are unique so a stale entry would never wrongly match, but this keeps the file from growing.
+    private void PruneSpatial(SpatialSource source)
+    {
+        if (_spatialStore is null) return;
+        var live = source.Groups.SelectMany(g => g.Desktops).Select(d => d.Id.Value.ToString()).ToHashSet();
+        int removed = _spatial.Positions.Keys.Where(k => !live.Contains(k)).ToList()
+            .Count(k => _spatial.Positions.Remove(k));
+        if (removed > 0) _spatialStore.Save(_spatial);
     }
 
     // Tab on either map: flip the persisted model and re-open in the other one. The camera is shared, so we
@@ -1629,9 +1642,10 @@ public sealed partial class App : Application
             if (_shuttingDown) return; // teardown already unregistered; don't resurrect the hotkey threads
             RegisterHotkeys();
             _stage?.Reassert();
-            // A map-style change made while settings was open was deferred (see ApplyMapStyle) to avoid a
-            // z-order fight; repaint the map now it's gone so it reflects the current style.
-            if (_overlay is { IsOpen: true } && _model is not null) _overlay.SetBoard(_model.BuildMap());
+            // A map-style or -model change made while settings was open was deferred (see ApplyMapStyle /
+            // ApplyMapModel) to avoid a z-order fight; apply it now the window's gone — re-presenting in the
+            // chosen model if it changed, else just repainting the current one.
+            EnsureOpenMapMatchesModel();
         };
         _settingsWindow.Show();
         _settingsWindow.TakeFocus();
@@ -1642,12 +1656,34 @@ public sealed partial class App : Application
     // stay suspended for exactly as long as the window is open (and a rebind lands cleanly on close).
     private void SaveSettings(AppSettings settings, bool startOnLogin)
     {
+        MapModel previousModel = _settings.MapModel;
         _settings = settings;
         _settingsStore?.Save(settings);
         ApplyTaskbarLabel();
         ApplySwitcher();
         ApplyMapStyle();
+        ApplyMapModel(previousModel);
         _startup?.SetEnabled(startOnLogin);
+    }
+
+    // The map model was changed in Settings. Like ApplyMapStyle, defer the actual re-present while the
+    // Settings window holds the z-order (the Closed handler picks it up); otherwise re-present now.
+    private void ApplyMapModel(MapModel previous)
+    {
+        if (_settings.MapModel == previous || _settingsWindow is not null) return;
+        EnsureOpenMapMatchesModel();
+    }
+
+    // Make the open map match the chosen model — re-opening in the other model if they differ (e.g. after a
+    // Settings change), else just refreshing. No-op when no map is open.
+    private void EnsureOpenMapMatchesModel()
+    {
+        if (_model is null) return;
+        bool rowOpen = _overlay is { IsOpen: true }, spatialOpen = _spatialOverlay is { IsOpen: true };
+        if (!rowOpen && !spatialOpen) return;
+        bool wantSpatial = _settings.MapModel == MapModel.Spatial;
+        if (wantSpatial == spatialOpen) RefreshOverlay();          // already the right model — just repaint
+        else { _mapCamera.Reframe(); OpenMapForModel(); }          // swap to the chosen model
     }
 
     // v on the map (or the Settings selector) cycles the board style board → metro → ascii → board. It's a

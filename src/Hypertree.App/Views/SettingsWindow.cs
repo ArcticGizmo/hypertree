@@ -55,6 +55,7 @@ internal sealed class SettingsWindow : Window
     private readonly ToggleSwitch _showTaskbarLabel;
     private readonly ToggleSwitch _showSwitcher;
     private readonly ComboBox _mapStyle;
+    private readonly ComboBox _mapModel;
     private readonly ToggleSwitch _displayBeforeMoving;
     private readonly ToggleSwitch _animateNavigation;
     private readonly ToggleSwitch _sweepFromLeadingEdge;
@@ -102,6 +103,7 @@ internal sealed class SettingsWindow : Window
         _showTaskbarLabel = Toggle(settings.ShowTaskbarLabel);
         _showSwitcher = Toggle(settings.ShowSwitcher);
         _mapStyle = MapStyleSelector(settings.MapStyle);
+        _mapModel = MapModelSelector(settings.MapModel);
         _displayBeforeMoving = Toggle(settings.DisplayBeforeMoving);
         _animateNavigation = Toggle(settings.AnimateNavigation);
         _sweepFromLeadingEdge = Toggle(settings.SweepFromLeadingEdge);
@@ -132,6 +134,7 @@ internal sealed class SettingsWindow : Window
                    _animateNavigation, _sweepFromLeadingEdge, _showChangelog })
             t.IsCheckedChanged += (_, _) => ApplyLive();
         _mapStyle.SelectionChanged += (_, _) => ApplyLive();
+        _mapModel.SelectionChanged += (_, _) => ApplyLive();
 
         var options = new StackPanel
         {
@@ -155,10 +158,16 @@ internal sealed class SettingsWindow : Window
 
                     Divider(),
                     Title2("Appearance"),
+                    SelectRow("Map model", _mapModel),
+                    Hint("How the map is organised. “List” is the classic vertical stack of timelines "
+                         + "(main and its branches); “Spatial” is a 2-D map where desktops are freely-placed "
+                         + "rooms and branches become logical groups. Swap them any time with Tab on the map — "
+                         + "they're two lenses on one arrangement."),
                     SelectRow("Map style", _mapStyle),
                     Hint("How every board is drawn — the flash, the map, previews and the move flow. "
                          + "“Board” is the screen-tile view, “Metro” a transit diagram (coloured lines and "
-                         + "stations), “ASCII” a monospace terminal look. Cycle it with “v” on the map."),
+                         + "stations), “ASCII” a monospace terminal look. Cycle it with “v” on the map. "
+                         + "(Applies to the List model; the Spatial map has its own look.)"),
 
                     Divider(),
                     Title2("Navigation"),
@@ -238,6 +247,7 @@ internal sealed class SettingsWindow : Window
             ShowTaskbarLabel = _showTaskbarLabel.IsChecked ?? true,
             ShowSwitcher = _showSwitcher.IsChecked ?? false,
             MapStyle = (MapStyle)Math.Max(0, _mapStyle.SelectedIndex),
+            MapModel = (MapModel)Math.Max(0, _mapModel.SelectedIndex),
             DisplayBeforeMoving = _displayBeforeMoving.IsChecked ?? true,
             AnimateNavigation = _animateNavigation.IsChecked ?? true,
             SweepFromLeadingEdge = _sweepFromLeadingEdge.IsChecked ?? true,
@@ -539,6 +549,15 @@ internal sealed class SettingsWindow : Window
         HorizontalAlignment = HorizontalAlignment.Right, MinWidth = 132,
         ItemsSource = new[] { "Board", "Metro", "ASCII" },
         SelectedIndex = (int)style,
+    };
+
+    // The map-model dropdown. Item order matches the MapModel enum (Rows, Spatial), so the selected index is
+    // the enum value — mirrors MapStyleSelector.
+    private static ComboBox MapModelSelector(MapModel model) => new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Right, MinWidth = 132,
+        ItemsSource = new[] { "List", "Spatial" },
+        SelectedIndex = (int)model,
     };
 
     // A label on the left, its selector pinned right — the ToggleRow shape for a non-toggle control.

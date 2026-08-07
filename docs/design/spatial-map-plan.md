@@ -116,9 +116,16 @@ id). Membership changes go through `NavigationModel`; colour/position through `S
 preserved), pack groups non-overlapping; animated and reversible. Anchor = largest fragment (see open Q1).
 
 ### M6 — Polish & integration
-Flash/HUD spatial support (so a navigation flash can show the spatial board), reduced-motion, a
-colourblind-safety pass on the palette, Settings → Appearance model toggle, README + CHANGELOG +
-cross-refs from `metro-map.md` / `scene-camera.md`, and any `htree` surfacing.
+**Done:** Settings → Appearance **Map model** selector (List / Spatial), which also fixed a latent reset of
+the persisted `MapModel` on any settings save; the open map re-presents in the chosen model when it changes
+(immediately, or when the Settings window closes). Stale room positions are pruned from `spatial.json` when
+the spatial map opens. README + CHANGELOG updated.
+
+**Deferred (cosmetic, tracked):** the tidy/magnet **animation** (moves are instant today — the geometry is
+correct, the tween is polish and can't be eyeballed headlessly), the **delete ghost** outline, **spatial card
+backdrops** (a confirm/prompt over the spatial map still shows the row board behind it), a **colourblind**
+audit of the palette, and **flash/HUD** rendering the spatial board on a bare-desktop navigation. None change
+behaviour; each is a look-and-feel pass best done against the live app.
 
 ---
 
