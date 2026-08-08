@@ -30,12 +30,13 @@ public static class SpatialTidy
 
     /// <summary>Reunite every group and pack the resulting blocks so none overlap. Returns the new position
     /// of every room. Groups are processed in scene order; blocks are laid on a left-to-right shelf that
-    /// wraps at a roughly-square width, snapped to the grid.</summary>
+    /// wraps at a roughly-square width, snapped to the grid, and packed flush — no empty cells between
+    /// groups, so a tidy map reads as one dense field rather than islands with wasted gaps.</summary>
     public static IReadOnlyDictionary<DesktopId, GridPos> All(SpatialScene scene)
     {
         var result = new Dictionary<DesktopId, GridPos>();
         int shelfX = 0, shelfY = 0, shelfH = 0;
-        const int gap = 1;
+        const int gap = 0; // groups abut — the hull padding still keeps them visually distinct
         int maxW = (int)Math.Ceiling(Math.Sqrt(Math.Max(1, scene.Rooms.Count))) + 4;
 
         foreach (SpatialGroup g in scene.Groups)

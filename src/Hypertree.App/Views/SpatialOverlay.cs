@@ -39,6 +39,7 @@ internal sealed class SpatialOverlay : IStageContent
     private SpatialSource _source = new(Array.Empty<SpatialGroupSource>());
     private SpatialState _state = new();
     private DesktopId? _cursor;   // the blue selection; null until homed onto the current desktop
+    private DesktopId? _pendingSelect; // where the cursor should land after the current room/group is deleted
     private Guid? _selectedGroup; // the active group (g cycles it); its whole set moves as one
     private bool _groupsPanel;    // the ⇧G groups-and-colours panel is showing
     private Guid? _paletteFor;    // which group's colour palette is expanded in the panel
@@ -49,6 +50,11 @@ internal sealed class SpatialOverlay : IStageContent
     // a drag can move a host directly — no re-render mid-gesture, which would drop the pointer capture.
     private readonly Dictionary<DesktopId, Control> _roomHosts = new();
     private SpatialScene? _displayed;
+
+    // The last render's room hit rects (in root coordinates) and the group the mouse is hovering, so a hover
+    // brightens that group's hull — the pointer analog of the blue selection sitting in it.
+    private readonly List<(DesktopId Id, Rect Rect)> _hits = new();
+    private Guid? _hoverGroup;
 
     /// <summary>Switch to a room (Enter / double-click) — App resolves the id to a jump.</summary>
     public event Action<DesktopId>? JumpRoomRequested;
@@ -93,6 +99,7 @@ internal sealed class SpatialOverlay : IStageContent
         _root.PointerMoved += OnPointerMoved;
         _root.PointerReleased += OnPointerReleased;
         _root.PointerCaptureLost += (_, _) => CancelDrag();
+        _root.PointerExited += (_, _) => SetHoverGroup(null); // pointer left the map — no group is hovered
     }
 
     public bool IsOpen => _stage.Current == this;
@@ -133,6 +140,17 @@ internal sealed class SpatialOverlay : IStageContent
     /// the room exists in the scene being drawn).</summary>
     public void SelectRoom(DesktopId id)
     {
+        // A freshly created desktop has no stored position yet: drop it into the empty cell closest to the
+        // room it was created from (still the cursor at this point, before we move it onto the new room), so
+        // it appears beside its group rather than at a row-layout default that may overlap or scatter.
+        if (_displayed is { } scene && _state.Position(id.Value) is null
+            && _cursor is { } anchorId && scene.Rooms.FirstOrDefault(r => r.Id == anchorId) is { } anchor)
+        {
+            var occupied = scene.Rooms.Where(r => r.Id != id).Select(r => r.Pos).ToHashSet();
+            _state.SetPosition(id.Value, SpatialPlacement.NearestEmpty(anchor.Pos, occupied));
+            SpatialStateChanged?.Invoke(); // persist the placement to spatial.json
+        }
+
         _cursor = id;
         _selectedGroup = null;
         _initialised = true; // keep this selection — don't let InitCursor override it on re-present
@@ -313,15 +331,35 @@ internal sealed class SpatialOverlay : IStageContent
 
     private void DeleteCursorRoom()
     {
-        if (_cursor is { } id && RoomOf(id) is not null) DeleteRoomRequested?.Invoke(id);
+        // Pick where the selection lands *before* the room is gone (App's delete is async behind a confirm):
+        // the nearest surviving room to the one being removed. Applied by Render once the room disappears.
+        if (_cursor is { } id && RoomOf(id) is { } room)
+        {
+            _pendingSelect = NearestRoom(room.Pos, r => r.Id != id);
+            DeleteRoomRequested?.Invoke(id);
+        }
     }
 
     private void DeleteGroup()
     {
         // The group to remove: the selected one, else the cursor's. main (the ungrouped bucket) can't be removed.
         Guid? group = _selectedGroup ?? (_cursor is { } id ? RoomOf(id)?.GroupId : null);
-        if (group is { } g && g != Guid.Empty) DeleteGroupRequested?.Invoke(g);
+        if (group is { } g && g != Guid.Empty)
+        {
+            // Land on the nearest room outside the group once its rooms are gone.
+            if (_cursor is { } cid && RoomOf(cid) is { } room)
+                _pendingSelect = NearestRoom(room.Pos, r => r.GroupId != g);
+            DeleteGroupRequested?.Invoke(g);
+        }
     }
+
+    // The surviving room nearest grid cell <paramref name="to"/> that passes <paramref name="keep"/> — where
+    // the selection should jump when its current room is deleted. Equal distances prefer right, then bottom.
+    private DesktopId? NearestRoom(GridPos to, Func<SpatialRoom, bool> keep)
+        => _displayed?.Rooms.Where(keep)
+            .OrderBy(r => { int dx = r.Pos.X - to.X, dy = r.Pos.Y - to.Y; return dx * dx + dy * dy; })
+            .ThenByDescending(r => r.Pos.X).ThenByDescending(r => r.Pos.Y)
+            .FirstOrDefault()?.Id;
 
     // ── Moving rooms, blocks & groups ──────────────────────────────────────────
     // Movement writes grid positions straight into the shared SpatialState (so the change is live) and
@@ -420,7 +458,7 @@ internal sealed class SpatialOverlay : IStageContent
 
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (_grab is null) return;
+        if (_grab is null) { UpdateHover(e.GetPosition(_root)); return; }
         Point at = e.GetPosition(_root);
         if (!_dragging)
         {
@@ -468,6 +506,24 @@ internal sealed class SpatialOverlay : IStageContent
         if (wasActive && IsOpen) Render();                     // snap any visually-moved hosts back to their cells
     }
 
+    // Hover: the group whose hull brightens under the mouse. Hit-test the last render's room rects (topmost
+    // wins) and, only when the hovered group actually changes, redraw — so a redraw fires at group boundaries,
+    // not on every pixel of travel.
+    private void UpdateHover(Point at)
+    {
+        Guid? group = null;
+        for (int i = _hits.Count - 1; i >= 0; i--)
+            if (_hits[i].Rect.Contains(at)) { group = RoomOf(_hits[i].Id)?.GroupId; break; }
+        SetHoverGroup(group);
+    }
+
+    private void SetHoverGroup(Guid? group)
+    {
+        if (group == _hoverGroup || !IsOpen) return;
+        _hoverGroup = group;
+        Render();
+    }
+
     // ── Render ───────────────────────────────────────────────────────────────────
 
     private void Render()
@@ -480,13 +536,26 @@ internal sealed class SpatialOverlay : IStageContent
         SpatialScene display = _cursor is { } c
             ? SpatialScene.From(_source, _state, c)
             : SpatialScene.From(_source, _state);
+
+        // The selection's room was deleted out from under us (its id no longer resolves): land on the nearest
+        // survivor picked when the delete was requested, else the current "here", else the first room — then
+        // rebuild so the blue cursor actually shows on the new room instead of vanishing.
+        if (_cursor is { } stale && display.Rooms.All(r => r.Id != stale))
+        {
+            _cursor = _pendingSelect is { } p && display.Rooms.Any(r => r.Id == p) ? p
+                    : display.Rooms.FirstOrDefault(r => r.Here)?.Id ?? display.Rooms.FirstOrDefault()?.Id;
+            _pendingSelect = null;
+            display = _cursor is { } c2 ? SpatialScene.From(_source, _state, c2) : SpatialScene.From(_source, _state);
+        }
         _displayed = display;
 
         _roomHosts.Clear();
+        _hits.Clear();
         Control board = SpatialPainter.Render(display, width, height, 1.0, _camera,
             onClick: id => { _cursor = id; _selectedGroup = null; _tilePressed = true; Render(); },
             onActivate: id => JumpRoomRequested?.Invoke(id),
-            selectedGroup: _selectedGroup, style: _stage.MapStyle, roomHosts: _roomHosts);
+            hits: _hits, selectedGroup: _selectedGroup, style: _stage.MapStyle, roomHosts: _roomHosts,
+            hoverGroup: _hoverGroup);
 
         _root.Children.Clear();
         _root.Children.Add(board);

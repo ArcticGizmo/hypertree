@@ -1,5 +1,4 @@
 using Avalonia;
-using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
@@ -25,7 +24,7 @@ internal static class SpatialPainter
 {
     private static readonly Color TileBg = Color.Parse("#1F2836"), TileBorder = Color.Parse("#2A3444");
     private static readonly Color CapBg = Color.Parse("#161C27");
-    private static readonly Color Ink = Color.Parse("#E8EDF5"), InkSoft = Color.Parse("#9AA6B8"), InkFaint = Color.Parse("#69748A");
+    private static readonly Color Ink = Color.Parse("#E8EDF5"), InkSoft = Color.Parse("#9AA6B8");
     private static readonly Color Focus = Color.Parse("#6EA8FF"), Here = Color.Parse("#34D399");
     private static readonly Color WinBase = Color.Parse("#374357");
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
@@ -33,13 +32,16 @@ internal static class SpatialPainter
     private static readonly Color AsciiGround = Color.Parse("#0C0F16");
     private static readonly Color MetroBg = Color.Parse("#0F131B"), ChipBase = Color.Parse("#111722"), ChipInk = Color.Parse("#0A0D12");
     private static readonly FontFamily Sans = new("Inter,Segoe UI,sans-serif");
-    private const double AsciiFont = 13;
-    private const int AsciiInnerW = 9;
+    // Larger than the row/list view's ASCII card: a spatial cell (140×72) is far bigger than a list row, so
+    // the box grows to fill it instead of floating in wasted space.
+    private const double AsciiFont = 18;
+    private const int AsciiInnerW = 12;
 
-    // Base geometry (unscaled). A room is the board tile; the grid stride leaves generous gaps so rooms and
-    // their hulls have room to breathe (tile is 96×72, so these strides leave ~60px between neighbours).
-    private const double BaseTileW = 96, BaseScrH = 50, BaseCapH = 22;
-    private const double BaseStrideX = 158, BaseStrideY = 140, BaseHullPad = 16;
+    // Base geometry (unscaled). A room is the board tile, kept wide so long desktop names fit; the grid
+    // stride leaves generous gaps so rooms and their hulls have room to breathe (tile is 140×72, so these
+    // strides leave ~60px between neighbours).
+    private const double BaseTileW = 140, BaseScrH = 50, BaseCapH = 22;
+    private const double BaseStrideX = 202, BaseStrideY = 140, BaseHullPad = 16;
     private static double TileH => BaseScrH + BaseCapH; // 72
 
     /// <summary>The spatial metrics — a near-square grid, unlike the tall row pitch, since 2-D placement
@@ -51,7 +53,8 @@ internal static class SpatialPainter
     public static Control Render(SpatialScene scene, double screenW, double screenH, double s, MapCamera camera,
                                  Action<DesktopId>? onClick = null, Action<DesktopId>? onActivate = null,
                                  IList<(DesktopId Id, Rect Rect)>? hits = null, Guid? selectedGroup = null,
-                                 MapStyle style = MapStyle.Board, IDictionary<DesktopId, Control>? roomHosts = null)
+                                 MapStyle style = MapStyle.Board, IDictionary<DesktopId, Control>? roomHosts = null,
+                                 Guid? hoverGroup = null)
     {
         var layout = new SpatialLayout(scene, Metrics(s));
         camera.Update(layout, screenW, screenH);
@@ -59,10 +62,21 @@ internal static class SpatialPainter
 
         var canvas = new Canvas { Width = screenW, Height = screenH, ClipToBounds = true, Background = Brushes.Transparent };
 
+        // A group hull only lifts to its bright fill when it's "live": the blue selection sits in it, it's
+        // where we currently are (the green "here"), the mouse is hovering it, or the whole group is picked up.
+        // At rest every other group's fill is halved so the map isn't colour-washed by groups you're not in.
+        var activeGroups = new HashSet<Guid>();
+        foreach (PlacedRoom pr in layout.Rooms)
+            if (pr.Room.Selected || pr.Room.Here) activeGroups.Add(pr.Room.GroupId);
+        if (selectedGroup is { } sgId) activeGroups.Add(sgId);
+        if (hoverGroup is { } hgId) activeGroups.Add(hgId);
+
         // Hulls first (behind the rooms), then their name badges, then the rooms on top. The hull is the
         // spatial stand-in for the row model's branch box / metro route, so it stays whatever the room style.
         foreach (GroupHull hull in layout.Hulls(BaseHullPad * s, BaseHullPad * s))
-            PaintHull(canvas, hull, ox, oy, s, selectedGroup is { } sg && hull.Group.Id == sg);
+            PaintHull(canvas, hull, ox, oy, s,
+                      active: activeGroups.Contains(hull.Group.Id),
+                      selected: selectedGroup is { } sg && hull.Group.Id == sg);
 
         // Cells holding more than one room — flagged so a stack shows a warning instead of hiding silently.
         var overlapping = layout.Rooms.GroupBy(r => r.Room.Pos).Where(g => g.Count() > 1)
@@ -86,6 +100,11 @@ internal static class SpatialPainter
                 default: DrawBoardRoom(host, placed.Room, groupColor, local, s); break;
             }
             if (overlapping.Contains(id)) AddOverlapBadge(host, local, s);
+
+            // A desktop dims unless its group is "live" (the selection, "here", hover, or a whole-group pick
+            // sits in it). This is the de-emphasis 0-window rooms used to carry, now repurposed to mean "not
+            // the group you're in" — so a room reads the same whether or not it holds windows.
+            host.Opacity = activeGroups.Contains(placed.Room.GroupId) ? 1.0 : 0.5;
 
             if (onClick is not null || onActivate is not null)
             {
@@ -140,28 +159,26 @@ internal static class SpatialPainter
         return (m.CellStride, m.RowPitch);
     }
 
-    private static void PaintHull(Canvas canvas, GroupHull hull, double ox, double oy, double s, bool selected)
+    private static void PaintHull(Canvas canvas, GroupHull hull, double ox, double oy, double s, bool active, bool selected)
     {
         Color c = Color.Parse(hull.Group.Color);
         bool main = hull.Group.IsMain; // the ungrouped bucket: barely-there, dashed, no deliberate grouping
         LayoutRect r = hull.Rect;
 
         // The hull is the group's "tetris" outline — the rooms' cells merged along shared edges, corners
-        // rounded. A selected group lifts to a stronger fill and a blue selection stroke, the same accent the
-        // room selection uses, so "this group is active" reads at a glance. Resting fills are kept very faint —
-        // the hull should whisper the grouping, not colour-wash the rooms inside it.
+        // rounded. It's borderless: only the fill carries the grouping. A "live" group (active: the selection,
+        // "here", or hover sits in it) lifts to the bright fill so "this is the group I'm in" reads at a
+        // glance; every resting group sits far dimmer so it whispers the grouping rather than colour-washing
+        // the map.
+        bool bright = active || selected;
         var path = new Avalonia.Controls.Shapes.Path
         {
             Data = HullGeometry(hull.Loops, ox, oy, 18 * s),
-            Fill = new SolidColorBrush(c, selected ? 0.11 : main ? 0.02 : 0.045),
-            Stroke = new SolidColorBrush(selected ? Focus : c, selected ? 1.0 : main ? 0.18 : 0.34),
-            StrokeThickness = Math.Max(1, (selected ? 1.8 : 1.1) * s),
-            StrokeJoin = PenLineJoin.Round,
+            Fill = new SolidColorBrush(c, bright ? 0.11 : main ? 0.005 : 0.012),
         };
-        if (main && !selected) path.StrokeDashArray = new AvaloniaList<double> { 2, 4 };
         canvas.Children.Add(path);
 
-        PaintBadge(canvas, hull.Group, c, main, r.Left + ox, r.Top + oy, s);
+        PaintBadge(canvas, hull.Group, c, main, bright, r.Left + ox, r.Top + oy, s);
     }
 
     // Turn the hull's rectilinear rings into a filled path with rounded corners: each corner is cut back by
@@ -211,7 +228,7 @@ internal static class SpatialPainter
         return new Point(from.X + (to.X - from.X) * t, from.Y + (to.Y - from.Y) * t);
     }
 
-    private static void PaintBadge(Canvas canvas, SpatialGroup group, Color c, bool main, double x, double y, double s)
+    private static void PaintBadge(Canvas canvas, SpatialGroup group, Color c, bool main, bool bright, double x, double y, double s)
     {
         var dot = new Ellipse { Width = 7 * s, Height = 7 * s, Fill = new SolidColorBrush(c), VerticalAlignment = VerticalAlignment.Center };
         var text = new TextBlock
@@ -227,6 +244,7 @@ internal static class SpatialPainter
             CornerRadius = new CornerRadius(999), Padding = new Thickness(8 * s, 3 * s, 9 * s, 3 * s),
             Child = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 * s, Children = { dot, text } },
         };
+        badge.Opacity = bright ? 1.0 : 0.4; // labels dim with their group; only the live one reads at full strength
         Canvas.SetLeft(badge, x + 2 * s);
         Canvas.SetTop(badge, y - 11 * s); // ride the hull's top edge, like the metro route badge
         canvas.Children.Add(badge);
@@ -264,7 +282,7 @@ internal static class SpatialPainter
             Child = new TextBlock
             {
                 Text = room.Label, FontFamily = Mono, FontSize = 11 * s,
-                Foreground = new SolidColorBrush(room.Selected ? Ink : (empty ? InkFaint : InkSoft)),
+                Foreground = new SolidColorBrush(room.Selected ? Ink : InkSoft),
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
             },
         };
@@ -286,7 +304,6 @@ internal static class SpatialPainter
             result = grid;
         }
 
-        if (empty && !room.Selected && !room.Here) result.Opacity = 0.5;
         if (room.Selected) result.RenderTransform = new TranslateTransform(0, -5 * s);
         return result;
     }
@@ -297,12 +314,11 @@ internal static class SpatialPainter
         var badge = new Border
         {
             Height = h, MinWidth = h, Padding = new Thickness(5 * s, 0), CornerRadius = new CornerRadius(h / 2),
-            Background = new SolidColorBrush(count == 0 ? Color.FromArgb(0x33, 0x16, 0x1C, 0x27)
-                                                        : Color.FromArgb(0xCC, 0x0F, 0x14, 0x1D)),
+            Background = new SolidColorBrush(Color.FromArgb(0xCC, 0x0F, 0x14, 0x1D)),
             Child = new TextBlock
             {
                 Text = count.ToString(), FontFamily = Mono, FontSize = 10 * s, FontWeight = FontWeight.SemiBold,
-                Foreground = new SolidColorBrush(count == 0 ? InkFaint : Ink),
+                Foreground = new SolidColorBrush(Ink),
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
             },
         };
@@ -326,8 +342,7 @@ internal static class SpatialPainter
 
     private static void DrawAsciiRoom(Canvas canvas, SpatialRoom room, Color groupColor, Rect cell, double s)
     {
-        bool empty = room.WindowCount == 0;
-        Color colour = room.Selected ? Focus : room.Here ? Here : (empty ? Blend(groupColor, AsciiGround, 0.5) : groupColor);
+        Color colour = room.Selected ? Focus : room.Here ? Here : groupColor;
         var card = new TextBlock
         {
             Text = AsciiCard(room), FontFamily = Mono, FontSize = AsciiFont * s,
@@ -369,8 +384,8 @@ internal static class SpatialPainter
         double cx = cell.X + cell.Width / 2, cy = cell.Y + cell.Height * 0.42; // station up top, chip below it
         double rOut = 10 * s;
         bool empty = room.WindowCount == 0, marked = room.Selected || room.Here;
-        double r = empty && !marked ? rOut * 0.66 : rOut;
-        double ring = empty && !marked ? 2.5 * s : 3.5 * s;
+        double r = rOut;
+        double ring = 3.5 * s;
 
         if (room.Here)
         {
@@ -398,7 +413,7 @@ internal static class SpatialPainter
 
         // The label chip below the station.
         Color fill = room.Selected ? Focus : room.Here ? Here : Blend(ChipBase, groupColor, 0.13);
-        Color ink = marked ? ChipInk : Blend(groupColor, ChipBase, empty ? 0.64 : 0.48);
+        Color ink = marked ? ChipInk : Blend(groupColor, ChipBase, 0.48);
         var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 * s };
         content.Children.Add(new TextBlock
         {
@@ -418,7 +433,7 @@ internal static class SpatialPainter
             Background = new SolidColorBrush(fill), CornerRadius = new CornerRadius(9 * s),
             Padding = new Thickness(9 * s, 3 * s), Child = content,
         };
-        if (!marked) { chip.BorderBrush = new SolidColorBrush(Blend(MetroBg, groupColor, empty ? 0.3 : 0.44)); chip.BorderThickness = new Thickness(Math.Max(1, s)); }
+        if (!marked) { chip.BorderBrush = new SolidColorBrush(Blend(MetroBg, groupColor, 0.44)); chip.BorderThickness = new Thickness(Math.Max(1, s)); }
         chip.Measure(Size.Infinity);
         Canvas.SetLeft(chip, cx - chip.DesiredSize.Width / 2);
         Canvas.SetTop(chip, cy + rOut + 10 * s);
