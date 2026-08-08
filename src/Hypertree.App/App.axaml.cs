@@ -1465,9 +1465,9 @@ public sealed partial class App : Application
         {
             Snapshot s = snapshot; // capture per iteration
             items.Add(new PaletteItem(s.Name, $"{s.DesktopCount} desktops · {s.Branches.Count} branches", "⟲",
-                () => ConfirmRestore(s),                 // Enter restores (pushes a confirm over this palette)…
-                Preview: () => SnapshotPreview(s),        // preview the layout you'd land in
-                OnDelete: () => ConfirmDeleteLayout(s))); // …Del deletes it (pushes a confirm)
+                () => ConfirmRestore(s),                          // Enter restores (pushes a confirm over this palette)…
+                SpatialPreview: () => SpatialSnapshot.SceneFrom(s), // preview the spatial layout you'd land in
+                OnDelete: () => ConfirmDeleteLayout(s)));          // …Del deletes it (pushes a confirm)
         }
         // The reset ("restore the empty layout") sits at the bottom — greyed out when already a single desktop.
         items.Add(new PaletteItem("Reset to a single desktop", "clear every desktop & branch", "⊘",
@@ -1497,27 +1497,13 @@ public sealed partial class App : Application
         if (_model is null || _snapshots is null) return;
         _model.Reconcile(); // capture the live layout, not stale/deleted desktops
 
+        Snapshot snap = _model.CaptureSnapshot(name);
+        SpatialSnapshot.Capture(snap, _spatial); // layer the room positions & group colours on top of the structure
+
         // Same name overwrites, so re-snapshotting a layout updates it in place.
         var list = _snapshots.Load().Where(s => !s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToList();
-        list.Add(_model.CaptureSnapshot(name));
+        list.Add(snap);
         _snapshots.Save(list);
-    }
-
-    // Build a board from a saved snapshot (persisted labels only — no live windows), so the restore
-    // palette previews the layout you'd land in. All branches render bright (this is the whole target),
-    // and window counts are absent since the desktops may not exist yet.
-    private static NavMap SnapshotPreview(Snapshot snap)
-    {
-        var top = snap.MainDesktops.Select(d => new NavMapTile(d.Label, IsCurrent: false)).ToList();
-        var branches = new List<NavMapBranch>(snap.Branches.Count);
-        for (int gi = 0; gi < snap.Branches.Count; gi++)
-        {
-            PersistedBranch pg = snap.Branches[gi];
-            var tiles = pg.Desktops.Select(d => new NavMapTile(d.Label, IsCurrent: false)).ToList();
-            int cursor = tiles.Count == 0 ? 0 : Math.Clamp(pg.LastUsedIndex, 0, tiles.Count - 1);
-            branches.Add(new NavMapBranch(gi, pg.Name, tiles, IsCurrentLevel: true, cursor));
-        }
-        return new NavMap(top, TopCursor: 0, OnTop: true, branches, Math.Clamp(snap.MainSlot, 0, branches.Count));
     }
 
     private void ConfirmRestore(Snapshot snap)
@@ -1553,6 +1539,11 @@ public sealed partial class App : Application
         var live = _desktops.List().Select(d => d.Id.Value).ToHashSet();
         var keep = new HashSet<Guid>();
 
+        // Re-keying maps for the spatial facts: a captured desktop GUID → the live GUID it resolved to, and
+        // a captured branch id → the fresh id its restored branch minted. Positions/colours ride these over.
+        var desktopRemap = new Dictionary<Guid, Guid>();
+        var branchRemap = new Dictionary<Guid, Guid>();
+
         // Resolve one saved desktop to a live id: reuse its GUID if present (renamed to the saved label),
         // else create a fresh desktop with that label. Branch desktops are tracked in _created so the
         // teardown guard may remove them later; main desktops are the user's and are never tracked.
@@ -1569,6 +1560,7 @@ public sealed partial class App : Application
                 id = _desktops!.Create(d.Label);
             }
             keep.Add(id.Value);
+            desktopRemap[d.Id] = id.Value; // remember where this room's stored position should land
             if (branch) _created.Add(id.Value);
             return id;
         }
@@ -1580,7 +1572,10 @@ public sealed partial class App : Application
         foreach (PersistedBranch pg in snap.Branches)
         {
             var refs = pg.Desktops.Select(d => new DesktopRef(Resolve(d, branch: true), d.Label)).ToList();
-            if (refs.Count > 0) branches.Add(new Branch(pg.Name, refs, pg.LastUsedIndex));
+            if (refs.Count == 0) continue;
+            var branch = new Branch(pg.Name, refs, pg.LastUsedIndex); // a template restore mints a fresh id
+            branchRemap[pg.Id] = branch.Id; // remember where this group's stored colour should land
+            branches.Add(branch);
         }
 
         // Land on the snapshot's first desktop (main[0], else the first branch desktop) before removing.
@@ -1596,6 +1591,14 @@ public sealed partial class App : Application
         }
 
         _model.RestoreStructure(snap.MainSlot, branches); // re-derives the top row + re-anchors to `first`
+
+        // Re-apply the saved spatial arrangement onto the live state, re-keyed to the ids we just resolved,
+        // and persist it — so the restored map lands in its 2-D layout, not the default rows. Then the map
+        // rebuild below (RefreshOrFlash → BuildSpatialSource + _spatial) reflects it. Empty tables (an old
+        // snapshot, or a never-arranged map) simply write nothing, leaving the defaults in place.
+        SpatialSnapshot.ApplyTo(_spatial, snap, desktopRemap, branchRemap);
+        _spatialStore?.Save(_spatial);
+
         RefreshOrFlash();
     }
 

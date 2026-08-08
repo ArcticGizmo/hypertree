@@ -827,7 +827,10 @@ public sealed class NavigationModel
     // ── Snapshots (named layout capture / restore) ───────────────────────────────
 
     /// <summary>Capture the whole current layout — main timeline + branches, each desktop keyed by its OS
-    /// GUID — as a named <see cref="Snapshot"/> the caller can persist and later restore.</summary>
+    /// GUID — as a named <see cref="Snapshot"/> the caller can persist and later restore. The branch
+    /// <see cref="Branch.Id"/> is stamped on each captured branch so the caller can correlate the spatial
+    /// group colour (keyed by that id) it layers on separately; structure restore still mints fresh ids, as
+    /// a snapshot is a template.</summary>
     public Snapshot CaptureSnapshot(string name) => new()
     {
         Name = name,
@@ -835,6 +838,7 @@ public sealed class NavigationModel
         MainDesktops = _topRow.Select(d => new PersistedDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
         Branches = _branches.Select(g => new PersistedBranch
         {
+            Id = g.Id,
             Name = g.Name,
             LastUsedIndex = g.LastUsedIndex,
             Desktops = g.Desktops.Select(d => new PersistedDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
