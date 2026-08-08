@@ -59,6 +59,9 @@ internal sealed class SpatialOverlay : IStageContent
     /// <summary>A move or a recolour changed the spatial state: it's already written to the shared
     /// <see cref="SpatialState"/>; App just persists it to spatial.json.</summary>
     public event Action? SpatialStateChanged;
+    /// <summary>g — set the highlighted room's group. App opens a picker (existing groups + "create «name»")
+    /// over the map and reassigns the desktop to the chosen — or newly created — group.</summary>
+    public event Action<DesktopId>? SetRoomGroupRequested;
     /// <summary>Del — remove the room (the desktop). App resolves the id and runs its confirm/teardown.</summary>
     public event Action<DesktopId>? DeleteRoomRequested;
     /// <summary>Shift+Del — remove a whole group (a branch). App resolves the group id to a branch.</summary>
@@ -142,7 +145,7 @@ internal sealed class SpatialOverlay : IStageContent
             case Key.Tab: SwapModelRequested?.Invoke(); e.Handled = true; break;
             case Key.Enter: if (_cursor is { } c) JumpRoomRequested?.Invoke(c); e.Handled = true; break;
             case Key.G when e.KeyModifiers.HasFlag(KeyModifiers.Shift): ToggleGroupsPanel(); e.Handled = true; break;
-            case Key.G: CycleGroup(); e.Handled = true; break;
+            case Key.G: RequestSetGroup(); e.Handled = true; break;
             case Key.V: ViewStyleToggleRequested?.Invoke(); e.Handled = true; break;
             case Key.T: Tidy(); e.Handled = true; break;
             case Key.Delete when e.KeyModifiers.HasFlag(KeyModifiers.Shift): DeleteGroup(); e.Handled = true; break;
@@ -192,19 +195,14 @@ internal sealed class SpatialOverlay : IStageContent
         else if (_cursor is null) { _cursor = scene.Rooms[0].Id; Render(); }
     }
 
-    // ── Groups (select, cycle, recolour) ───────────────────────────────────────
+    // ── Groups (set, select, recolour) ─────────────────────────────────────────
 
-    // g — step through the groups (main included), lighting the whole set and framing it. While a group is
-    // selected it is the active unit: Ctrl+arrows and a drag move it whole.
-    private void CycleGroup()
+    // g — set the highlighted room's group. App owns the picker (existing groups plus a "create «name»"
+    // row) and the reassignment; the overlay just hands over which room to move. The ⇧G panel still selects
+    // a whole group as the active move unit (Ctrl+arrows / drag).
+    private void RequestSetGroup()
     {
-        if (_displayed is null || _displayed.Groups.Count == 0) return;
-        var ids = _displayed.Groups.Select(g => g.Id).ToList();
-        int at = _selectedGroup is { } g ? ids.IndexOf(g) : -1;
-        _selectedGroup = ids[(at + 1) % ids.Count];
-        // Frame the group by homing the cursor onto its first room, so the camera keeps it in view.
-        if (_displayed.Rooms.FirstOrDefault(r => r.GroupId == _selectedGroup) is { } first) _cursor = first.Id;
-        Render();
+        if (_cursor is { } id && RoomOf(id) is not null) SetRoomGroupRequested?.Invoke(id);
     }
 
     private IReadOnlyList<SpatialRoom> GroupRooms(Guid group)
@@ -451,7 +449,7 @@ internal sealed class SpatialOverlay : IStageContent
         rows.Children.Add(LegendRow("Ctrl+Alt+←→↑↓", "switch to a desktop"));
         rows.Children.Add(LegendRow("Ctrl+←→↑↓", "move the room / group"));
         rows.Children.Add(LegendRow("Ctrl+Shift+←→↑↓", "move the block"));
-        rows.Children.Add(LegendRow("g", "select a group"));
+        rows.Children.Add(LegendRow("g", "set the room's group"));
         rows.Children.Add(LegendRow("Shift+g", "groups & colours"));
         rows.Children.Add(LegendRow("t", "tidy up (reunite groups)"));
         rows.Children.Add(LegendRow("v", _stage.MapStyle switch

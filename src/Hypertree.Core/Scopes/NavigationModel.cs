@@ -542,6 +542,53 @@ public sealed class NavigationModel
         return Locate(moved.Id);
     }
 
+    /// <summary>
+    /// Reassign an existing desktop to the group identified by <paramref name="groupId"/> — another branch,
+    /// or main (<see cref="Guid.Empty"/>, the ungrouped bucket) — appending it to that group's end. The
+    /// spatial map's "set group" (g) for a destination that already exists: a thin wrapper over
+    /// <see cref="MoveDesktop"/> that resolves the group id to a slot. Returns the desktop's new position,
+    /// or null when the desktop or group can't be resolved, or it's already in that group (a no-op).
+    /// </summary>
+    public (bool onMain, int branchIndex, int desktopIndex)? MoveDesktopToGroup(DesktopId id, Guid groupId)
+    {
+        if (Locate(id) is not { } at) return null;
+        if (groupId == Guid.Empty)
+        {
+            if (at.onMain) return null;                                   // already ungrouped
+            return MoveDesktop(false, at.branchIndex, at.desktopIndex, true, -1, _topRow.Count);
+        }
+        int to = IndexOfBranch(groupId);
+        if (to < 0) return null;
+        if (!at.onMain && at.branchIndex == to) return null;             // already in that group
+        return MoveDesktop(at.onMain, at.branchIndex, at.desktopIndex, false, to, _branches[to].Count);
+    }
+
+    /// <summary>
+    /// Move an existing desktop out of wherever it lives (main, or another branch) and into a brand-new
+    /// branch named <paramref name="name"/>, which it seeds as the sole desktop. The mirror of
+    /// <see cref="MoveDesktopToGroup"/> for the "＋ create group" case, where the destination branch doesn't
+    /// exist yet — a branch can't be created empty, so the moved desktop is what fills it. Taking a branch's
+    /// last desktop dissolves that branch. Returns the new branch, or null if the desktop isn't tracked.
+    /// </summary>
+    public Branch? MoveDesktopToNewBranch(DesktopId id, string name)
+    {
+        if (Locate(id) is not { } at) return null;
+        DesktopRef moved = at.onMain
+            ? _topRow[at.desktopIndex]
+            : _branches[at.branchIndex].Desktops[at.desktopIndex];
+
+        if (!at.onMain)
+        {
+            Branch from = _branches[at.branchIndex];
+            from.RemoveDesktopAt(at.desktopIndex);
+            if (from.Count == 0) { _branches.RemoveAt(at.branchIndex); AdjustForRemoval(at.branchIndex); }
+        }
+
+        var branch = new Branch(name, new[] { moved });
+        AddBranch(branch); // inserts at the main slot; SyncTopRow then drops the desktop off the main timeline
+        return branch;
+    }
+
     /// <summary>Where a desktop sits in the stack right now — main (branch index -1) or a branch — or null
     /// if we don't track it. Used to follow a desktop after a structural change moved it.</summary>
     public (bool onMain, int branchIndex, int desktopIndex)? Locate(DesktopId id)

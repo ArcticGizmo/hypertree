@@ -261,6 +261,7 @@ public sealed partial class App : Application
         _spatialOverlay.SwapModelRequested += SwapMapModel; // Tab — swap back to the row map
         _spatialOverlay.ViewStyleToggleRequested += ToggleMapStyle; // v — cycle board ↔ metro ↔ ascii (app-wide)
         _spatialOverlay.SpatialStateChanged += () => _spatialStore?.Save(_spatial); // a move or recolour is written to spatial.json
+        _spatialOverlay.SetRoomGroupRequested += OpenGroupPickerForRoom; // g — pick / create the room's group
         _spatialOverlay.DeleteRoomRequested += id =>       // Del — reuse the row map's confirm/teardown flow
         {
             if (_model?.Locate(id) is { } at)
@@ -991,6 +992,60 @@ public sealed partial class App : Application
         if (_model is null) return;
         _overlay?.SetBoard(_model.BuildMap()); // row: redraws if open, else stashes for the next present
         if (_spatialOverlay is { IsOpen: true }) _spatialOverlay.SetSource(_model.BuildSpatialSource(), _spatial);
+    }
+
+    // ── Set a room's group (g on the spatial map) ───────────────────────────────────
+
+    // g on the spatial map: pick the group (branch) the highlighted room belongs to, or type a new name to
+    // create one. Reuses the shared palette — its "create «name»" row is exactly the "create xxxx" affordance
+    // — over the durable spatial map, so choosing reassigns the desktop and unwinds back to the recoloured
+    // map. The room's current group is left out of the list (you can't move it to where it already is).
+    private void OpenGroupPickerForRoom(DesktopId id)
+    {
+        if (_model is null || _stage is null) return;
+        SpatialSource source = _model.BuildSpatialSource();
+        SpatialGroupSource? owner = source.Groups.FirstOrDefault(g => g.Desktops.Any(d => d.Id == id));
+        if (owner is null) return; // the room vanished (e.g. an external delete) — nothing to regroup
+
+        string room = owner.Desktops.First(d => d.Id == id).Label;
+
+        var items = new List<PaletteItem>();
+        foreach (SpatialGroupSource g in source.Groups)
+        {
+            if (g.Id == owner.Id) continue;                  // skip the group it's already in
+            Guid target = g.Id;
+            int n = g.Desktops.Count;
+            items.Add(new PaletteItem(
+                g.IsMain ? "main" : g.Name,
+                n == 1 ? "1 room" : $"{n} rooms",
+                g.IsMain ? "○" : "●",
+                () => AssignRoomToGroup(id, target)));
+        }
+
+        // A typed name that matches no existing group offers to create it, seeded with the moved room.
+        PaletteItem? CreateRow(string q) =>
+            new($"Create “{q}”", "new group", "＋", () => AssignRoomToNewGroup(id, q));
+
+        _stage.Present(new PaletteContent(
+            $"Set group for “{room}”…",
+            "↑↓ move · ↵ choose · type a name to create · Esc back",
+            items, CreateRow));
+    }
+
+    private void AssignRoomToGroup(DesktopId id, Guid groupId)
+    {
+        if (_model is null) return;
+        _model.MoveDesktopToGroup(id, groupId);
+        RefreshOverlay(); // stash the regrouped board; the stage re-presents the map as the palette completes
+    }
+
+    private void AssignRoomToNewGroup(DesktopId id, string name)
+    {
+        if (_model is null) return;
+        name = name.Trim();
+        if (name.Length == 0) return;
+        _model.MoveDesktopToNewBranch(id, name);
+        RefreshOverlay();
     }
 
     // ── Move windows to another desktop (m on the map) ──────────────────────────────
