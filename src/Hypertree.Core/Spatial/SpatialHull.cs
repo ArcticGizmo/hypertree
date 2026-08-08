@@ -8,16 +8,10 @@ namespace Hypertree.Spatial;
 /// the name badge and framing.</summary>
 public sealed record HullShape(IReadOnlyList<IReadOnlyList<LayoutPoint>> Loops, LayoutRect Bounds);
 
-/// <summary>A corridor joining two rooms that touch only at a corner (a diagonal): the two rooms' near
-/// corners, in world space. The painter draws a constant-width capsule between them and unions it into the
-/// group's hull so the two blocks read as one connected piece.</summary>
-public sealed record HullBridge(LayoutPoint A, LayoutPoint B);
-
 /// <summary>
 /// Turns a set of occupied grid cells into <b>polyomino outlines</b> — the "tetris piece" hulls the spatial
-/// map draws around a group. Cells that share an edge merge into one ring (the shared edge dissolves), via
-/// <see cref="Shapes"/>. Cells that touch only at a corner stay separate blocks but are reported as a
-/// <see cref="HullBridge"/> by <see cref="Corridors"/>, so the painter can join them with a slim corridor.
+/// map draws around a group. Cells that share an edge merge into one ring (the shared edge dissolves); cells
+/// that only touch at a corner stay separate blocks.
 ///
 /// A cell <c>(gx, gy)</c> owns the world box centred on its room, <c>strideX × strideY</c>, so edge-adjacent
 /// cells' boxes abut and their shared edge cancels. Each ring is pulled inward by an inset so it clears the
@@ -50,32 +44,6 @@ public static class SpatialHull
             shapes.Add(new HullShape(loops, new LayoutRect(minX, minY, maxX - minX, maxY - minY)));
         }
         return shapes;
-    }
-
-    /// <summary>The corridors to draw for a group: one per genuine diagonal-only touch — two cells kitty-corner
-    /// with both cells between them empty (so they aren't already edge-joined, as an L's arm-tips are). Each is
-    /// the two rooms' near corners in world space, inset to sit just inside the tiles.</summary>
-    public static IReadOnlyList<HullBridge> Corridors(
-        IReadOnlyCollection<GridPos> cells, double strideX, double strideY, double insetX, double insetY)
-    {
-        var set = new HashSet<(int X, int Y)>();
-        foreach (GridPos c in cells) set.Add((c.X, c.Y));
-
-        var bridges = new List<HullBridge>();
-        foreach ((int x, int y) in set)
-            foreach (int dy in new[] { -1, 1 }) // the two right-hand diagonals — each pair seen once
-            {
-                if (!set.Contains((x + 1, y + dy))) continue;                 // not a diagonal pair
-                if (set.Contains((x + 1, y)) || set.Contains((x, y + dy))) continue; // already edge-joined
-
-                // Each room's corner nearest the other, pulled in by the inset so it sits just inside the tile.
-                double ax = (x + 0.5) * strideX - insetX;
-                double ay = y * strideY + dy * (0.5 * strideY - insetY);
-                double bx = (x + 0.5) * strideX + insetX;
-                double by = (y + dy) * strideY - dy * (0.5 * strideY - insetY);
-                bridges.Add(new HullBridge(new LayoutPoint(ax, ay), new LayoutPoint(bx, by)));
-            }
-        return bridges;
     }
 
     // Split the cells into edge-connected (4-neighbour) blocks — one merged outline each.

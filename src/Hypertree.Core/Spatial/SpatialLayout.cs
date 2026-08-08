@@ -6,13 +6,11 @@ namespace Hypertree.Spatial;
 /// <summary>A room placed in world space — its scene data plus the rect it occupies.</summary>
 public sealed record PlacedRoom(SpatialRoom Room, LayoutRect Rect);
 
-/// <summary>A group's hull: the rectilinear "tetris" outlines of its rooms (<see cref="Loops"/> — one or more
-/// rings, edge-adjacent rooms already merged, holes included) plus the <see cref="Bridges"/> that join
-/// corner-touching blocks with a corridor. <see cref="Rect"/> is the top-most / left-most block's bounds, for
-/// the name badge. The whole group draws as one unioned shape.</summary>
+/// <summary>A group's hull: the rectilinear "tetris" outlines of its rooms (<see cref="Loops"/> — one ring per
+/// edge-connected block, edge-adjacent rooms already merged, holes included). <see cref="Rect"/> is the
+/// top-most / left-most block's bounds, for the name badge.</summary>
 public sealed record GroupHull(
-    SpatialGroup Group, IReadOnlyList<IReadOnlyList<LayoutPoint>> Loops,
-    IReadOnlyList<HullBridge> Bridges, LayoutRect Rect);
+    SpatialGroup Group, IReadOnlyList<IReadOnlyList<LayoutPoint>> Loops, LayoutRect Rect);
 
 /// <summary>
 /// Where every room sits in <b>world space</b> for the spatial map — the spatial twin of
@@ -80,8 +78,8 @@ public sealed class SpatialLayout : ICameraLayout
     }
 
     /// <summary>One hull per group: the "tetris" outlines of its rooms (edge-adjacent rooms merged, held
-    /// <paramref name="padX"/> / <paramref name="padY"/> clear of the tiles) plus the corridors that join
-    /// corner-touching blocks. The name badge hangs off the top-most / left-most block.</summary>
+    /// <paramref name="padX"/> / <paramref name="padY"/> clear of the tiles). Corner-only (diagonal) touches
+    /// stay separate blocks. The name badge hangs off the top-most / left-most block.</summary>
     public IReadOnlyList<GroupHull> Hulls(double padX, double padY)
     {
         // Full stride cells abut, so edge-adjacent cells merge; inset back to leave `pad` around each tile.
@@ -105,8 +103,7 @@ public sealed class SpatialLayout : ICameraLayout
                     anchor = s;
 
             var loops = shapes.SelectMany(s => s.Loops).ToList();
-            IReadOnlyList<HullBridge> bridges = SpatialHull.Corridors(cells, _m.CellStride, _m.RowPitch, insetX, insetY);
-            result.Add(new GroupHull(g, loops, bridges, anchor.Bounds));
+            result.Add(new GroupHull(g, loops, anchor.Bounds));
         }
         return result;
     }

@@ -147,17 +147,12 @@ internal static class SpatialPainter
         LayoutRect r = hull.Rect;
 
         // The hull is the group's "tetris" outline — the rooms' cells merged along shared edges, corners
-        // rounded — with a constant-width corridor unioned in for each corner-only (diagonal) touch, so the
-        // whole group reads as one continuous shape. A selected group lifts to a stronger fill and a blue
-        // selection stroke, the same accent the room selection uses. Resting fills are kept very faint — the
-        // hull should whisper the grouping, not colour-wash the rooms inside it.
-        Geometry geo = HullGeometry(hull.Loops, ox, oy, 18 * s);
-        foreach (HullBridge b in hull.Bridges)
-            geo = new CombinedGeometry(GeometryCombineMode.Union, geo, Capsule(b, ox, oy, 15 * s));
-
+        // rounded. A selected group lifts to a stronger fill and a blue selection stroke, the same accent the
+        // room selection uses, so "this group is active" reads at a glance. Resting fills are kept very faint —
+        // the hull should whisper the grouping, not colour-wash the rooms inside it.
         var path = new Avalonia.Controls.Shapes.Path
         {
-            Data = geo,
+            Data = HullGeometry(hull.Loops, ox, oy, 18 * s),
             Fill = new SolidColorBrush(c, selected ? 0.11 : main ? 0.02 : 0.045),
             Stroke = new SolidColorBrush(selected ? Focus : c, selected ? 1.0 : main ? 0.18 : 0.34),
             StrokeThickness = Math.Max(1, (selected ? 1.8 : 1.1) * s),
@@ -167,32 +162,6 @@ internal static class SpatialPainter
         canvas.Children.Add(path);
 
         PaintBadge(canvas, hull.Group, c, main, r.Left + ox, r.Top + oy, s);
-    }
-
-    // A constant-width corridor between two diagonal rooms: a capsule (stadium) whose straight sides give the
-    // even width and whose rounded ends, pushed a little into each room, merge seamlessly when unioned with
-    // the hull. `half` is the corridor's half-width.
-    private static Geometry Capsule(HullBridge b, double ox, double oy, double half)
-    {
-        double ax = b.A.X + ox, ay = b.A.Y + oy, bx = b.B.X + ox, by = b.B.Y + oy;
-        double dx = bx - ax, dy = by - ay;
-        double len = Math.Sqrt(dx * dx + dy * dy);
-        if (len < 1e-3) return new EllipseGeometry(new Rect(ax - half, ay - half, 2 * half, 2 * half));
-
-        double ux = dx / len, uy = dy / len;       // along the corridor
-        double ext = half;                          // push the ends into each room so the union has no seam
-        double x0 = ax - ux * ext, y0 = ay - uy * ext, x1 = bx + ux * ext, y1 = by + uy * ext;
-        double nx = -uy * half, ny = ux * half;     // half-width normal
-
-        var geo = new StreamGeometry();
-        using StreamGeometryContext ctx = geo.Open();
-        ctx.BeginFigure(new Point(x0 + nx, y0 + ny), isFilled: true);
-        ctx.LineTo(new Point(x1 + nx, y1 + ny));
-        ctx.ArcTo(new Point(x1 - nx, y1 - ny), new Size(half, half), 0, false, SweepDirection.Clockwise);
-        ctx.LineTo(new Point(x0 - nx, y0 - ny));
-        ctx.ArcTo(new Point(x0 + nx, y0 + ny), new Size(half, half), 0, false, SweepDirection.Clockwise);
-        ctx.EndFigure(true);
-        return geo;
     }
 
     // Turn the hull's rectilinear rings into a filled path with rounded corners: each corner is cut back by

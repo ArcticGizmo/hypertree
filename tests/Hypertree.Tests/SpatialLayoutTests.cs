@@ -98,7 +98,6 @@ public class SpatialLayoutTests
 
         GroupHull hull = Assert.Single(layout.Hulls(10, 10)); // one hull per group
         Assert.Equal(2, hull.Loops.Count);                    // the merged pair, plus the stray
-        Assert.Empty(hull.Bridges);                           // the stray isn't diagonally adjacent — no corridor
     }
 
     [Fact]

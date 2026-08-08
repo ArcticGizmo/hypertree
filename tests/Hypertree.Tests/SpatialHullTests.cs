@@ -7,8 +7,8 @@ namespace Hypertree.Tests;
 
 /// <summary>
 /// Covers the "tetris" group outline: cells sharing an edge merge into one ring with the shared edge gone,
-/// cells touching only at a corner merge too (via a concave neck), and the inset holds the ring off the cell
-/// edges. Pure geometry — no Avalonia, no painter.
+/// cells touching only at a corner stay separate blocks, and the inset holds the ring off the cell edges.
+/// Pure geometry — no Avalonia, no painter.
 /// </summary>
 public class SpatialHullTests
 {
@@ -18,9 +18,6 @@ public class SpatialHullTests
 
     private static IReadOnlyList<HullShape> Shapes(params (int x, int y)[] c)
         => SpatialHull.Shapes(Cells(c), Stride, Stride, Inset, Inset);
-
-    private static IReadOnlyList<HullBridge> Bridges(params (int x, int y)[] c)
-        => SpatialHull.Corridors(Cells(c), Stride, Stride, Inset, Inset);
 
     [Fact]
     public void A_single_cell_is_one_inset_rectangle()
@@ -59,29 +56,10 @@ public class SpatialHullTests
     }
 
     [Fact]
-    public void Corner_touching_cells_are_two_blocks_joined_by_one_corridor()
+    public void Corner_touching_cells_stay_two_blocks()
     {
-        // A diagonal pair shares no edge, so each cell is its own block; a single corridor joins them (the
-        // painter unions the corridor capsule into the group's hull so they read as one piece).
+        // A diagonal pair shares no edge, so each cell is its own block — diagonals don't connect.
         Assert.Equal(2, Shapes((0, 0), (1, 1)).Count);
-        Assert.Single(Bridges((0, 0), (1, 1)));
-    }
-
-    [Fact]
-    public void A_diagonal_staircase_has_a_corridor_per_step()
-    {
-        Assert.Equal(3, Shapes((0, 0), (1, 1), (2, 2)).Count);
-        Assert.Equal(2, Bridges((0, 0), (1, 1), (2, 2)).Count);
-    }
-
-    [Fact]
-    public void A_concave_notch_is_not_bridged()
-    {
-        // In an L the two arm-tips are diagonal, but they already join through the corner cell — one block, and
-        // no corridor fills the notch.
-        HullShape shape = Assert.Single(Shapes((0, 0), (1, 0), (0, 1)));
-        Assert.Equal(6, Assert.Single(shape.Loops).Count);
-        Assert.Empty(Bridges((0, 0), (1, 0), (0, 1)));
     }
 
     [Fact]
