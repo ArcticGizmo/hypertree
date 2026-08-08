@@ -88,7 +88,7 @@ public class SpatialLayoutTests
     }
 
     [Fact]
-    public void A_scattered_group_yields_one_hull_per_fragment_with_a_single_primary()
+    public void A_scattered_group_is_one_hull_with_a_ring_per_block()
     {
         Guid g = new("00000001-aaaa-0000-0000-000000000000");
         var scene = new SpatialScene(
@@ -96,20 +96,20 @@ public class SpatialLayoutTests
             new[] { R(0, 0, 0, g), R(1, 1, 0, g), R(2, 9, 9, g) }); // a pair + a lone stray
         var layout = new SpatialLayout(scene, M);
 
-        var hulls = layout.Hulls(10, 10);
-        Assert.Equal(2, hulls.Count);
-        Assert.Single(hulls, h => h.Primary);                       // exactly one badge anchor
-        Assert.True(hulls.First(h => h.Primary).Rect.Top <= hulls.Last().Rect.Top); // the top-most fragment
+        GroupHull hull = Assert.Single(layout.Hulls(10, 10)); // one hull per group
+        Assert.Equal(2, hull.Loops.Count);                    // the merged pair, plus the stray
+        Assert.Empty(hull.Bridges);                           // the stray isn't diagonally adjacent — no corridor
     }
 
     [Fact]
-    public void A_contiguous_group_yields_a_single_hull()
+    public void A_contiguous_group_is_one_hull_with_a_single_ring()
     {
         Guid g = new("00000002-aaaa-0000-0000-000000000000");
         var scene = new SpatialScene(
             new[] { new SpatialGroup(g, "rel", "#5BC8F4", false, new[] { D(0), D(1), D(2), D(3) }) },
             new[] { R(0, 5, 0, g), R(1, 6, 0, g), R(2, 5, 1, g), R(3, 6, 1, g) }); // a 2×2 block
         var layout = new SpatialLayout(scene, M);
-        Assert.Single(layout.Hulls(10, 10));
+        GroupHull hull = Assert.Single(layout.Hulls(10, 10));
+        Assert.Single(hull.Loops);
     }
 }

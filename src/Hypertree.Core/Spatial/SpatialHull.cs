@@ -2,30 +2,29 @@ using Hypertree.Layout;
 
 namespace Hypertree.Spatial;
 
-/// <summary>One drawable group hull: the rectilinear outline of a single touching clump of a group's cells.
-/// <see cref="Loops"/> is the outer ring first, then any holes (a group that encircles an empty cell); each
+/// <summary>One drawable clump: the rectilinear outline of a single edge-connected block of a group's cells.
+/// <see cref="Loops"/> is the outer ring first, then any holes (a block that encircles an empty cell); each
 /// ring is a closed list of world-space points. <see cref="Bounds"/> is the ring's world bounding box, for
 /// the name badge and framing.</summary>
 public sealed record HullShape(IReadOnlyList<IReadOnlyList<LayoutPoint>> Loops, LayoutRect Bounds);
 
+/// <summary>A corridor joining two rooms that touch only at a corner (a diagonal): the two rooms' near
+/// corners, in world space. The painter draws a constant-width capsule between them and unions it into the
+/// group's hull so the two blocks read as one connected piece.</summary>
+public sealed record HullBridge(LayoutPoint A, LayoutPoint B);
+
 /// <summary>
 /// Turns a set of occupied grid cells into <b>polyomino outlines</b> — the "tetris piece" hulls the spatial
-/// map draws around a group. Cells that share an edge merge into one ring (the shared edge dissolves), and
-/// cells that touch only at a corner (a diagonal) are joined by a short solid <b>corridor</b> so the group
-/// reads as one connected piece. Each ring hugs the cells and is pulled inward by an inset so it clears the
-/// room tiles inside and neighbouring groups outside.
+/// map draws around a group. Cells that share an edge merge into one ring (the shared edge dissolves), via
+/// <see cref="Shapes"/>. Cells that touch only at a corner stay separate blocks but are reported as a
+/// <see cref="HullBridge"/> by <see cref="Corridors"/>, so the painter can join them with a slim corridor.
 ///
-/// Cells are rasterised onto a finer sub-grid (<see cref="Sub"/> sub-cells per cell per axis): a cell fills
-/// a solid block, so edge-adjacent blocks abut and merge; a diagonal-only touch — the two cells kitty-corner
-/// with both orthogonal neighbours empty — gets a small solid block dropped over the shared corner, which is
-/// the corridor. The outline of the sub-grid is then a clean rectilinear polygon with no pinch points. Pure
-/// geometry, no Avalonia — the painter turns the rings into a rounded path at the drawing edge.
+/// A cell <c>(gx, gy)</c> owns the world box centred on its room, <c>strideX × strideY</c>, so edge-adjacent
+/// cells' boxes abut and their shared edge cancels. Each ring is pulled inward by an inset so it clears the
+/// room tiles inside and neighbouring groups outside. Pure geometry, no Avalonia.
 /// </summary>
 public static class SpatialHull
 {
-    private const int Sub = 16;       // sub-cells per cell per axis — the resolution the diagonal corridor is cut at
-    private const int BridgeHalf = 3; // corridor half-width in sub-cells (a 2·BridgeHalf block over the shared corner)
-
     public static IReadOnlyList<HullShape> Shapes(
         IReadOnlyCollection<GridPos> cells, double strideX, double strideY, double insetX, double insetY)
     {
@@ -33,16 +32,12 @@ public static class SpatialHull
         foreach (GridPos c in cells) set.Add((c.X, c.Y));
         if (set.Count == 0) return Array.Empty<HullShape>();
 
-        double subX = strideX / Sub, subY = strideY / Sub, offX = strideX / 2, offY = strideY / 2;
-
         var shapes = new List<HullShape>();
         foreach (HashSet<(int X, int Y)> comp in Components(set))
         {
-            HashSet<(int X, int Y)> subCells = Rasterise(comp);
-
             var loops = new List<IReadOnlyList<LayoutPoint>>();
             double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
-            foreach (List<LayoutPoint> ring in Rings(subCells, subX, subY, offX, offY, insetX, insetY))
+            foreach (List<LayoutPoint> ring in Rings(comp, strideX, strideY, insetX, insetY))
             {
                 loops.Add(ring);
                 foreach (LayoutPoint p in ring)
@@ -57,8 +52,33 @@ public static class SpatialHull
         return shapes;
     }
 
-    // Split the cells into touching (8-neighbour, diagonals included) components — one drawn shape each, so a
-    // diagonally-linked clump reads as one connected piece.
+    /// <summary>The corridors to draw for a group: one per genuine diagonal-only touch — two cells kitty-corner
+    /// with both cells between them empty (so they aren't already edge-joined, as an L's arm-tips are). Each is
+    /// the two rooms' near corners in world space, inset to sit just inside the tiles.</summary>
+    public static IReadOnlyList<HullBridge> Corridors(
+        IReadOnlyCollection<GridPos> cells, double strideX, double strideY, double insetX, double insetY)
+    {
+        var set = new HashSet<(int X, int Y)>();
+        foreach (GridPos c in cells) set.Add((c.X, c.Y));
+
+        var bridges = new List<HullBridge>();
+        foreach ((int x, int y) in set)
+            foreach (int dy in new[] { -1, 1 }) // the two right-hand diagonals — each pair seen once
+            {
+                if (!set.Contains((x + 1, y + dy))) continue;                 // not a diagonal pair
+                if (set.Contains((x + 1, y)) || set.Contains((x, y + dy))) continue; // already edge-joined
+
+                // Each room's corner nearest the other, pulled in by the inset so it sits just inside the tile.
+                double ax = (x + 0.5) * strideX - insetX;
+                double ay = y * strideY + dy * (0.5 * strideY - insetY);
+                double bx = (x + 0.5) * strideX + insetX;
+                double by = (y + dy) * strideY - dy * (0.5 * strideY - insetY);
+                bridges.Add(new HullBridge(new LayoutPoint(ax, ay), new LayoutPoint(bx, by)));
+            }
+        return bridges;
+    }
+
+    // Split the cells into edge-connected (4-neighbour) blocks — one merged outline each.
     private static IEnumerable<HashSet<(int X, int Y)>> Components(HashSet<(int X, int Y)> cells)
     {
         var seen = new HashSet<(int, int)>();
@@ -71,111 +91,50 @@ public static class SpatialHull
             while (stack.Count > 0)
             {
                 (int x, int y) = stack.Pop();
-                for (int dx = -1; dx <= 1; dx++)
-                    for (int dy = -1; dy <= 1; dy++)
-                    {
-                        if (dx == 0 && dy == 0) continue;
-                        (int nx, int ny) = (x + dx, y + dy);
-                        if (cells.Contains((nx, ny)) && seen.Add((nx, ny))) { comp.Add((nx, ny)); stack.Push((nx, ny)); }
-                    }
+                foreach ((int nx, int ny) in new[] { (x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1) })
+                    if (cells.Contains((nx, ny)) && seen.Add((nx, ny))) { comp.Add((nx, ny)); stack.Push((nx, ny)); }
             }
             yield return comp;
         }
     }
 
-    // Paint the component onto the sub-grid: a solid Sub×Sub block per cell, plus a small solid block over the
-    // shared corner of each diagonal-only touch — the corridor that joins two kitty-corner rooms. The corridor
-    // is only for a genuine diagonal touch: if either cell between them is filled, they already join by an
-    // edge and a bridge would wrongly fill the concave notch (e.g. an L).
-    private static HashSet<(int X, int Y)> Rasterise(HashSet<(int X, int Y)> comp)
-    {
-        var sub = new HashSet<(int X, int Y)>();
-        foreach ((int x, int y) in comp)
-            for (int i = 0; i < Sub; i++)
-                for (int j = 0; j < Sub; j++)
-                    sub.Add((x * Sub + i, y * Sub + j));
-
-        foreach ((int x, int y) in comp)
-            foreach (int dy in new[] { -1, 1 })
-            {
-                if (!comp.Contains((x + 1, y + dy))) continue;                 // not a diagonal pair
-                if (comp.Contains((x + 1, y)) || comp.Contains((x, y + dy))) continue; // already edge-joined
-
-                // Drop a solid block of sub-cells straddling the rooms' shared sub-corner: the two rooms sit at
-                // opposite corners of it, so filling it joins them with a corridor of width ~2·BridgeHalf cells.
-                int cx = (x + 1) * Sub, cy = (dy > 0 ? y + 1 : y) * Sub;
-                for (int i = -BridgeHalf; i < BridgeHalf; i++)
-                    for (int j = -BridgeHalf; j < BridgeHalf; j++)
-                        sub.Add((cx + i, cy + j));
-            }
-        return sub;
-    }
-
-    // Trace the boundary of the sub-grid region into closed rings of world-space points (inset applied),
-    // collinear runs merged so each ring is the minimal set of corners. A sub-cell (x,y) owns the corner box
-    // (x,y)..(x+1,y+1); a side is a boundary edge when the neighbour across it is empty. Edges run clockwise
-    // around each sub-cell (screen y-down), so the outer ring comes out clockwise and holes anticlockwise.
+    // Trace the boundary of one block into closed rings of world-space points (inset applied), collinear runs
+    // merged so each ring is the minimal set of corners. A cell (x,y) owns the corner box (x,y)..(x+1,y+1); a
+    // side is a boundary edge when the neighbour across it is empty. Edges run clockwise around each cell
+    // (screen y-down), so the outer ring comes out clockwise and holes anticlockwise.
     private static IEnumerable<List<LayoutPoint>> Rings(
-        HashSet<(int X, int Y)> region, double subX, double subY, double offX, double offY, double insetX, double insetY)
+        HashSet<(int X, int Y)> comp, double strideX, double strideY, double insetX, double insetY)
     {
-        var outgoing = new Dictionary<(int X, int Y), List<(int X, int Y)>>();
-        void Add((int, int) a, (int, int) b)
+        var outgoing = new Dictionary<(int X, int Y), (int X, int Y)>();
+        foreach ((int x, int y) in comp)
         {
-            if (!outgoing.TryGetValue(a, out List<(int, int)>? ends)) outgoing[a] = ends = new List<(int, int)>();
-            ends.Add(b);
-        }
-        foreach ((int x, int y) in region)
-        {
-            if (!region.Contains((x, y - 1))) Add((x, y), (x + 1, y));         // top    →
-            if (!region.Contains((x + 1, y))) Add((x + 1, y), (x + 1, y + 1)); // right  ↓
-            if (!region.Contains((x, y + 1))) Add((x + 1, y + 1), (x, y + 1)); // bottom ←
-            if (!region.Contains((x - 1, y))) Add((x, y + 1), (x, y));         // left   ↑
+            if (!comp.Contains((x, y - 1))) outgoing[(x, y)] = (x + 1, y);         // top    →
+            if (!comp.Contains((x + 1, y))) outgoing[(x + 1, y)] = (x + 1, y + 1); // right  ↓
+            if (!comp.Contains((x, y + 1))) outgoing[(x + 1, y + 1)] = (x, y + 1); // bottom ←
+            if (!comp.Contains((x - 1, y))) outgoing[(x, y + 1)] = (x, y);         // left   ↑
         }
 
         while (outgoing.Count > 0)
         {
-            // Start on a single-exit corner so the first step is unambiguous; take the sharpest-left turn at
-            // any corner that still offers a choice, which keeps the trace on the outside of the region.
-            (int X, int Y) startCorner = outgoing.FirstOrDefault(kv => kv.Value.Count == 1).Key;
-            if (!outgoing.ContainsKey(startCorner)) startCorner = outgoing.Keys.First();
-
+            (int X, int Y) start = outgoing.Keys.First();
             var corners = new List<(int X, int Y)>();
-            (int X, int Y) cur = startCorner;
-            (int X, int Y)? prev = null;
-            while (true)
+            (int X, int Y) cur = start;
+            do
             {
                 corners.Add(cur);
-                List<(int X, int Y)> ends = outgoing[cur];
-
-                int pick = ends.Count - 1;
-                if (ends.Count > 1 && prev is { } p)
-                {
-                    (int dx, int dy) = (cur.X - p.X, cur.Y - p.Y);
-                    double best = double.MaxValue;
-                    for (int k = 0; k < ends.Count; k++)
-                    {
-                        (int ex, int ey) = (ends[k].X - cur.X, ends[k].Y - cur.Y);
-                        double cross = dx * ey - dy * ex; // y-down: most-negative = sharpest left
-                        if (cross < best) { best = cross; pick = k; }
-                    }
-                }
-
-                (int X, int Y) next = ends[pick];
-                ends.RemoveAt(pick);
-                if (ends.Count == 0) outgoing.Remove(cur);
-                prev = cur;
+                (int X, int Y) next = outgoing[cur];
+                outgoing.Remove(cur);
                 cur = next;
-                if (cur == startCorner) break;
-            }
+            } while (cur != start && outgoing.ContainsKey(cur));
 
             List<(int X, int Y)> ring = DropCollinear(corners);
-            if (ring.Count >= 4) yield return Inset(ring, subX, subY, offX, offY, insetX, insetY);
+            if (ring.Count >= 4) yield return Inset(ring, strideX, strideY, insetX, insetY);
         }
     }
 
-    // Sub-corner (cx, cy) → world. offX/offY put a cell's own sub-block symmetric about the room centre.
-    private static LayoutPoint World(int cx, int cy, double subX, double subY, double offX, double offY)
-        => new(cx * subX - offX, cy * subY - offY);
+    // Corner (cx, cy) → world: the cell centre gx*stride sits at corner gx+0.5, so world = (corner-0.5)*stride.
+    private static LayoutPoint World(int cx, int cy, double strideX, double strideY)
+        => new((cx - 0.5) * strideX, (cy - 0.5) * strideY);
 
     // Remove a corner whose neighbours are collinear with it — that's a dissolved shared edge, the whole point.
     private static List<(int X, int Y)> DropCollinear(List<(int X, int Y)> pts)
@@ -196,11 +155,11 @@ public static class SpatialHull
     // shifted horizontal and vertical edges. Handles concave corners; holes shift the other way via their
     // reversed winding, which is what we want.
     private static List<LayoutPoint> Inset(
-        List<(int X, int Y)> ring, double subX, double subY, double offX, double offY, double insetX, double insetY)
+        List<(int X, int Y)> ring, double strideX, double strideY, double insetX, double insetY)
     {
         int n = ring.Count;
         var world = new List<LayoutPoint>(n);
-        foreach ((int X, int Y) c in ring) world.Add(World(c.X, c.Y, subX, subY, offX, offY));
+        foreach ((int X, int Y) c in ring) world.Add(World(c.X, c.Y, strideX, strideY));
 
         var shiftX = new double[n];
         var shiftY = new double[n];
@@ -208,16 +167,8 @@ public static class SpatialHull
         for (int i = 0; i < n; i++)
         {
             LayoutPoint a = world[i], b = world[(i + 1) % n];
-            if (Math.Abs(a.Y - b.Y) < 1e-6) // horizontal: N.y = sign(dx)
-            {
-                horizontal[i] = true;
-                shiftY[i] = insetY * Math.Sign(b.X - a.X);
-            }
-            else // vertical: N.x = -sign(dy)
-            {
-                horizontal[i] = false;
-                shiftX[i] = -insetX * Math.Sign(b.Y - a.Y);
-            }
+            if (Math.Abs(a.Y - b.Y) < 1e-6) { horizontal[i] = true; shiftY[i] = insetY * Math.Sign(b.X - a.X); }
+            else { horizontal[i] = false; shiftX[i] = -insetX * Math.Sign(b.Y - a.Y); }
         }
 
         var result = new List<LayoutPoint>(n);

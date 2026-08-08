@@ -6,12 +6,13 @@ namespace Hypertree.Spatial;
 /// <summary>A room placed in world space — its scene data plus the rect it occupies.</summary>
 public sealed record PlacedRoom(SpatialRoom Room, LayoutRect Rect);
 
-/// <summary>A group's hull: the rectilinear "tetris" outline of one edge-connected clump of its rooms
-/// (<see cref="Loops"/> — outer ring first, then holes), plus that outline's bounding <see cref="Rect"/> for
-/// the badge and framing. A group with rooms in several clumps yields several hulls; <see cref="Primary"/>
-/// marks the one the name badge hangs off (the top-most, then left-most) so the label has a stable home.</summary>
+/// <summary>A group's hull: the rectilinear "tetris" outlines of its rooms (<see cref="Loops"/> — one or more
+/// rings, edge-adjacent rooms already merged, holes included) plus the <see cref="Bridges"/> that join
+/// corner-touching blocks with a corridor. <see cref="Rect"/> is the top-most / left-most block's bounds, for
+/// the name badge. The whole group draws as one unioned shape.</summary>
 public sealed record GroupHull(
-    SpatialGroup Group, IReadOnlyList<IReadOnlyList<LayoutPoint>> Loops, LayoutRect Rect, bool Primary);
+    SpatialGroup Group, IReadOnlyList<IReadOnlyList<LayoutPoint>> Loops,
+    IReadOnlyList<HullBridge> Bridges, LayoutRect Rect);
 
 /// <summary>
 /// Where every room sits in <b>world space</b> for the spatial map — the spatial twin of
@@ -78,11 +79,9 @@ public sealed class SpatialLayout : ICameraLayout
         return (lo, hi);
     }
 
-    /// <summary>The group hulls to draw: the "tetris" outline of each edge-connected clump of a group's
-    /// rooms, its edges hugging the cells and merged where cells adjoin, held <paramref name="padX"/> /
-    /// <paramref name="padY"/> clear of the room tiles inside. One hull per clump, so a split group shows as
-    /// several; the top-most / left-most clump of each group is flagged <see cref="GroupHull.Primary"/> for
-    /// the name badge.</summary>
+    /// <summary>One hull per group: the "tetris" outlines of its rooms (edge-adjacent rooms merged, held
+    /// <paramref name="padX"/> / <paramref name="padY"/> clear of the tiles) plus the corridors that join
+    /// corner-touching blocks. The name badge hangs off the top-most / left-most block.</summary>
     public IReadOnlyList<GroupHull> Hulls(double padX, double padY)
     {
         // Full stride cells abut, so edge-adjacent cells merge; inset back to leave `pad` around each tile.
@@ -98,16 +97,16 @@ public sealed class SpatialLayout : ICameraLayout
             IReadOnlyList<HullShape> shapes = SpatialHull.Shapes(cells, _m.CellStride, _m.RowPitch, insetX, insetY);
             if (shapes.Count == 0) continue;
 
-            // The badge hangs off the top-most (then left-most) clump, so it has a stable home even as
-            // clumps come and go.
-            int primary = 0;
-            for (int i = 1; i < shapes.Count; i++)
-                if (shapes[i].Bounds.Top < shapes[primary].Bounds.Top ||
-                    (shapes[i].Bounds.Top == shapes[primary].Bounds.Top && shapes[i].Bounds.Left < shapes[primary].Bounds.Left))
-                    primary = i;
+            // The badge hangs off the top-most (then left-most) block, so it has a stable home.
+            HullShape anchor = shapes[0];
+            foreach (HullShape s in shapes)
+                if (s.Bounds.Top < anchor.Bounds.Top ||
+                    (s.Bounds.Top == anchor.Bounds.Top && s.Bounds.Left < anchor.Bounds.Left))
+                    anchor = s;
 
-            for (int i = 0; i < shapes.Count; i++)
-                result.Add(new GroupHull(g, shapes[i].Loops, shapes[i].Bounds, i == primary));
+            var loops = shapes.SelectMany(s => s.Loops).ToList();
+            IReadOnlyList<HullBridge> bridges = SpatialHull.Corridors(cells, _m.CellStride, _m.RowPitch, insetX, insetY);
+            result.Add(new GroupHull(g, loops, bridges, anchor.Bounds));
         }
         return result;
     }

@@ -19,6 +19,9 @@ public class SpatialHullTests
     private static IReadOnlyList<HullShape> Shapes(params (int x, int y)[] c)
         => SpatialHull.Shapes(Cells(c), Stride, Stride, Inset, Inset);
 
+    private static IReadOnlyList<HullBridge> Bridges(params (int x, int y)[] c)
+        => SpatialHull.Corridors(Cells(c), Stride, Stride, Inset, Inset);
+
     [Fact]
     public void A_single_cell_is_one_inset_rectangle()
     {
@@ -56,30 +59,29 @@ public class SpatialHullTests
     }
 
     [Fact]
-    public void Corner_touching_cells_join_through_a_corridor()
+    public void Corner_touching_cells_are_two_blocks_joined_by_one_corridor()
     {
-        // A diagonal pair touches only at a corner; a solid corridor over that corner joins them into one
-        // connected piece — a single shape with a single outer ring (no gap, no separate hulls).
-        HullShape shape = Assert.Single(Shapes((0, 0), (1, 1)));
-        IReadOnlyList<LayoutPoint> ring = Assert.Single(shape.Loops);
-        Assert.True(ring.Count > 8, "the corridor adds corners beyond a plain rectangle");
+        // A diagonal pair shares no edge, so each cell is its own block; a single corridor joins them (the
+        // painter unions the corridor capsule into the group's hull so they read as one piece).
+        Assert.Equal(2, Shapes((0, 0), (1, 1)).Count);
+        Assert.Single(Bridges((0, 0), (1, 1)));
     }
 
     [Fact]
-    public void A_diagonal_staircase_is_one_connected_shape()
+    public void A_diagonal_staircase_has_a_corridor_per_step()
     {
-        HullShape shape = Assert.Single(Shapes((0, 0), (1, 1), (2, 2)));
-        Assert.Single(shape.Loops); // one continuous outline through both corridors
+        Assert.Equal(3, Shapes((0, 0), (1, 1), (2, 2)).Count);
+        Assert.Equal(2, Bridges((0, 0), (1, 1), (2, 2)).Count);
     }
 
     [Fact]
     public void A_concave_notch_is_not_bridged()
     {
-        // In an L the two arm-tips are diagonal, but they already join through the corner cell — so no corridor
-        // fills the notch; the L stays a six-corner outline.
+        // In an L the two arm-tips are diagonal, but they already join through the corner cell — one block, and
+        // no corridor fills the notch.
         HullShape shape = Assert.Single(Shapes((0, 0), (1, 0), (0, 1)));
-        IReadOnlyList<LayoutPoint> ring = Assert.Single(shape.Loops);
-        Assert.Equal(6, ring.Count);
+        Assert.Equal(6, Assert.Single(shape.Loops).Count);
+        Assert.Empty(Bridges((0, 0), (1, 0), (0, 1)));
     }
 
     [Fact]
