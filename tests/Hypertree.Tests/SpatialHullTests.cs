@@ -56,19 +56,30 @@ public class SpatialHullTests
     }
 
     [Fact]
-    public void Corner_touching_cells_merge_through_a_pinch()
+    public void Corner_touching_cells_join_through_a_corridor()
     {
-        // A diagonal pair touches only at a corner; it still reads as one connected piece — one shape, one
-        // ring that visits the shared corner twice (the concave neck), so eight corners in all.
+        // A diagonal pair touches only at a corner; a solid corridor over that corner joins them into one
+        // connected piece — a single shape with a single outer ring (no gap, no separate hulls).
         HullShape shape = Assert.Single(Shapes((0, 0), (1, 1)));
         IReadOnlyList<LayoutPoint> ring = Assert.Single(shape.Loops);
-        Assert.Equal(8, ring.Count);
+        Assert.True(ring.Count > 8, "the corridor adds corners beyond a plain rectangle");
     }
 
     [Fact]
-    public void A_diagonal_staircase_is_one_shape()
+    public void A_diagonal_staircase_is_one_connected_shape()
     {
-        Assert.Single(Shapes((0, 0), (1, 1), (2, 2)));
+        HullShape shape = Assert.Single(Shapes((0, 0), (1, 1), (2, 2)));
+        Assert.Single(shape.Loops); // one continuous outline through both corridors
+    }
+
+    [Fact]
+    public void A_concave_notch_is_not_bridged()
+    {
+        // In an L the two arm-tips are diagonal, but they already join through the corner cell — so no corridor
+        // fills the notch; the L stays a six-corner outline.
+        HullShape shape = Assert.Single(Shapes((0, 0), (1, 0), (0, 1)));
+        IReadOnlyList<LayoutPoint> ring = Assert.Single(shape.Loops);
+        Assert.Equal(6, ring.Count);
     }
 
     [Fact]
