@@ -934,10 +934,13 @@ public sealed partial class App : Application
 
     // Prime the map with a fresh board: redraws now if it's the current surface, else stashes it so the
     // map shows the update the next time the stage unwinds back to it (after an action completes on a card).
+    // SetSource itself decides render-now vs stash, so this must NOT be gated on IsOpen — an action run from
+    // a card on top of the map (e.g. the group picker) leaves the map not-current, and gating here would drop
+    // the update so the map re-presents stale.
     private void RefreshOverlay()
     {
         if (_model is null) return;
-        if (_spatialOverlay is { IsOpen: true }) _spatialOverlay.SetSource(_model.BuildSpatialSource(), _spatial);
+        _spatialOverlay?.SetSource(_model.BuildSpatialSource(), _spatial);
     }
 
     // ── Set a room's group (g on the spatial map) ───────────────────────────────────
@@ -1860,10 +1863,10 @@ public sealed partial class App : Application
     private void RefreshOrFlash()
     {
         if (_model is null) return;
+        // Map in the chain (it's the durable base the card sits on): stash the fresh scene so it shows when
+        // the stage unwinds back — not gated on IsOpen, since the card on top makes the map not-current.
         if (_stage is not null && _stage.HasDurableBase)
-        {
-            if (_spatialOverlay is { IsOpen: true }) _spatialOverlay.SetSource(_model.BuildSpatialSource(), _spatial);
-        }
+            _spatialOverlay?.SetSource(_model.BuildSpatialSource(), _spatial);
         // A result flash, not a gesture — just times out. It appears over a bare desktop, so it fades up too.
         else FlashBoard(null, HotkeyModifiers.None, move: null, animate: false, fade: WindowFx.SystemAnimationsEnabled());
     }
