@@ -71,6 +71,17 @@ public sealed class AppSettings
     /// pressing <c>v</c> on the map.</summary>
     public MapStyle MapStyle { get; set; } = MapStyle.Ascii;
 
+    /// <summary>The spatial map's zoom factor, set by pressing <c>+</c> / <c>-</c> (and <c>0</c> to reset) on
+    /// the map. 1.0 is the default 100%; the map clamps it to a legible range when applied. Persisted so the
+    /// map reopens at the zoom you left it. See <c>SpatialOverlay</c>.</summary>
+    public double MapZoom { get; set; } = 1.0;
+
+    /// <summary>Whether the spatial map's key legend (the help panel in the top-left) is shown. Toggled with
+    /// <c>l</c> on the map and persisted, so power users can hide it for good — it covers a fair slice of the
+    /// screen and isn't needed once the keys are second nature. Defaults on for discoverability. See
+    /// <c>SpatialOverlay</c>.</summary>
+    public bool ShowMapLegend { get; set; } = true;
+
     /// <summary>Reusable branch recipes, offered via the branch card's "Load from template" button so you
     /// don't retype the desktop set each time. Empty by default — you build and delete them in the
     /// "Manage templates…" command.</summary>

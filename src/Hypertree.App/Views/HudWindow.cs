@@ -5,10 +5,12 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using Hypertree.App.Views.Scene;
 using Hypertree.Layout;
 using Hypertree.Platform;
 using Hypertree.Scopes;
 using Hypertree.Settings;
+using Hypertree.Spatial;
 
 namespace Hypertree.App.Views;
 
@@ -18,7 +20,7 @@ namespace Hypertree.App.Views;
 /// draws (F1: one presentation, two modes). It stays up while you hold the nav modifiers (Ctrl+Alt),
 /// so you get time to find your bearings mid-navigation, and only fades out a short beat after you
 /// release them. This is the transient mode: click-through and non-activating, so it never blocks
-/// input or steals focus. The interactive mode (<see cref="MapOverlay"/>) draws the same board but
+/// input or steals focus. The interactive mode (<see cref="SpatialOverlay"/>) draws the same board but
 /// stays open, takes clicks, and pins across desktops.
 /// </summary>
 internal sealed class HudWindow : Window
@@ -74,6 +76,10 @@ internal sealed class HudWindow : Window
     // The shared map camera (owned by App, also driving the interactive map). Flashing navigates it, so
     // opening the map lands on the same framing, and the flash pans by the same dead-zone rules.
     private readonly MapCamera _camera;
+
+    /// <summary>The spatial map zoom, mirrored from the interactive map (App keeps it in sync) so the
+    /// transient flash draws the board at the same scale the user set with <c>+</c>/<c>−</c>.</summary>
+    public double MapZoom { get; set; } = 1.0;
 
     public HudWindow(MapCamera camera)
     {
@@ -202,16 +208,37 @@ internal sealed class HudWindow : Window
     public void Flash(NavMap map, HotkeyModifiers holdMods, NavAction? move = null, bool animate = false,
                       bool fromLeadingEdge = true, MapStyle style = MapStyle.Board, bool fade = false)
     {
+        PrepareSurface();
+        FlashBoard(MapSurface.Render(map, Width, Height, style, MapZoom, camera: _camera),
+                   holdMods, move, animate, fromLeadingEdge, fade);
+    }
+
+    /// <summary>Flash the <b>spatial</b> board — the same transient HUD, drawn from the spatial scene so a
+    /// navigation in spatial mode shows the layout you configured rather than the row list.</summary>
+    public void Flash(SpatialScene scene, MapStyle style, HotkeyModifiers holdMods, NavAction? move = null,
+                      bool animate = false, bool fromLeadingEdge = true, bool fade = false)
+    {
+        PrepareSurface();
+        FlashBoard(SpatialPainter.Render(scene, Width, Height, MapZoom, _camera, style: style),
+                   holdMods, move, animate, fromLeadingEdge, fade);
+    }
+
+    // Realize + size the window so Width/Height are the primary screen before a board is built against them.
+    private void PrepareSurface()
+    {
+        if (!IsVisible) Show();   // realizes the handle so Screens is available (Cover may have done this)
+        CoverPrimary();           // sets Width/Height to the primary screen (DIPs)
+    }
+
+    // Put a freshly-built board on screen with the shared fade/wipe behaviour — the body both Flash overloads
+    // share, differing only in how the board control was drawn.
+    private void FlashBoard(Control board, HotkeyModifiers holdMods, NavAction? move, bool animate,
+                            bool fromLeadingEdge, bool fade)
+    {
         _holdMods = holdMods;
         // Whether this press puts a board up where there wasn't one, as opposed to updating one that's
         // already showing. Read before _hasBoard is set below.
         bool cold = !_hasBoard;
-        if (!IsVisible) Show();   // realizes the handle so Screens is available (Cover may have done this)
-        CoverPrimary();           // sets Width/Height to the primary screen (DIPs)
-
-        // The flash is transient, so the metro train doesn't pulse here (animate:false) — the wipe below is
-        // the only motion. board centres itself within the full screen.
-        Control board = MapSurface.Render(map, Width, Height, style, camera: _camera);
 
         // A directional move gets a soft gradient wipe: a dark band that begins on the edge opposite the
         // arrow and sweeps across toward the way you pressed, uncovering the (already-switched) desktop as

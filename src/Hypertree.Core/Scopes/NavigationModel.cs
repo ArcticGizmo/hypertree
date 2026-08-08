@@ -1,4 +1,5 @@
 using Hypertree.Desktops;
+using Hypertree.Spatial;
 using Hypertree.Status;
 using Hypertree.Store;
 
@@ -133,6 +134,47 @@ public sealed class NavigationModel
         }
 
         return new NavMap(top, _topRow.Count == 0 ? 0 : _topIndex, _onMain, branches, Math.Clamp(_mainSlot, 0, _branches.Count));
+    }
+
+    /// <summary>
+    /// The id-carrying structural snapshot the <b>spatial</b> map is built from — the spatial twin of
+    /// <see cref="BuildMap"/>. Same selection/here/window-count facts, but it keeps the <see cref="Branch.Id"/>
+    /// and <see cref="DesktopId"/> that spatial state is keyed by (colour per group, position per desktop),
+    /// which <see cref="NavMap"/> deliberately drops. Groups are emitted in the same draw order the rows use
+    /// — branches above main, main (as the <see cref="Guid.Empty"/> "ungrouped" bucket), branches below — so
+    /// the default spatial layout mirrors the row stack. Like <see cref="BuildMap"/>, it walks window counts,
+    /// so it's a summon-time build, not a per-keystroke one.
+    /// </summary>
+    public SpatialSource BuildSpatialSource(DesktopId? cameFrom = null)
+    {
+        IReadOnlyDictionary<DesktopId, int> counts = _desktops.WindowCounts();
+        int Windows(DesktopId id) => counts.TryGetValue(id, out int n) ? n : 0;
+        bool CameFrom(DesktopId id) => cameFrom == id;
+
+        SpatialGroupSource MainGroup() => new(Guid.Empty, "main", IsMain: true,
+            _topRow.Select((d, i) => new SpatialDesktop(
+                d.Id, d.Label, _onMain && i == _topIndex, CameFrom(d.Id), Windows(d.Id))).ToList());
+
+        SpatialGroupSource BranchGroup(int gi)
+        {
+            Branch g = _branches[gi];
+            bool current = !_onMain && gi == _currentBranch;
+            var desks = new List<SpatialDesktop>(g.Desktops.Count);
+            for (int j = 0; j < g.Desktops.Count; j++)
+            {
+                DesktopRef d = g.Desktops[j];
+                desks.Add(new SpatialDesktop(d.Id, d.Label, current && j == g.LastUsedIndex,
+                                             CameFrom(d.Id), Windows(d.Id)));
+            }
+            return new SpatialGroupSource(g.Id, g.Name, IsMain: false, desks);
+        }
+
+        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
+        var groups = new List<SpatialGroupSource>(_branches.Count + 1);
+        for (int i = 0; i < slot; i++) groups.Add(BranchGroup(i));
+        groups.Add(MainGroup());
+        for (int i = slot; i < _branches.Count; i++) groups.Add(BranchGroup(i));
+        return new SpatialSource(groups);
     }
 
     /// <summary>
@@ -500,6 +542,53 @@ public sealed class NavigationModel
         return Locate(moved.Id);
     }
 
+    /// <summary>
+    /// Reassign an existing desktop to the group identified by <paramref name="groupId"/> — another branch,
+    /// or main (<see cref="Guid.Empty"/>, the ungrouped bucket) — appending it to that group's end. The
+    /// spatial map's "set group" (g) for a destination that already exists: a thin wrapper over
+    /// <see cref="MoveDesktop"/> that resolves the group id to a slot. Returns the desktop's new position,
+    /// or null when the desktop or group can't be resolved, or it's already in that group (a no-op).
+    /// </summary>
+    public (bool onMain, int branchIndex, int desktopIndex)? MoveDesktopToGroup(DesktopId id, Guid groupId)
+    {
+        if (Locate(id) is not { } at) return null;
+        if (groupId == Guid.Empty)
+        {
+            if (at.onMain) return null;                                   // already ungrouped
+            return MoveDesktop(false, at.branchIndex, at.desktopIndex, true, -1, _topRow.Count);
+        }
+        int to = IndexOfBranch(groupId);
+        if (to < 0) return null;
+        if (!at.onMain && at.branchIndex == to) return null;             // already in that group
+        return MoveDesktop(at.onMain, at.branchIndex, at.desktopIndex, false, to, _branches[to].Count);
+    }
+
+    /// <summary>
+    /// Move an existing desktop out of wherever it lives (main, or another branch) and into a brand-new
+    /// branch named <paramref name="name"/>, which it seeds as the sole desktop. The mirror of
+    /// <see cref="MoveDesktopToGroup"/> for the "＋ create group" case, where the destination branch doesn't
+    /// exist yet — a branch can't be created empty, so the moved desktop is what fills it. Taking a branch's
+    /// last desktop dissolves that branch. Returns the new branch, or null if the desktop isn't tracked.
+    /// </summary>
+    public Branch? MoveDesktopToNewBranch(DesktopId id, string name)
+    {
+        if (Locate(id) is not { } at) return null;
+        DesktopRef moved = at.onMain
+            ? _topRow[at.desktopIndex]
+            : _branches[at.branchIndex].Desktops[at.desktopIndex];
+
+        if (!at.onMain)
+        {
+            Branch from = _branches[at.branchIndex];
+            from.RemoveDesktopAt(at.desktopIndex);
+            if (from.Count == 0) { _branches.RemoveAt(at.branchIndex); AdjustForRemoval(at.branchIndex); }
+        }
+
+        var branch = new Branch(name, new[] { moved });
+        AddBranch(branch); // inserts at the main slot; SyncTopRow then drops the desktop off the main timeline
+        return branch;
+    }
+
     /// <summary>Where a desktop sits in the stack right now — main (branch index -1) or a branch — or null
     /// if we don't track it. Used to follow a desktop after a structural change moved it.</summary>
     public (bool onMain, int branchIndex, int desktopIndex)? Locate(DesktopId id)
@@ -738,7 +827,10 @@ public sealed class NavigationModel
     // ── Snapshots (named layout capture / restore) ───────────────────────────────
 
     /// <summary>Capture the whole current layout — main timeline + branches, each desktop keyed by its OS
-    /// GUID — as a named <see cref="Snapshot"/> the caller can persist and later restore.</summary>
+    /// GUID — as a named <see cref="Snapshot"/> the caller can persist and later restore. The branch
+    /// <see cref="Branch.Id"/> is stamped on each captured branch so the caller can correlate the spatial
+    /// group colour (keyed by that id) it layers on separately; structure restore still mints fresh ids, as
+    /// a snapshot is a template.</summary>
     public Snapshot CaptureSnapshot(string name) => new()
     {
         Name = name,
@@ -746,6 +838,7 @@ public sealed class NavigationModel
         MainDesktops = _topRow.Select(d => new PersistedDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
         Branches = _branches.Select(g => new PersistedBranch
         {
+            Id = g.Id,
             Name = g.Name,
             LastUsedIndex = g.LastUsedIndex,
             Desktops = g.Desktops.Select(d => new PersistedDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),

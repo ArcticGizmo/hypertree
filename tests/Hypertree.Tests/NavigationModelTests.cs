@@ -1,5 +1,6 @@
 using Hypertree.Desktops;
 using Hypertree.Scopes;
+using Hypertree.Spatial;
 using Hypertree.Store;
 using Xunit;
 
@@ -332,6 +333,86 @@ public class NavigationModelTests
     {
         var (m, c) = Pivot();
         Assert.Null(m.AddDesktopToBranch(2, new DesktopRef(c.Create("orphan"), "z"))); // only 0 and 1 exist
+    }
+
+    // ── Setting a room's group (spatial map: g) ──────────────────────────────────
+    // The map carries ids on the spatial source (BuildSpatialSource), not on NavMap, so these read groups
+    // and desktop ids from there.
+
+    private static SpatialGroupSource Grp(NavigationModel m, string name)
+        => m.BuildSpatialSource().Groups.First(g => g.Name == name);
+
+    [Fact]
+    public void MoveDesktopToGroup_moves_a_main_desktop_into_an_existing_branch()
+    {
+        var (m, _) = Pivot();                 // feat-1 (10,11,12) above main; feat-2 (20,21) below; main T0,T1,T2
+        Guid feat2 = Grp(m, "feat-2").Id;
+
+        var at = m.MoveDesktopToGroup(T1, feat2);
+        Assert.NotNull(at);
+        Assert.False(at!.Value.onMain);
+
+        Assert.DoesNotContain(T1, Grp(m, "main").Desktops.Select(d => d.Id));    // left the main timeline
+        Assert.Equal(new[] { D(20), D(21), T1 }, Grp(m, "feat-2").Desktops.Select(d => d.Id)); // appended
+    }
+
+    [Fact]
+    public void MoveDesktopToGroup_to_main_returns_a_branch_desktop_to_the_timeline()
+    {
+        var (m, _) = Pivot();
+        int mainBefore = Grp(m, "main").Desktops.Count;
+
+        var at = m.MoveDesktopToGroup(D(21), Guid.Empty); // feat-2's "y" → main (ungrouped)
+        Assert.NotNull(at);
+        Assert.True(at!.Value.onMain);
+
+        Assert.Equal(mainBefore + 1, Grp(m, "main").Desktops.Count);
+        Assert.Contains(D(21), Grp(m, "main").Desktops.Select(d => d.Id));
+        Assert.Equal(new[] { D(10), D(11), D(12) }, Grp(m, "feat-1").Desktops.Select(d => d.Id)); // feat-1 untouched
+        Assert.Single(Grp(m, "feat-2").Desktops);                                                 // "x" remains
+    }
+
+    [Fact]
+    public void MoveDesktopToGroup_dissolves_a_branch_when_its_last_desktop_leaves()
+    {
+        // The branch desktop must exist in the OS list, since returning it to main asks the OS to reorder it.
+        var m = new NavigationModel(new FakeDesktopController(new[] { T0, T1, T2, D(30) }, 0));
+        m.AddBranch(G("solo", (30, "only"))); // one-desktop branch, below main; claims D(30) off main
+        Assert.True(m.MoveDesktopToGroup(D(30), Guid.Empty)!.Value.onMain);
+        Assert.Equal(0, m.BranchCount);        // the emptied branch is gone
+    }
+
+    [Fact]
+    public void MoveDesktopToGroup_is_a_noop_for_the_group_the_desktop_is_already_in()
+    {
+        var (m, _) = Pivot();
+        Assert.Null(m.MoveDesktopToGroup(T0, Guid.Empty));               // a main desktop → main
+        Assert.Null(m.MoveDesktopToGroup(D(10), Grp(m, "feat-1").Id));   // already in feat-1
+    }
+
+    [Fact]
+    public void MoveDesktopToNewBranch_seeds_a_new_branch_from_a_main_desktop()
+    {
+        var (m, _) = Pivot();
+        int mainBefore = Grp(m, "main").Desktops.Count;
+
+        Branch? b = m.MoveDesktopToNewBranch(T2, "spike");
+        Assert.NotNull(b);
+        Assert.Equal("spike", b!.Name);
+
+        Assert.Equal(mainBefore - 1, Grp(m, "main").Desktops.Count);        // T2 left main
+        Assert.Equal(new[] { T2 }, Grp(m, "spike").Desktops.Select(d => d.Id)); // its sole desktop
+    }
+
+    [Fact]
+    public void MoveDesktopToNewBranch_from_a_branch_dissolves_the_old_one_when_it_empties()
+    {
+        var (m, _) = New();
+        m.AddBranch(G("solo", (30, "only")));
+        Branch? b = m.MoveDesktopToNewBranch(D(30), "moved");
+        Assert.NotNull(b);
+        Assert.Equal(new[] { "moved" }, m.BuildMap().Branches.Select(g => g.Name)); // old dissolved, new present
+        Assert.Equal(new[] { D(30) }, b!.Desktops.Select(d => d.Id));
     }
 
     // ── Click-to-navigate ────────────────────────────────────────────────────────

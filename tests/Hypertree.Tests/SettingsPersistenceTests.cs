@@ -85,6 +85,16 @@ public class SettingsPersistenceTests
     }
 
     [Fact]
+    public void MapZoom_round_trips_and_defaults_to_one()
+    {
+        Assert.Equal(1.0, new AppSettings().MapZoom);
+
+        var store = StoreInTempDir();
+        store.Save(new AppSettings { MapZoom = 1.3225 });
+        Assert.Equal(1.3225, store.Load().MapZoom);
+    }
+
+    [Fact]
     public void Missing_file_yields_defaults()
     {
         // A fresh store with no file loads defaults rather than throwing (MapStyle defaults to ASCII).

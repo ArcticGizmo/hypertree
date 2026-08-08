@@ -42,7 +42,7 @@ public sealed partial class App
             return;
         }
         // Opened over the map (Esc pops back to it) when the map is up; a fresh root otherwise.
-        OpenAppLauncher(overCurrent: _overlay?.IsOpen == true);
+        OpenAppLauncher(overCurrent: _spatialOverlay?.IsOpen == true);
     }
 
     private void OpenAppLauncher(bool overCurrent = false)

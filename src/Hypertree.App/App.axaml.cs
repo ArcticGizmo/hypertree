@@ -14,6 +14,7 @@ using Hypertree.Layout;
 using Hypertree.Platform;
 using Hypertree.Scopes;
 using Hypertree.Settings;
+using Hypertree.Spatial;
 using Hypertree.Store;
 using Hypertree.WindowLayout;
 
@@ -53,7 +54,12 @@ public sealed partial class App : Application
     private Hypertree.Launch.IAppIconProvider? _appIcons;
     private NavigationModel? _model;
     private HudWindow? _hud;
-    private MapOverlay? _overlay;
+    // The spatial map — the app's single map and manage-desktops surface. Its extra facts — group colours,
+    // room positions — live in their own spatial.json, apart from navigation state.
+    // See docs/design/spatial-map-plan.md.
+    private SpatialOverlay? _spatialOverlay;
+    private ISpatialStore? _spatialStore;
+    private SpatialState _spatial = new();
     // One camera shared by the flash and the interactive map, so navigating with the map closed leaves it
     // framed where the map opens, and the two never disagree about where the map sits. Reframed on a theme
     // switch (metrics change). See docs/design/scene-camera.md.
@@ -149,6 +155,11 @@ public sealed partial class App : Application
         // teardown guard still only ever destroys our own desktops.
         foreach (DesktopId id in _model.BranchDesktopIds()) _created.Add(id.Value);
 
+        // The spatial map's own state (group colours + room positions), kept in its own file. Sparse — a
+        // fresh install loads empty and everything falls back to defaults.
+        _spatialStore = new FileSpatialStore();
+        _spatial = _spatialStore.Load();
+
         var settingsStore = new FileSettingsStore();
         // First run = no settings file yet. Hypertree defaults to launching at login; we enable it and
         // write the settings file so this one-time default doesn't re-assert if the user later opts out.
@@ -181,7 +192,7 @@ public sealed partial class App : Application
             _settingsStore.Save(_settings);
         }
 
-        _hud = new HudWindow(_mapCamera);
+        _hud = new HudWindow(_mapCamera) { MapZoom = _settings.MapZoom }; // the flash draws the map at the same zoom
 
         // Persistent desktop-name pill over the taskbar. It re-reads the current desktop itself, but we
         // also poke it on every navigation so it never lags a keystroke.
@@ -214,33 +225,62 @@ public sealed partial class App : Application
         // content floats over the live map, which the stage pulls from here.
         _stage = new OverlayStage(_desktops, _activator)
         {
-            MapProvider = () => _model!.BuildMap(),
+            // The live card backdrop is the current spatial scene; read live, so no sync as it changes.
+            SpatialProvider = () => (_model!.BuildSpatialSource(), _spatial),
             MapStyle = _settings.MapStyle, // board vs. metro, applied to every surface the stage draws
+            MapZoom = _settings.MapZoom,   // the map zoom, applied to the card backdrops and the move flow's board
         };
         // Park the taskbar pill while the overlay is up (the map already shows where you are) — this also
         // removes the topmost-z fight that made the pill flash in/out when a dialog opened.
         _stage.Shown += () => { _taskbarLabel?.SetSuppressed(true); _switcher?.SetSuppressed(true); };
         _stage.Hidden += () => { _taskbarLabel?.SetSuppressed(false); _switcher?.SetSuppressed(false); };
 
-        _overlay = new MapOverlay(_stage, _mapCamera);
-        _overlay.JumpTopRequested += i => JumpFromMap(() => _model!.GoToTop(i));
-        _overlay.JumpBranchRequested += (g, d) => JumpFromMap(() => _model!.GoToBranchDesktop(g, d));
-        _overlay.RenameRequested += RenameSelected;
-        _overlay.RenameBranchRequested += RenameBranchOnMap; // Shift+R — rename the selected branch (no-op on main)
-        _overlay.DeleteDesktopRequested += DeleteSelectedDesktop;
-        _overlay.DeleteBranchRequested += ConfirmRemoveBranch;
-        _overlay.MoveBranchRequested += MoveBranchOnMap;     // Shift+↑↓ / a dragged branch box
-        _overlay.MoveMainRequested += MoveMainOnMap;         // Shift+↑↓ with main selected
-        _overlay.MoveDesktopRequested += MoveDesktopOnMap;   // Ctrl+arrows / a dragged tile
-        _overlay.NewDesktopRequested += PromptNewDesktop;
-        _overlay.NewBranchRequested += () => OpenNewBranchDialog(null); // branch card over the map (with in-card "Load from template" when any exist)
-        _overlay.MoveWindowsRequested += ToggleMoveWindows; // m — start the move-windows flow (replaces the map)
-        _overlay.PullWindowsRequested += TogglePullWindows; // Shift+m — pull windows from other desktops onto this one
-        _overlay.FinderRequested += () => OpenSpotlight(); // f / Ctrl+F — finder pushed over the map; Esc pops back to it
-        _overlay.CommandPaletteRequested += () => ShowCommandPalette(overCurrent: true); // p — palette over the map; Esc pops back to it
-        _overlay.AppLauncherRequested += () => OpenAppLauncher(overCurrent: true); // o — launcher over the map; Esc pops back to it
-        _overlay.ViewStyleToggleRequested += ToggleMapStyle; // v — flip board ↔ metro (persisted, app-wide)
-        _overlay.HistoryProvider = BuildHistoryCrumbs; // the top-right breadcrumb panel reads the trail live
+        // The spatial map — the app's single map and "manage desktops" surface. Every edit is raised here and
+        // serviced by App; DesktopId/Guid are resolved to the position-based model ops via Locate/IndexOfBranch.
+        _spatialOverlay = new SpatialOverlay(_stage, _mapCamera, _settings.MapZoom, _settings.ShowMapLegend);
+        _spatialOverlay.JumpRoomRequested += id => JumpFromMap(() => JumpToId(id));
+        _spatialOverlay.ViewStyleToggleRequested += ToggleMapStyle; // v — cycle board ↔ metro ↔ ascii (app-wide)
+        _spatialOverlay.SpatialStateChanged += () => _spatialStore?.Save(_spatial); // a move or recolour is written to spatial.json
+        _spatialOverlay.ZoomChanged += zoom =>                      // +/− — persist the map zoom and mirror it to
+        {                                                          // every other surface that draws the map (flash, backdrops, move flow)
+            _settings.MapZoom = zoom;
+            _settingsStore?.Save(_settings);
+            if (_stage is not null) _stage.MapZoom = zoom;
+            if (_hud is not null) _hud.MapZoom = zoom;
+        };
+        _spatialOverlay.LegendVisibilityChanged += show => { _settings.ShowMapLegend = show; _settingsStore?.Save(_settings); }; // l — persist the legend
+        _spatialOverlay.SetRoomGroupRequested += OpenGroupPickerForRoom; // g — pick / create the room's group
+        _spatialOverlay.DeleteRoomRequested += id =>       // Del — the confirm/teardown flow, resolved to a slot
+        {
+            if (_model?.Locate(id) is { } at)
+                DeleteSelectedDesktop(new DesktopSelection(at.onMain, at.branchIndex, at.desktopIndex));
+        };
+        _spatialOverlay.DeleteGroupRequested += g =>       // Shift+Del — a group is a branch
+        {
+            int i = _model?.IndexOfBranch(g) ?? -1;
+            if (i >= 0) ConfirmRemoveBranch(i);
+        };
+        _spatialOverlay.RenameRoomRequested += id =>       // r — rename the highlighted desktop
+        {
+            if (_model?.Locate(id) is { } at)
+                RenameSelected(new DesktopSelection(at.onMain, at.branchIndex, at.desktopIndex));
+        };
+        _spatialOverlay.RenameGroupRequested += g =>       // Shift+R — rename the group (a branch)
+        {
+            int i = _model?.IndexOfBranch(g) ?? -1;
+            if (i >= 0) RenameBranchOnMap(i);
+        };
+        _spatialOverlay.NewDesktopRequested += id =>       // n — new desktop in the highlighted room's group
+        {
+            if (_model?.Locate(id) is { } at)
+                PromptNewDesktop(new DesktopSelection(at.onMain, at.branchIndex, at.desktopIndex));
+        };
+        _spatialOverlay.NewBranchRequested += () => OpenNewBranchDialog(null); // b — branch card over the map
+        _spatialOverlay.MoveWindowsRequested += ToggleMoveWindows; // m — move this desktop's windows elsewhere
+        _spatialOverlay.PullWindowsRequested += TogglePullWindows; // Shift+m — pull windows onto this desktop
+        _spatialOverlay.FinderRequested += () => OpenSpotlight();  // f — finder over the map; Esc pops back
+        _spatialOverlay.CommandPaletteRequested += () => ShowCommandPalette(overCurrent: true); // p — palette over the map
+        _spatialOverlay.AppLauncherRequested += () => OpenAppLauncher(overCurrent: true); // o — launcher over the map
 
         _stage.Prewarm(); // size the overlay host now, so the first summon doesn't render at the top-left then jump
 
@@ -671,43 +711,55 @@ public sealed partial class App : Application
         // them can record it as "last visited". A poll watches for the release (flashing or in the map).
         _gestureFrom ??= _desktops.Current;
         _gestureMods = mods;
-        // A cold press with "show before moving" on only raises the board — it doesn't move, so it gets a
-        // plain fade rather than a directional wipe (null move below). Only dive/surface reveal first (see
-        // RevealOnly); a left/right move within the current row goes straight away.
-        bool revealOnly = RevealOnly(action);
-        // Two separate gates. The board fades up whenever the flash appears from nothing — that's about not
-        // punching a lit board onto the desktop, so it isn't the "Animate navigation moves" setting's business
-        // (that setting is the directional wipe, per its own hint). Both still answer to Windows' "show
-        // animations": the OS reduce-motion preference wins either way.
+
         bool softMotion = WindowFx.SystemAnimationsEnabled();
         bool animate = _settings.AnimateNavigation && softMotion;
-        bool inMap = _overlay is { IsOpen: true };
+        bool inMap = AnyMapOpen();
 
-        // Cover the screen BEFORE switching. The switch presents the destination desktop the moment it
-        // completes — foreground handover included — so raising the flash afterwards left the desktop fully
-        // lit and uncovered for ~68ms, which is the punch of light that reads as the overlay flashing. With
-        // the dim already up, the switch happens behind it. (The map is its own always-up surface, and a
-        // reveal press doesn't switch at all, so neither needs covering — and a reveal keeps its soft fade.)
+        // The direction resolves to the nearest room; "crossing a group" is the analog of a dive/surface —
+        // it's what the show-before-moving reveal keys off.
+        (int dx, int dy) = DirectionOf(action);
+        SpatialScene pre = SpatialScene.From(_model.BuildSpatialSource(), _spatial);
+        DesktopId? target = SpatialNavigation.NextInDirection(pre, _desktops.Current, dx, dy);
+        bool crossing = target is { } t &&
+                        SpatialNavigation.GroupOf(pre, t) != SpatialNavigation.GroupOf(pre, _desktops.Current);
+
+        // A cold press with "show before moving" on only raises the board — it doesn't move (a plain fade,
+        // no wipe). It applies to a move out of the current group; a move that stays in it goes straight away,
+        // and the map never needs the reveal.
+        bool revealOnly = _settings.DisplayBeforeMoving && crossing && !inMap && _hud is { IsVisible: false };
+
+        // Cover the screen BEFORE switching, so the switch happens behind the dim rather than flashing the lit
+        // destination desktop for a beat. The map is its own always-up surface, and a reveal doesn't switch.
         if (!inMap && !revealOnly) _hud?.Cover();
 
-        // Apply reports whether the desktop actually changed: false at a row's edge or when already there.
-        // A move that goes nowhere must not animate — no wipe, just leave the board as is. (We can't know
-        // that before covering, so a blocked move at a row edge raises the dim without the fade. Harmless:
-        // it's the same board arriving, a beat sooner.)
-        bool moved = !revealOnly && _model.Apply(action);
-        // In the map, the nav chord switches for real, so the selection follows onto the new desktop
-        // (green "here" and blue selection rejoin); in the transient flash, the green outline marks the
-        // gesture's origin so the jump's direction/distance reads at a glance.
-        if (inMap) _overlay!.SyncToCurrent(_model.BuildMap());
-        else
-        {
-            // Only a move that actually went somewhere wipes; a reveal press or a blocked move (row edge,
-            // already there) has no direction to carry. The fade is unconditional — every appearance softens.
-            bool doAnimate = animate && moved;
-            _hud?.Flash(_model.BuildMap(_gestureFrom), mods, moved ? action : null, doAnimate,
-                        _settings.SweepFromLeadingEdge, _settings.MapStyle, fade: softMotion);
-        }
+        // Apply the move. It reports whether the desktop actually changed (false at an edge / already there),
+        // so a move that goes nowhere doesn't play a directional wipe.
+        bool moved = !revealOnly && target is { } tid && JumpToId(tid);
+
+        // In the map, the nav chord switches for real and the selection follows; otherwise the flash shows,
+        // with the green marker on the gesture origin so direction/distance reads at a glance.
+        if (inMap) SyncOpenMapToCurrent();
+        else FlashBoard(_gestureFrom, mods, moved ? action : null, animate && moved, softMotion);
         StartGesturePoll();
+    }
+
+    private static (int X, int Y) DirectionOf(NavAction action) => action switch
+    {
+        NavAction.MoveLeft => (-1, 0),
+        NavAction.MoveRight => (1, 0),
+        NavAction.Surface => (0, -1),
+        NavAction.Dive => (0, 1),
+        _ => (0, 0),
+    };
+
+    // Raise the transient flash on the current spatial arrangement. <paramref name="cameFrom"/> marks the
+    // gesture origin with the green "here" outline (null for a plain result/peek flash).
+    private void FlashBoard(DesktopId? cameFrom, HotkeyModifiers mods, NavAction? move, bool animate, bool fade)
+    {
+        if (_hud is null || _model is null) return;
+        SpatialScene scene = SpatialScene.From(_model.BuildSpatialSource(cameFrom), _spatial);
+        _hud.Flash(scene, _settings.MapStyle, mods, move, animate, _settings.SweepFromLeadingEdge, fade);
     }
 
     // Peek: raise the flash on where we actually are and hold it while <paramref name="mods"/> stay down,
@@ -720,26 +772,11 @@ public sealed partial class App : Application
         // The move flow owns the arrows while it's up; the map is already a persistent board — neither wants
         // a transient peek over it.
         if (_stage?.Current is MoveContent) return;
-        if (_overlay is { IsOpen: true }) return;
+        if (AnyMapOpen()) return;
         _model.AnchorToCurrent(); // show where we stand now, not our stale cursor
         // A peek has no direction, so there's nothing to wipe — it's pure appearance, and fades up.
-        _hud?.Flash(_model.BuildMap(), mods, move: null, style: _settings.MapStyle,
-                    fade: WindowFx.SystemAnimationsEnabled());
+        FlashBoard(null, mods, move: null, animate: false, fade: WindowFx.SystemAnimationsEnabled());
     }
-
-    // "Show before moving": with the setting on, a dive/surface chord that arrives while the flash is off
-    // screen spends itself raising the flash — you read where you are, then keep holding the modifiers and
-    // press again to actually move. Only the cold press is swallowed; once the board is up (which it stays
-    // for as long as the modifiers are held) every press navigates, so a held run of arrows is uninterrupted.
-    //
-    // It applies only to the vertical moves — diving into a branch or surfacing out — because that's where
-    // the disorientation is: you land among a fresh set of lookalike desktops. Left/right stays within the
-    // row you can already see, so it's not worth the extra press and moves immediately. The map is an
-    // always-visible surface of its own, so it never needs the reveal press.
-    private bool RevealOnly(NavAction action) =>
-        _settings.DisplayBeforeMoving
-        && action is NavAction.Dive or NavAction.Surface
-        && _overlay is not { IsOpen: true } && _hud is { IsVisible: false };
 
     // A double-click / arrow-driven jump from the map: switch to the chosen desktop, record where we
     // came from, then re-home the selection onto it (green + blue rejoin), keeping the map open.
@@ -749,7 +786,7 @@ public sealed partial class App : Application
         DesktopId from = _desktops.Current;
         doJump();
         RecordVisit(from);
-        if (_overlay is { IsOpen: true }) _overlay.SyncToCurrent(_model.BuildMap());
+        SyncOpenMapToCurrent();
     }
 
     private void StartGesturePoll()
@@ -840,25 +877,8 @@ public sealed partial class App : Application
         if (at.onMain) _model.GoToTop(at.desktopIndex);
         else _model.GoToBranchDesktop(at.branchIndex, at.desktopIndex);
 
-        if (_overlay is { IsOpen: true }) _overlay.SyncToCurrent(_model.BuildMap());
-        else _hud?.Flash(_model.BuildMap(cur), mods, move: null, style: _settings.MapStyle,
-                         fade: WindowFx.SystemAnimationsEnabled());
-    }
-
-    // The history panel's rows (newest last): each crumb's display label — branch-qualified, resolved
-    // fresh so renames show — with the cursor's entry marked and the redo tail flagged.
-    private IReadOnlyList<HistoryCrumb> BuildHistoryCrumbs()
-    {
-        if (_model is null) return Array.Empty<HistoryCrumb>();
-        _history.Prune(id => _model.Locate(id) is not null); // never show ghosts of deleted desktops
-        var crumbs = new List<HistoryCrumb>(_history.Entries.Count);
-        for (int i = 0; i < _history.Entries.Count; i++)
-        {
-            (string? branch, string label) = _model.Describe(_history.Entries[i]);
-            crumbs.Add(new HistoryCrumb(branch is null ? label : $"{branch} · {label}",
-                                        IsCurrent: i == _history.Cursor, IsAhead: i > _history.Cursor));
-        }
-        return crumbs;
+        if (AnyMapOpen()) SyncOpenMapToCurrent();
+        else FlashBoard(cur, mods, move: null, animate: false, fade: WindowFx.SystemAnimationsEnabled());
     }
 
     // A discrete jump from the spotlight palette: switch, record where we came from, then close the overlay
@@ -874,18 +894,116 @@ public sealed partial class App : Application
 
     private void ToggleMap()
     {
-        if (_model is null || _overlay is null || _desktops is null) return;
-        if (_overlay.IsOpen) { _overlay.Close(); return; }
+        if (_model is null || _spatialOverlay is null || _desktops is null) return;
+        if (_spatialOverlay.IsOpen) { _spatialOverlay.Close(); return; }
 
         _model.Reconcile(); // drop any externally-deleted desktops before showing the map
-        _overlay.Open(_model.BuildMap()); // vertical model renders the stack around main; selection homes to current
+        OpenMap();
+    }
+
+    // Open the spatial map. Reframe first, since its metrics differ from the flash offset the shared camera
+    // may hold.
+    private void OpenMap()
+    {
+        if (_model is null) return;
+        _mapCamera.Reframe();
+        SpatialSource source = _model.BuildSpatialSource();
+        PruneSpatial(source); // forget positions for desktops that no longer exist, so spatial.json doesn't grow
+        _spatialOverlay?.Open(source, _spatial);
+    }
+
+    // Drop stored positions for desktops the source no longer contains (deleted since they were placed).
+    // GUIDs are unique so a stale entry would never wrongly match, but this keeps the file from growing.
+    private void PruneSpatial(SpatialSource source)
+    {
+        if (_spatialStore is null) return;
+        var live = source.Groups.SelectMany(g => g.Desktops).Select(d => d.Id.Value.ToString()).ToHashSet();
+        int removed = _spatial.Positions.Keys.Where(k => !live.Contains(k)).ToList()
+            .Count(k => _spatial.Positions.Remove(k));
+        if (removed > 0) _spatialStore.Save(_spatial);
+    }
+
+    // Resolve a spatial jump: turn a desktop id into the row/branch position the model jumps by.
+    private bool JumpToId(DesktopId id)
+    {
+        if (_model is null) return false;
+        if (_model.Locate(id) is not { } at) return false;
+        return at.onMain ? _model.GoToTop(at.desktopIndex)
+                         : _model.GoToBranchDesktop(at.branchIndex, at.desktopIndex);
+    }
+
+    private bool AnyMapOpen() => _spatialOverlay is { IsOpen: true };
+
+    // Re-home the open map onto the desktop we're now on — after a real switch.
+    private void SyncOpenMapToCurrent()
+    {
+        if (_model is null) return;
+        if (_spatialOverlay is { IsOpen: true }) _spatialOverlay.SyncToCurrent(_model.BuildSpatialSource(), _spatial);
     }
 
     // Prime the map with a fresh board: redraws now if it's the current surface, else stashes it so the
     // map shows the update the next time the stage unwinds back to it (after an action completes on a card).
+    // SetSource itself decides render-now vs stash, so this must NOT be gated on IsOpen — an action run from
+    // a card on top of the map (e.g. the group picker) leaves the map not-current, and gating here would drop
+    // the update so the map re-presents stale.
     private void RefreshOverlay()
     {
-        if (_model is not null) _overlay?.SetBoard(_model.BuildMap());
+        if (_model is null) return;
+        _spatialOverlay?.SetSource(_model.BuildSpatialSource(), _spatial);
+    }
+
+    // ── Set a room's group (g on the spatial map) ───────────────────────────────────
+
+    // g on the spatial map: pick the group (branch) the highlighted room belongs to, or type a new name to
+    // create one. Reuses the shared palette — its "create «name»" row is exactly the "create xxxx" affordance
+    // — over the durable spatial map, so choosing reassigns the desktop and unwinds back to the recoloured
+    // map. The room's current group is left out of the list (you can't move it to where it already is).
+    private void OpenGroupPickerForRoom(DesktopId id)
+    {
+        if (_model is null || _stage is null) return;
+        SpatialSource source = _model.BuildSpatialSource();
+        SpatialGroupSource? owner = source.Groups.FirstOrDefault(g => g.Desktops.Any(d => d.Id == id));
+        if (owner is null) return; // the room vanished (e.g. an external delete) — nothing to regroup
+
+        string room = owner.Desktops.First(d => d.Id == id).Label;
+
+        var items = new List<PaletteItem>();
+        foreach (SpatialGroupSource g in source.Groups)
+        {
+            if (g.Id == owner.Id) continue;                  // skip the group it's already in
+            Guid target = g.Id;
+            int n = g.Desktops.Count;
+            items.Add(new PaletteItem(
+                g.IsMain ? "main" : g.Name,
+                n == 1 ? "1 room" : $"{n} rooms",
+                g.IsMain ? "○" : "●",
+                () => AssignRoomToGroup(id, target)));
+        }
+
+        // A typed name that matches no existing group offers to create it, seeded with the moved room.
+        PaletteItem? CreateRow(string q) =>
+            new($"Create “{q}”", "new group", "＋", () => AssignRoomToNewGroup(id, q));
+
+        _stage.Present(new PaletteContent(
+            $"Set group for “{room}”…",
+            "↑↓ move · ↵ choose · type a name to create · Esc back",
+            items, CreateRow));
+    }
+
+    private void AssignRoomToGroup(DesktopId id, Guid groupId)
+    {
+        if (_model is null) return;
+        _model.MoveDesktopToGroup(id, groupId);
+        RefreshOverlay(); // stash the regrouped board; the stage re-presents the map as the palette completes
+    }
+
+    private void AssignRoomToNewGroup(DesktopId id, string name)
+    {
+        if (_model is null) return;
+        name = name.Trim();
+        if (name.Length == 0) return;
+        _model.MoveDesktopToNewBranch(id, name);
+        RefreshOverlay();
     }
 
     // ── Move windows to another desktop (m on the map) ──────────────────────────────
@@ -909,7 +1027,7 @@ public sealed partial class App : Application
         // Launched from the map → push over it so completing/cancelling unwinds back to the map (its durable
         // base). Otherwise (hotkey / tray, no map open) it's a fresh root that dismisses to the desktop —
         // Back/CompleteToBase then behave exactly like the old Dismiss.
-        if (_overlay?.IsOpen == true) _stage.Present(content);
+        if (_spatialOverlay?.IsOpen == true) _stage.Present(content);
         else _stage.Summon(content);
     }
 
@@ -954,7 +1072,7 @@ public sealed partial class App : Application
         content.PullRequested += PullSelectedWindows;
         // Launched from the map → push over it so completing/cancelling unwinds back to the map. Otherwise
         // (hotkey / tray, no map open) it's a fresh root that dismisses to the desktop.
-        if (_overlay?.IsOpen == true) _stage.Present(content);
+        if (_spatialOverlay?.IsOpen == true) _stage.Present(content);
         else _stage.Summon(content);
     }
 
@@ -1035,53 +1153,6 @@ public sealed partial class App : Application
                 "are removed and any windows on them move to another desktop.", () => RemoveBranch(index));
     }
 
-    // ── Rearranging the layout from the map (Shift/Ctrl+arrows, drag) ───────────────
-
-    // Re-slot a branch in the vertical stack. Structure only — nothing is created, destroyed or switched —
-    // so we just redraw and keep the selection on the branch as it moves, which is what makes repeated
-    // Shift+↑ feel like carrying it up the stack.
-    private void MoveBranchOnMap(int index, int row)
-    {
-        if (_model is null || _overlay is null) return;
-        DesktopSelection was = _overlay.Selection;
-        if (_model.MoveBranchToRow(index, row) is not { } moved) return;
-
-        NavMap map = _model.BuildMap();
-        _overlay.SetBoard(map);
-        // Stay on the same desktop within the branch when the selection was already in it; otherwise land
-        // on the branch's own resume point.
-        int col = !was.OnMain && was.BranchIndex == index ? was.DesktopIndex
-                : moved < map.Branches.Count ? map.Branches[moved].Cursor : 0;
-        _overlay.Select(new DesktopSelection(false, moved, col));
-    }
-
-    // Re-slot main itself (Shift+↑/↓ with main selected). Same as above, but the row that moved is main —
-    // keep the selection on main and on the same desktop it was showing.
-    private void MoveMainOnMap(int row)
-    {
-        if (_model is null || _overlay is null) return;
-        DesktopSelection was = _overlay.Selection;
-        if (_model.MoveMainToRow(row) is null) return;
-
-        _overlay.SetBoard(_model.BuildMap());
-        _overlay.Select(new DesktopSelection(true, -1, was.DesktopIndex));
-    }
-
-    // Move a desktop to another slot: along its row, into another branch, or on/off main. The model does
-    // the whole move (including asking the OS to reorder when it lands on main, since main *is* the OS
-    // order) and reports where the desktop ended up, so the selection can follow it there — the row it came
-    // from may have dissolved under it.
-    private void MoveDesktopOnMap(DesktopSelection from, DesktopSelection to)
-    {
-        if (_model is null || _overlay is null) return;
-        var landed = _model.MoveDesktop(from.OnMain, from.BranchIndex, from.DesktopIndex,
-                                       to.OnMain, to.BranchIndex, to.DesktopIndex);
-        if (landed is not { } slot) return;
-
-        _overlay.SetBoard(_model.BuildMap());
-        _overlay.Select(new DesktopSelection(slot.onMain, slot.branchIndex, slot.desktopIndex));
-    }
-
     // n on the map: prompt for a name, create a new desktop at the end of the selected row (no switch — the
     // manage surface stays where you are), then home the selection onto it so you can rename/act on it
     // immediately. The row is the point: pressing n inside a branch grows *that* branch, which is where you
@@ -1101,11 +1172,10 @@ public sealed partial class App : Application
             {
                 if (branch is null)
                 {
-                    _desktops.Create(name); // a main-timeline desktop is the user's own — not tracked in _created
+                    DesktopId mainId = _desktops.Create(name); // a main-timeline desktop is the user's own — not tracked in _created
                     _model.SyncTopRow();    // picks up the new desktop (appended to the top row)
-                    NavMap map = _model.BuildMap();
-                    _overlay?.SetBoard(map);
-                    _overlay?.Select(new DesktopSelection(true, -1, map.TopRow.Count - 1)); // home to the just-created desktop
+                    RefreshOverlay();
+                    _spatialOverlay?.SelectRoom(mainId); // home the cursor to the just-created room
                     return;
                 }
 
@@ -1114,10 +1184,10 @@ public sealed partial class App : Application
                 // of the branch.
                 DesktopId id = _desktops.Create($"{branch} · {name}");
                 _created.Add(id.Value);
-                if (_model.AddDesktopToBranch(sel.BranchIndex, new DesktopRef(id, name)) is { } at)
+                if (_model.AddDesktopToBranch(sel.BranchIndex, new DesktopRef(id, name)) is not null)
                 {
-                    _overlay?.SetBoard(_model.BuildMap());
-                    _overlay?.Select(new DesktopSelection(false, sel.BranchIndex, at));
+                    RefreshOverlay();
+                    _spatialOverlay?.SelectRoom(id);
                 }
                 else
                 {
@@ -1125,9 +1195,8 @@ public sealed partial class App : Application
                     // desktop moved out). The desktop exists, so let it show up on main rather than stranding it.
                     _created.Remove(id.Value);
                     _model.SyncTopRow();
-                    NavMap map = _model.BuildMap();
-                    _overlay?.SetBoard(map);
-                    _overlay?.Select(new DesktopSelection(true, -1, map.TopRow.Count - 1));
+                    RefreshOverlay();
+                    _spatialOverlay?.SelectRoom(id);
                 }
             },
             confirmLabel: "Create"));
@@ -1157,10 +1226,12 @@ public sealed partial class App : Application
         for (int i = 0; i < map.TopRow.Count; i++)
         {
             int idx = i;
-            bool last = IsLast(_model.PeekTopDesktop(i)?.id);
+            DesktopId? tid = _model.PeekTopDesktop(i)?.id;
+            bool last = IsLast(tid);
             items.Add(new PaletteItem(map.TopRow[i].Label, Detail("main", last), Icon(last),
                 () => Jump(() => _model!.GoToTop(idx)), // no flash — the preview already showed it
-                Preview: () => PreviewMap(onMain: true, topIndex: idx, branchIndex: -1, desktopIndex: -1)));
+                Preview: () => PreviewMap(onMain: true, topIndex: idx, branchIndex: -1, desktopIndex: -1),
+                SpatialPreview: tid is { } t ? () => SpatialPreviewScene(t) : null));
             if (last) lastIndex = items.Count - 1;
         }
         foreach (NavMapBranch g in map.Branches)
@@ -1169,10 +1240,12 @@ public sealed partial class App : Application
             for (int j = 0; j < g.Desktops.Count; j++)
             {
                 int dj = j;
-                bool last = IsLast(_model.PeekBranchDesktop(gi, dj)?.id);
+                DesktopId? tid = _model.PeekBranchDesktop(gi, dj)?.id;
+                bool last = IsLast(tid);
                 items.Add(new PaletteItem(g.Desktops[j].Label, Detail(g.Name, last), Icon(last),
                     () => Jump(() => _model!.GoToBranchDesktop(gi, dj)),
-                    Preview: () => PreviewMap(onMain: false, topIndex: -1, branchIndex: gi, desktopIndex: dj)));
+                    Preview: () => PreviewMap(onMain: false, topIndex: -1, branchIndex: gi, desktopIndex: dj),
+                    SpatialPreview: tid is { } t ? () => SpatialPreviewScene(t) : null));
                 if (last) lastIndex = items.Count - 1;
             }
         }
@@ -1188,9 +1261,14 @@ public sealed partial class App : Application
         OpenPalette("Jump to or create a desktop…",
             "↑↓ move · ↵ jump/create · Esc back · blue = you are here", items,
             query => new PaletteItem($"Create desktop “{query}”", "new · main", "+",
-                () => CreateAndGoToDesktop(query),
-                Preview: () => _model!.BuildMap())); // no target tile yet — show the current board
+                () => CreateAndGoToDesktop(query))); // no target tile yet — the stage shows the live board
     }
+
+    // The spatial twin of PreviewMap: the current scene with the jump's target as the blue selection (and
+    // the desktop you're on staying the green "here"), so the jump palette highlights where you'd land as a
+    // room while the user is in the spatial model.
+    private SpatialScene SpatialPreviewScene(DesktopId target)
+        => SpatialScene.From(_model!.BuildSpatialSource(), _spatial, target);
 
     // Build a board snapshot that marks a specific desktop as current (for the jump palette's preview),
     // without moving the model. Rebuilds the tiles from the live map with the target highlighted and
@@ -1262,7 +1340,7 @@ public sealed partial class App : Application
         }
         // Pressed while the map is up, the chord means the same as the map's own "p": push the palette over
         // the map so back returns there, instead of replacing the map with a fresh root.
-        ShowCommandPalette(overCurrent: _overlay?.IsOpen == true);
+        ShowCommandPalette(overCurrent: _spatialOverlay?.IsOpen == true);
     }
 
     private void OpenCommandPalette() => ShowCommandPalette(overCurrent: false);
@@ -1276,12 +1354,13 @@ public sealed partial class App : Application
 
         _model.Reconcile(); // drop any externally-deleted desktops so the context board is accurate
 
-        // Show the live map behind each command ("blue = you are here"); commands with a distinct target
-        // supply their own board that highlights what they'll act on (green).
+        // Show the live map behind each command ("blue = you are here") — the stage draws it in the user's
+        // current model (rows or spatial). Commands with a distinct target supply their own board that
+        // highlights what they'll act on (green); a null preview falls back to the stage's live board.
         var items = BuildCommands()
             .Select(c => new PaletteItem(c.Name, c.DisabledReason,
                                          c.DisabledReason is null ? "▸" : null, c.Run,
-                                         Preview: c.Preview ?? (() => _model!.BuildMap()),
+                                         Preview: c.Preview,
                                          DisabledReason: c.DisabledReason))
             .ToList();
         var palette = new PaletteContent("Run a command…",
@@ -1394,9 +1473,9 @@ public sealed partial class App : Application
         {
             Snapshot s = snapshot; // capture per iteration
             items.Add(new PaletteItem(s.Name, $"{s.DesktopCount} desktops · {s.Branches.Count} branches", "⟲",
-                () => ConfirmRestore(s),                 // Enter restores (pushes a confirm over this palette)…
-                Preview: () => SnapshotPreview(s),        // preview the layout you'd land in
-                OnDelete: () => ConfirmDeleteLayout(s))); // …Del deletes it (pushes a confirm)
+                () => ConfirmRestore(s),                          // Enter restores (pushes a confirm over this palette)…
+                SpatialPreview: () => SpatialSnapshot.SceneFrom(s), // preview the spatial layout you'd land in
+                OnDelete: () => ConfirmDeleteLayout(s)));          // …Del deletes it (pushes a confirm)
         }
         // The reset ("restore the empty layout") sits at the bottom — greyed out when already a single desktop.
         items.Add(new PaletteItem("Reset to a single desktop", "clear every desktop & branch", "⊘",
@@ -1426,27 +1505,13 @@ public sealed partial class App : Application
         if (_model is null || _snapshots is null) return;
         _model.Reconcile(); // capture the live layout, not stale/deleted desktops
 
+        Snapshot snap = _model.CaptureSnapshot(name);
+        SpatialSnapshot.Capture(snap, _spatial); // layer the room positions & group colours on top of the structure
+
         // Same name overwrites, so re-snapshotting a layout updates it in place.
         var list = _snapshots.Load().Where(s => !s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToList();
-        list.Add(_model.CaptureSnapshot(name));
+        list.Add(snap);
         _snapshots.Save(list);
-    }
-
-    // Build a board from a saved snapshot (persisted labels only — no live windows), so the restore
-    // palette previews the layout you'd land in. All branches render bright (this is the whole target),
-    // and window counts are absent since the desktops may not exist yet.
-    private static NavMap SnapshotPreview(Snapshot snap)
-    {
-        var top = snap.MainDesktops.Select(d => new NavMapTile(d.Label, IsCurrent: false)).ToList();
-        var branches = new List<NavMapBranch>(snap.Branches.Count);
-        for (int gi = 0; gi < snap.Branches.Count; gi++)
-        {
-            PersistedBranch pg = snap.Branches[gi];
-            var tiles = pg.Desktops.Select(d => new NavMapTile(d.Label, IsCurrent: false)).ToList();
-            int cursor = tiles.Count == 0 ? 0 : Math.Clamp(pg.LastUsedIndex, 0, tiles.Count - 1);
-            branches.Add(new NavMapBranch(gi, pg.Name, tiles, IsCurrentLevel: true, cursor));
-        }
-        return new NavMap(top, TopCursor: 0, OnTop: true, branches, Math.Clamp(snap.MainSlot, 0, branches.Count));
     }
 
     private void ConfirmRestore(Snapshot snap)
@@ -1482,6 +1547,11 @@ public sealed partial class App : Application
         var live = _desktops.List().Select(d => d.Id.Value).ToHashSet();
         var keep = new HashSet<Guid>();
 
+        // Re-keying maps for the spatial facts: a captured desktop GUID → the live GUID it resolved to, and
+        // a captured branch id → the fresh id its restored branch minted. Positions/colours ride these over.
+        var desktopRemap = new Dictionary<Guid, Guid>();
+        var branchRemap = new Dictionary<Guid, Guid>();
+
         // Resolve one saved desktop to a live id: reuse its GUID if present (renamed to the saved label),
         // else create a fresh desktop with that label. Branch desktops are tracked in _created so the
         // teardown guard may remove them later; main desktops are the user's and are never tracked.
@@ -1498,6 +1568,7 @@ public sealed partial class App : Application
                 id = _desktops!.Create(d.Label);
             }
             keep.Add(id.Value);
+            desktopRemap[d.Id] = id.Value; // remember where this room's stored position should land
             if (branch) _created.Add(id.Value);
             return id;
         }
@@ -1509,7 +1580,10 @@ public sealed partial class App : Application
         foreach (PersistedBranch pg in snap.Branches)
         {
             var refs = pg.Desktops.Select(d => new DesktopRef(Resolve(d, branch: true), d.Label)).ToList();
-            if (refs.Count > 0) branches.Add(new Branch(pg.Name, refs, pg.LastUsedIndex));
+            if (refs.Count == 0) continue;
+            var branch = new Branch(pg.Name, refs, pg.LastUsedIndex); // a template restore mints a fresh id
+            branchRemap[pg.Id] = branch.Id; // remember where this group's stored colour should land
+            branches.Add(branch);
         }
 
         // Land on the snapshot's first desktop (main[0], else the first branch desktop) before removing.
@@ -1525,6 +1599,14 @@ public sealed partial class App : Application
         }
 
         _model.RestoreStructure(snap.MainSlot, branches); // re-derives the top row + re-anchors to `first`
+
+        // Re-apply the saved spatial arrangement onto the live state, re-keyed to the ids we just resolved,
+        // and persist it — so the restored map lands in its 2-D layout, not the default rows. Then the map
+        // rebuild below (RefreshOrFlash → BuildSpatialSource + _spatial) reflects it. Empty tables (an old
+        // snapshot, or a never-arranged map) simply write nothing, leaving the defaults in place.
+        SpatialSnapshot.ApplyTo(_spatial, snap, desktopRemap, branchRemap);
+        _spatialStore?.Save(_spatial);
+
         RefreshOrFlash();
     }
 
@@ -1552,8 +1634,8 @@ public sealed partial class App : Application
             RegisterHotkeys();
             _stage?.Reassert();
             // A map-style change made while settings was open was deferred (see ApplyMapStyle) to avoid a
-            // z-order fight; repaint the map now it's gone so it reflects the current style.
-            if (_overlay is { IsOpen: true } && _model is not null) _overlay.SetBoard(_model.BuildMap());
+            // z-order fight; repaint the open map now the window's gone so it picks the new style up.
+            RefreshOverlay();
         };
         _settingsWindow.Show();
         _settingsWindow.TakeFocus();
@@ -1594,12 +1676,14 @@ public sealed partial class App : Application
     {
         if (_stage is null || _stage.MapStyle == _settings.MapStyle) return;
         _stage.MapStyle = _settings.MapStyle;
-        _mapCamera.Reframe(); // the new theme's metrics invalidate the carried pixel offset — reframe the selection
+        // The spatial map's metrics are style-independent (only the room glyph changes), so leave its camera
+        // put when it's open; only reframe when navigating with the map closed (the flash uses the offset).
+        if (_spatialOverlay is not { IsOpen: true }) _mapCamera.Reframe();
         // While the Settings window is open it sits above the stage; re-rendering the map here would end in
         // _stage.BringToFront() and steal the top of the z-order from it. Defer the map repaint to the
         // Settings Closed handler; refreshing a card backdrop (no z-order change) is safe either way.
-        if (_settingsWindow is null && _overlay is { IsOpen: true } && _model is not null)
-            _overlay.SetBoard(_model.BuildMap());
+        if (_settingsWindow is null && _model is not null && _spatialOverlay is { IsOpen: true })
+            _spatialOverlay.SetSource(_model.BuildSpatialSource(), _spatial);
         _stage.RefreshBackdrop();
     }
 
@@ -1637,7 +1721,7 @@ public sealed partial class App : Application
         if (_model.GoTo(branchId, desktop, out _) != GoToResult.Ok) return;
         RecordVisit(from);
         // If the map happens to be open (it suppresses the switcher, but be safe), keep it in step.
-        if (_overlay is { IsOpen: true }) _overlay.SyncToCurrent(_model.BuildMap());
+        SyncOpenMapToCurrent();
     }
 
     // The switcher persists its own position (after a drag) and collapse state through these, folded into
@@ -1791,11 +1875,12 @@ public sealed partial class App : Application
     private void RefreshOrFlash()
     {
         if (_model is null) return;
-        NavMap map = _model.BuildMap();
-        if (_stage is not null && _stage.HasDurableBase) _overlay?.SetBoard(map);
+        // Map in the chain (it's the durable base the card sits on): stash the fresh scene so it shows when
+        // the stage unwinds back — not gated on IsOpen, since the card on top makes the map not-current.
+        if (_stage is not null && _stage.HasDurableBase)
+            _spatialOverlay?.SetSource(_model.BuildSpatialSource(), _spatial);
         // A result flash, not a gesture — just times out. It appears over a bare desktop, so it fades up too.
-        else _hud?.Flash(map, HotkeyModifiers.None, style: _settings.MapStyle,
-                         fade: WindowFx.SystemAnimationsEnabled());
+        else FlashBoard(null, HotkeyModifiers.None, move: null, animate: false, fade: WindowFx.SystemAnimationsEnabled());
     }
 
     // The product version for the tray header, read from the assembly (set by <Version> in the csproj) so
@@ -1935,14 +2020,12 @@ public sealed partial class App : Application
         }
 
         var branch = new Branch(spec.Name, refs);
-        // Created over the map (the branch prompt sits on top of it): attach the branch below the
-        // highlighted desktop's row, not below main. Tray / command-palette creation has no map in the
-        // chain, so it falls back to below main.
-        if (_stage is { HasDurableBase: true } && _overlay is not null)
-        {
-            DesktopSelection sel = _overlay.Selection;
-            _model.AddBranchBelow(sel.OnMain, sel.BranchIndex, branch);
-        }
+        // Created over the map (the branch prompt sits on top of it): attach the branch below the highlighted
+        // room's group, not below main. Tray / command-palette creation has no map in the chain, so it falls
+        // back to below main.
+        if (_stage is { HasDurableBase: true } && _spatialOverlay?.SelectedRoom is { } room
+            && _model.Locate(room) is { } at)
+            _model.AddBranchBelow(at.onMain, at.branchIndex, branch);
         else _model.AddBranch(branch);
         RefreshOrFlash();
     }

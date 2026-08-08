@@ -9,6 +9,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.4.0] - 2026-08-08
+
+### Added
+
+- **The map is now a 2-D spatial map.** Desktops are **rooms** you place anywhere on a grid and they stay put; branches are stable-coloured **groups**, drawn as merged "tetris" hulls.
+- `Ctrl`+arrows (or drag) move a room; `Ctrl+Shift`+arrows (or `⇧`-drag) move its contiguous block; a selected group moves as one.
+- `g` sets a room's group — pick an existing one or create it; `Shift+G` opens the groups-and-colours panel, where a palette pick sticks to the group.
+- `t` tidies drifted groups back into rigid blocks and packs them apart; `Ctrl+Z` undoes it.
+- `Del` removes a room and leaves its cell empty; `Shift+Del` removes a group.
+- `Ctrl+Alt+Arrow` navigates the map — the nearest room in that direction — and the flash shows the same board.
+- `+` / `−` zoom the map and `0` resets, persisted across sessions and applied wherever the map is drawn.
+- Off-screen rooms get a border arrow in their group colour pointing the way.
+- `l` toggles the key legend, remembered across sessions.
+
+### Changed
+
+- The row/list map model is gone — the spatial map is the only map.
+- Rooms render in the current **Map style** (Board / Metro / ASCII), cycled with `v`.
+- A move that would leave the current group raises the board first (dive/surface); moves within a group go straight away.
+- Two rooms on one cell show an overlap marker instead of shoving your layout around.
+- Saved layouts remember room positions and group colours; the Layouts palette previews the spatial board. Older layouts restore to the derived rows as before.
+- The legend lists each `Shift` shortcut on its own line.
+- Larger map text.
+
+---
+
 ## [v0.3.15] - 2026-08-07
 
 ### Fixed

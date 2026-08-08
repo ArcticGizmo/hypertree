@@ -7,10 +7,13 @@ using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using Hypertree.App.Views.Scene;
 using Hypertree.Desktops;
+using Hypertree.Layout;
 using Hypertree.Platform;
 using Hypertree.Scopes;
 using Hypertree.Settings;
+using Hypertree.Spatial;
 
 namespace Hypertree.App.Views;
 
@@ -26,7 +29,7 @@ namespace Hypertree.App.Views;
 /// root, <see cref="Present"/> pushes a sub-surface on top, <see cref="Back"/> pops one step (Esc /
 /// Cancel), and <see cref="CompleteToBase"/> unwinds to the durable base — the map — when an action
 /// finishes (or dismisses outright if there's no map in the chain). Card-style content floats over a
-/// live <b>map backdrop</b> (<see cref="MapProvider"/>), so every non-special view shows the board
+/// live <b>map backdrop</b> (<see cref="SpatialProvider"/>), so every non-special view shows the board
 /// behind it; full-surface content (the map, the move flow) draws its own board and gets no backdrop.
 /// </summary>
 internal sealed class OverlayStage
@@ -55,13 +58,19 @@ internal sealed class OverlayStage
     /// return there rather than dismiss. App uses this to decide whether to prime the map or flash the HUD.</summary>
     public bool HasDurableBase => _stack.Any(c => c.Durable);
 
-    /// <summary>Supplies the live board rendered behind Card content (App: <c>() =&gt; _model.BuildMap()</c>).</summary>
-    public Func<NavMap>? MapProvider;
+    /// <summary>Supplies the live spatial scene rendered behind Card content (App: the current source +
+    /// persisted state). A card can still override with its own board (a jump target, a snapshot's layout).</summary>
+    public Func<(SpatialSource Source, SpatialState State)>? SpatialProvider;
 
     /// <summary>The board style for every surface the stage draws (card backdrops here; the map and move
     /// flow read it off the stage too). App keeps this in sync with the persisted setting, so choosing the
     /// metro map applies everywhere at once.</summary>
     public MapStyle MapStyle { get; set; } = MapStyle.Board;
+
+    /// <summary>The spatial map zoom, mirrored from the interactive map (App keeps it in sync) so the card
+    /// backdrops here — and the move flow's board, which reads it off the stage — draw at the same scale the
+    /// user set with <c>+</c>/<c>−</c>. See <c>SpatialOverlay</c>.</summary>
+    public double MapZoom { get; set; } = 1.0;
 
     /// <summary>Raised when the stage becomes visible (first content shown) and when it hides (stack
     /// emptied). App uses these to park the taskbar pill while the overlay is up.</summary>
@@ -216,14 +225,24 @@ internal sealed class OverlayStage
         if (firstShow) Shown?.Invoke();
     }
 
-    // The board to paint behind a card: the content's own override (a jump-target highlight, a snapshot
-    // preview) or, by default, the live map.
+    // The board to paint behind a card. By default it's the live spatial map, so the backdrop matches what
+    // you'd see on the map. A card can override: a spatial scene (the jump palette highlighting its target),
+    // or a NavMap (a snapshot / template's would-be layout) — the latter is a deliberate row depiction of a
+    // concrete other layout, so it's kept as-is.
     private Control? RenderBackdrop(IStageContent content)
     {
-        NavMap? map = content.BackdropBoard() ?? MapProvider?.Invoke();
-        if (map is null) return null;
         double w = HostWidth > 0 ? HostWidth : 1280, h = HostHeight > 0 ? HostHeight : 800;
-        return MapSurface.Render(map, w, h, MapStyle);
+
+        if (content.BackdropScene() is { } scene)
+            return SpatialPainter.Render(scene, w, h, MapZoom, new MapCamera(), style: MapStyle);
+        if (content.BackdropBoard() is { } previewMap)
+            return MapSurface.Render(previewMap, w, h, MapStyle, MapZoom);
+        if (SpatialProvider is { } spatial)
+        {
+            (SpatialSource source, SpatialState state) = spatial();
+            return SpatialPainter.Render(SpatialScene.From(source, state), w, h, MapZoom, new MapCamera(), style: MapStyle);
+        }
+        return null;
     }
 
     /// <summary>Re-render the current card's backdrop board — after its selection moved (palette preview).</summary>
@@ -382,6 +401,11 @@ internal interface IStageContent
     /// <summary>The board to paint behind this card, or null to use the stage's live map. Full-surface
     /// content ignores this (it draws its own board).</summary>
     NavMap? BackdropBoard() => null;
+
+    /// <summary>The spatial scene to paint behind this card while the user is in the spatial model, or null
+    /// to fall back to <see cref="BackdropBoard"/> / the live spatial scene. Lets a card highlight its
+    /// target spatially (the jump palette) instead of only on the row map.</summary>
+    SpatialScene? BackdropScene() => null;
 
     /// <summary>Called after the view is hosted and the host is foregrounded — take focus, start timers,
     /// register DWM thumbnails, etc. The stage is passed for host handle / focus helpers.</summary>
