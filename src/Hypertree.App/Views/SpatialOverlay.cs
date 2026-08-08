@@ -175,7 +175,8 @@ internal sealed class SpatialOverlay : IStageContent
         switch (e.Key)
         {
             case Key.Escape: OnEscape(); e.Handled = true; break;
-            case Key.Enter: if (_cursor is { } c) JumpRoomRequested?.Invoke(c); e.Handled = true; break;
+            case Key.Enter:
+            case Key.Space: if (_cursor is { } c) JumpRoomRequested?.Invoke(c); e.Handled = true; break;
             case Key.G when e.KeyModifiers.HasFlag(KeyModifiers.Shift): ToggleGroupsPanel(); e.Handled = true; break;
             case Key.G: RequestSetGroup(); e.Handled = true; break;
             case Key.V: ViewStyleToggleRequested?.Invoke(); e.Handled = true; break;
@@ -504,7 +505,7 @@ internal sealed class SpatialOverlay : IStageContent
             Margin = new Avalonia.Thickness(0, 0, 0, 4),
         });
         rows.Children.Add(LegendRow("←→↑↓", "select the nearest room"));
-        rows.Children.Add(LegendRow("Enter", "switch to selected"));
+        rows.Children.Add(LegendRow("Enter/Space", "switch to selected"));
         rows.Children.Add(LegendRow("Ctrl+Alt+←→↑↓", "switch to a desktop"));
         rows.Children.Add(LegendRow("Ctrl+←→↑↓", "move the room / group"));
         rows.Children.Add(LegendRow("Ctrl+Shift+←→↑↓", "move the block"));
