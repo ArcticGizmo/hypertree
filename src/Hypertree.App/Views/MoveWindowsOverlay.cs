@@ -92,7 +92,7 @@ internal sealed class MoveContent : WindowPickerContent
         if (map is null) return;
 
         double width = Stage?.HostWidth ?? 1280, height = Stage?.HostHeight ?? 800;
-        Control board = MapSurface.Render(map, width, height, Stage?.MapStyle ?? MapStyle.Board);
+        Control board = MapSurface.Render(map, width, height, Stage?.MapStyle ?? MapStyle.Board, Stage?.MapZoom ?? 1.0);
 
         int n = Session.SelectedCount;
         Border banner = HintBar($"Moving {n} window{(n == 1 ? "" : "s")} · ←→↑↓ navigate · Enter to drop here · Esc/Backspace cancel");

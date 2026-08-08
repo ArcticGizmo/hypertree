@@ -120,7 +120,74 @@ internal static class SpatialPainter
             hits?.Add((id, cell));
         }
 
+        PaintOffscreenMarkers(canvas, layout, scene, ox, oy, screenW, screenH, s);
         return canvas;
+    }
+
+    // Rooms that fell off the edge of the viewport get an arrow on the border pointing their way: draw a
+    // straight line from the viewport centre to the off-screen room, and where it crosses the border sits an
+    // arrow (in that room's group colour) with a soft colour bleed behind it. The geometry is pure — see
+    // OffscreenMarkers — so here we only turn each marker into pixels, on top of the map.
+    private static void PaintOffscreenMarkers(Canvas canvas, SpatialLayout layout, SpatialScene scene,
+                                              double ox, double oy, double screenW, double screenH, double s)
+    {
+        IReadOnlyList<EdgeMarker> markers = OffscreenMarkers.Compute(layout, ox, oy, screenW, screenH, 3 * s);
+        if (markers.Count == 0) return;
+
+        // room → its group colour, looked up once for the frame.
+        var colourById = new Dictionary<DesktopId, Color>();
+        foreach (PlacedRoom pr in layout.Rooms)
+            colourById[pr.Room.Id] = Color.Parse(scene.Groups.First(g => g.Id == pr.Room.GroupId).Color);
+
+        foreach (EdgeMarker m in markers)
+            AddEdgeMarker(canvas, m.X, m.Y, m.Angle, colourById.TryGetValue(m.Room, out Color c) ? c : Focus, s);
+    }
+
+    // One border indicator: a radial colour bleed centred on the border point (clipped by the canvas, so it
+    // reads as a gradient washing in from the edge) with a filled triangle whose tip touches the border and
+    // points outward toward the off-screen room.
+    private static void AddEdgeMarker(Canvas canvas, double x, double y, double angle, Color c, double s)
+    {
+        double glow = 130 * s;
+        var halo = new Ellipse
+        {
+            Width = glow, Height = glow, IsHitTestVisible = false,
+            Fill = new RadialGradientBrush
+            {
+                GradientStops = new GradientStops
+                {
+                    new GradientStop(Color.FromArgb(0xB0, c.R, c.G, c.B), 0),
+                    new GradientStop(Color.FromArgb(0x00, c.R, c.G, c.B), 1),
+                },
+            },
+        };
+        Canvas.SetLeft(halo, x - glow / 2);
+        Canvas.SetTop(halo, y - glow / 2);
+        canvas.Children.Add(halo);
+
+        // Triangle in absolute coordinates: tip on the border, base set back along the inward direction and
+        // spread to either side (mirrors HullGeometry, which also builds an absolute-space Path).
+        double len = 22 * s, half = 13 * s;
+        double ca = Math.Cos(angle), sa = Math.Sin(angle);       // unit vector toward the room (outward)
+        double bxp = x - ca * len, byp = y - sa * len;           // arrow base, set back from the border
+        double perpX = -sa, perpY = ca;                          // perpendicular, to spread the base
+        var tip = new Point(x, y);
+        var b1 = new Point(bxp + perpX * half, byp + perpY * half);
+        var b2 = new Point(bxp - perpX * half, byp - perpY * half);
+
+        var geo = new StreamGeometry();
+        using (StreamGeometryContext ctx = geo.Open())
+        {
+            ctx.BeginFigure(tip, isFilled: true);
+            ctx.LineTo(b1);
+            ctx.LineTo(b2);
+            ctx.EndFigure(true);
+        }
+        canvas.Children.Add(new Avalonia.Controls.Shapes.Path
+        {
+            Data = geo, Fill = new SolidColorBrush(c), IsHitTestVisible = false,
+            Stroke = new SolidColorBrush(CapBg), StrokeThickness = 1.5 * s,
+        });
     }
 
     private static void DrawBoardRoom(Canvas host, SpatialRoom room, Color groupColor, Rect cell, double s)

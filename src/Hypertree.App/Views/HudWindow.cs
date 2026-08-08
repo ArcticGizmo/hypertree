@@ -77,6 +77,10 @@ internal sealed class HudWindow : Window
     // opening the map lands on the same framing, and the flash pans by the same dead-zone rules.
     private readonly MapCamera _camera;
 
+    /// <summary>The spatial map zoom, mirrored from the interactive map (App keeps it in sync) so the
+    /// transient flash draws the board at the same scale the user set with <c>+</c>/<c>−</c>.</summary>
+    public double MapZoom { get; set; } = 1.0;
+
     public HudWindow(MapCamera camera)
     {
         _camera = camera;
@@ -205,7 +209,7 @@ internal sealed class HudWindow : Window
                       bool fromLeadingEdge = true, MapStyle style = MapStyle.Board, bool fade = false)
     {
         PrepareSurface();
-        FlashBoard(MapSurface.Render(map, Width, Height, style, camera: _camera),
+        FlashBoard(MapSurface.Render(map, Width, Height, style, MapZoom, camera: _camera),
                    holdMods, move, animate, fromLeadingEdge, fade);
     }
 
@@ -215,7 +219,7 @@ internal sealed class HudWindow : Window
                       bool animate = false, bool fromLeadingEdge = true, bool fade = false)
     {
         PrepareSurface();
-        FlashBoard(SpatialPainter.Render(scene, Width, Height, 1.0, _camera, style: style),
+        FlashBoard(SpatialPainter.Render(scene, Width, Height, MapZoom, _camera, style: style),
                    holdMods, move, animate, fromLeadingEdge, fade);
     }
 

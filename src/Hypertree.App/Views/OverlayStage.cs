@@ -67,6 +67,11 @@ internal sealed class OverlayStage
     /// metro map applies everywhere at once.</summary>
     public MapStyle MapStyle { get; set; } = MapStyle.Board;
 
+    /// <summary>The spatial map zoom, mirrored from the interactive map (App keeps it in sync) so the card
+    /// backdrops here — and the move flow's board, which reads it off the stage — draw at the same scale the
+    /// user set with <c>+</c>/<c>−</c>. See <c>SpatialOverlay</c>.</summary>
+    public double MapZoom { get; set; } = 1.0;
+
     /// <summary>Raised when the stage becomes visible (first content shown) and when it hides (stack
     /// emptied). App uses these to park the taskbar pill while the overlay is up.</summary>
     public event Action? Shown;
@@ -229,13 +234,13 @@ internal sealed class OverlayStage
         double w = HostWidth > 0 ? HostWidth : 1280, h = HostHeight > 0 ? HostHeight : 800;
 
         if (content.BackdropScene() is { } scene)
-            return SpatialPainter.Render(scene, w, h, 1.0, new MapCamera(), style: MapStyle);
+            return SpatialPainter.Render(scene, w, h, MapZoom, new MapCamera(), style: MapStyle);
         if (content.BackdropBoard() is { } previewMap)
-            return MapSurface.Render(previewMap, w, h, MapStyle);
+            return MapSurface.Render(previewMap, w, h, MapStyle, MapZoom);
         if (SpatialProvider is { } spatial)
         {
             (SpatialSource source, SpatialState state) = spatial();
-            return SpatialPainter.Render(SpatialScene.From(source, state), w, h, 1.0, new MapCamera(), style: MapStyle);
+            return SpatialPainter.Render(SpatialScene.From(source, state), w, h, MapZoom, new MapCamera(), style: MapStyle);
         }
         return null;
     }

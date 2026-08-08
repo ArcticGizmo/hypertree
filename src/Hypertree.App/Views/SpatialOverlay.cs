@@ -53,6 +53,11 @@ internal sealed class SpatialOverlay : IStageContent
     private double _scale = 1.0;
     private const double MinScale = 0.5, MaxScale = 2.0, ZoomStep = 1.15;
 
+    // The key legend (top-left) is toggleable with `l`. It covers a fair slice of the screen, so power users
+    // hide it; the state is seeded from the persisted preference and raised back on change so App writes it to
+    // settings.json. When hidden a tiny "l legend" pill keeps the toggle discoverable.
+    private bool _legend = true;
+
     // The last render's per-room host controls (positioned at each room's cell) and the scene behind them, so
     // a drag can move a host directly — no re-render mid-gesture, which would drop the pointer capture.
     private readonly Dictionary<DesktopId, Control> _roomHosts = new();
@@ -100,12 +105,16 @@ internal sealed class SpatialOverlay : IStageContent
     /// <summary>+ / − / 0 — the map zoom changed. Carries the new (clamped) factor; App persists it to
     /// settings.json so the map reopens at the same zoom.</summary>
     public event Action<double>? ZoomChanged;
+    /// <summary>l — the legend was shown or hidden. App persists it to settings.json so the map reopens the
+    /// way you left it.</summary>
+    public event Action<bool>? LegendVisibilityChanged;
 
-    public SpatialOverlay(OverlayStage stage, MapCamera camera, double initialZoom = 1.0)
+    public SpatialOverlay(OverlayStage stage, MapCamera camera, double initialZoom = 1.0, bool showLegend = true)
     {
         _stage = stage;
         _camera = camera;
         _scale = Math.Clamp(initialZoom, MinScale, MaxScale);
+        _legend = showLegend;
         _root.PointerPressed += OnPointerPressed;
         _root.PointerMoved += OnPointerMoved;
         _root.PointerReleased += OnPointerReleased;
@@ -219,6 +228,7 @@ internal sealed class SpatialOverlay : IStageContent
             case Key.F: FinderRequested?.Invoke(); e.Handled = true; break;
             case Key.P: CommandPaletteRequested?.Invoke(); e.Handled = true; break;
             case Key.O: AppLauncherRequested?.Invoke(); e.Handled = true; break;
+            case Key.L: ToggleLegend(); e.Handled = true; break;
             // Zoom. + is usually Shift+= (OemPlus), so accept OemPlus/Add either way; likewise OemMinus/Subtract.
             case Key.Add: case Key.OemPlus: Zoom(ZoomStep); e.Handled = true; break;
             case Key.Subtract: case Key.OemMinus: Zoom(1 / ZoomStep); e.Handled = true; break;
@@ -337,6 +347,17 @@ internal sealed class SpatialOverlay : IStageContent
         _camera.Reframe();
         Render();
         ZoomChanged?.Invoke(_scale);
+    }
+
+    // ── Legend (l) ───────────────────────────────────────────────────────────────
+    // Show/hide the key legend. Persisted (via App) so it stays the way you left it; when hidden a small pill
+    // keeps the toggle discoverable.
+
+    private void ToggleLegend()
+    {
+        _legend = !_legend;
+        Render();
+        LegendVisibilityChanged?.Invoke(_legend);
     }
 
     // ── Tidy (t) & undo (Ctrl+Z) ───────────────────────────────────────────────
@@ -597,7 +618,7 @@ internal sealed class SpatialOverlay : IStageContent
 
         _root.Children.Clear();
         _root.Children.Add(board);
-        _root.Children.Add(BuildLegend());
+        _root.Children.Add(_legend ? BuildLegend() : BuildLegendHint());
         if (_groupsPanel) _root.Children.Add(BuildGroupsPanel(display));
 
         _stage.BringToFront();
@@ -618,9 +639,11 @@ internal sealed class SpatialOverlay : IStageContent
         rows.Children.Add(LegendRow("Ctrl+Shift+←→↑↓", "move the block"));
         rows.Children.Add(LegendRow("g", "set the room's group"));
         rows.Children.Add(LegendRow("Shift+g", "groups & colours"));
-        rows.Children.Add(LegendRow("r", "rename room · Shift+r group"));
+        rows.Children.Add(LegendRow("r", "rename room"));
+        rows.Children.Add(LegendRow("Shift+r", "rename group"));
         rows.Children.Add(LegendRow("n", "new desktop · b new branch"));
-        rows.Children.Add(LegendRow("m", "move windows · Shift+m pull"));
+        rows.Children.Add(LegendRow("m", "move windows"));
+        rows.Children.Add(LegendRow("Shift+m", "pull windows"));
         rows.Children.Add(LegendRow("f", "find · p palette · o apps"));
         rows.Children.Add(LegendRow("t", "tidy up (reunite groups)"));
         rows.Children.Add(LegendRow("+ / −", "zoom in / out · 0 reset"));
@@ -630,8 +653,10 @@ internal sealed class SpatialOverlay : IStageContent
             MapStyle.Metro => "ascii view",
             _ => "board view",
         }));
-        rows.Children.Add(LegendRow("Del", "remove room · Shift+Del group"));
+        rows.Children.Add(LegendRow("Del", "remove room"));
+        rows.Children.Add(LegendRow("Shift+Del", "remove group"));
         rows.Children.Add(LegendRow("Ctrl+z", "undo the last tidy"));
+        rows.Children.Add(LegendRow("l", "hide this legend"));
         rows.Children.Add(LegendRow("Esc", "close"));
         rows.Children.Add(new TextBlock
         {
@@ -654,18 +679,45 @@ internal sealed class SpatialOverlay : IStageContent
         return legend;
     }
 
-    private static Control LegendRow(string key, string desc)
+    // A hint shown in place of the full legend: a small pill in the same corner so the `l` toggle stays
+    // discoverable once the legend is hidden. Clicking it never selects the map behind it.
+    private Control BuildLegendHint()
     {
-        var cap = new Border
+        var hint = new Border
         {
-            Background = new SolidColorBrush(KeyCapBg),
-            CornerRadius = new Avalonia.CornerRadius(5), Padding = new Avalonia.Thickness(7, 2),
-            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center,
-            Child = new TextBlock
+            Background = new SolidColorBrush(LegendBg),
+            CornerRadius = new Avalonia.CornerRadius(9), Padding = new Avalonia.Thickness(10, 7),
+            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Avalonia.Thickness(24, 24, 0, 0),
+            Child = new StackPanel
             {
-                Text = key, FontSize = 11, FontWeight = FontWeight.SemiBold, Foreground = Accent, FontFamily = Mono,
+                Orientation = Orientation.Horizontal, Spacing = 8,
+                Children =
+                {
+                    KeyCap("l"),
+                    new TextBlock { Text = "legend", FontSize = 11, Foreground = FgDim, VerticalAlignment = VerticalAlignment.Center },
+                },
             },
         };
+        hint.PointerPressed += (_, e) => e.Handled = true;
+        return hint;
+    }
+
+    // A keycap chip — the accent-on-dark rounded label the legend and its hint share.
+    private static Control KeyCap(string key) => new Border
+    {
+        Background = new SolidColorBrush(KeyCapBg),
+        CornerRadius = new Avalonia.CornerRadius(5), Padding = new Avalonia.Thickness(7, 2),
+        HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center,
+        Child = new TextBlock
+        {
+            Text = key, FontSize = 11, FontWeight = FontWeight.SemiBold, Foreground = Accent, FontFamily = Mono,
+        },
+    };
+
+    private static Control LegendRow(string key, string desc)
+    {
+        Control cap = KeyCap(key);
         Grid.SetColumn(cap, 0);
         var label = new TextBlock
         {

@@ -192,7 +192,7 @@ public sealed partial class App : Application
             _settingsStore.Save(_settings);
         }
 
-        _hud = new HudWindow(_mapCamera);
+        _hud = new HudWindow(_mapCamera) { MapZoom = _settings.MapZoom }; // the flash draws the map at the same zoom
 
         // Persistent desktop-name pill over the taskbar. It re-reads the current desktop itself, but we
         // also poke it on every navigation so it never lags a keystroke.
@@ -228,6 +228,7 @@ public sealed partial class App : Application
             // The live card backdrop is the current spatial scene; read live, so no sync as it changes.
             SpatialProvider = () => (_model!.BuildSpatialSource(), _spatial),
             MapStyle = _settings.MapStyle, // board vs. metro, applied to every surface the stage draws
+            MapZoom = _settings.MapZoom,   // the map zoom, applied to the card backdrops and the move flow's board
         };
         // Park the taskbar pill while the overlay is up (the map already shows where you are) — this also
         // removes the topmost-z fight that made the pill flash in/out when a dialog opened.
@@ -236,11 +237,18 @@ public sealed partial class App : Application
 
         // The spatial map — the app's single map and "manage desktops" surface. Every edit is raised here and
         // serviced by App; DesktopId/Guid are resolved to the position-based model ops via Locate/IndexOfBranch.
-        _spatialOverlay = new SpatialOverlay(_stage, _mapCamera, _settings.MapZoom);
+        _spatialOverlay = new SpatialOverlay(_stage, _mapCamera, _settings.MapZoom, _settings.ShowMapLegend);
         _spatialOverlay.JumpRoomRequested += id => JumpFromMap(() => JumpToId(id));
         _spatialOverlay.ViewStyleToggleRequested += ToggleMapStyle; // v — cycle board ↔ metro ↔ ascii (app-wide)
         _spatialOverlay.SpatialStateChanged += () => _spatialStore?.Save(_spatial); // a move or recolour is written to spatial.json
-        _spatialOverlay.ZoomChanged += zoom => { _settings.MapZoom = zoom; _settingsStore?.Save(_settings); }; // +/− — persist the map zoom
+        _spatialOverlay.ZoomChanged += zoom =>                      // +/− — persist the map zoom and mirror it to
+        {                                                          // every other surface that draws the map (flash, backdrops, move flow)
+            _settings.MapZoom = zoom;
+            _settingsStore?.Save(_settings);
+            if (_stage is not null) _stage.MapZoom = zoom;
+            if (_hud is not null) _hud.MapZoom = zoom;
+        };
+        _spatialOverlay.LegendVisibilityChanged += show => { _settings.ShowMapLegend = show; _settingsStore?.Save(_settings); }; // l — persist the legend
         _spatialOverlay.SetRoomGroupRequested += OpenGroupPickerForRoom; // g — pick / create the room's group
         _spatialOverlay.DeleteRoomRequested += id =>       // Del — the confirm/teardown flow, resolved to a slot
         {

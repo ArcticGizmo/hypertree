@@ -76,6 +76,12 @@ public sealed class AppSettings
     /// map reopens at the zoom you left it. See <c>SpatialOverlay</c>.</summary>
     public double MapZoom { get; set; } = 1.0;
 
+    /// <summary>Whether the spatial map's key legend (the help panel in the top-left) is shown. Toggled with
+    /// <c>l</c> on the map and persisted, so power users can hide it for good — it covers a fair slice of the
+    /// screen and isn't needed once the keys are second nature. Defaults on for discoverability. See
+    /// <c>SpatialOverlay</c>.</summary>
+    public bool ShowMapLegend { get; set; } = true;
+
     /// <summary>Reusable branch recipes, offered via the branch card's "Load from template" button so you
     /// don't retype the desktop set each time. Empty by default — you build and delete them in the
     /// "Manage templates…" command.</summary>
