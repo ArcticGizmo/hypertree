@@ -18,3 +18,7 @@ public readonly record struct LayoutRect(double X, double Y, double Width, doubl
     /// into a screen rect by offsetting it.</summary>
     public LayoutRect Offset(double dx, double dy) => new(X + dx, Y + dy, Width, Height);
 }
+
+/// <summary>A point in world-space layout maths — the vertex type for the rectilinear group hull outline.
+/// Core has no Avalonia, so it can't use <c>Avalonia.Point</c>; the app converts at the drawing edge.</summary>
+public readonly record struct LayoutPoint(double X, double Y);

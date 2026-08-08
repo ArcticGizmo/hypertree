@@ -6,10 +6,12 @@ namespace Hypertree.Spatial;
 /// <summary>A room placed in world space — its scene data plus the rect it occupies.</summary>
 public sealed record PlacedRoom(SpatialRoom Room, LayoutRect Rect);
 
-/// <summary>A group's hull: the padded bounding rect of one contiguous fragment of its rooms. A group with
-/// scattered rooms yields several; <see cref="Primary"/> marks the one the name badge hangs off (the
-/// top-most, then left-most, fragment) so the label has a stable home.</summary>
-public sealed record GroupHull(SpatialGroup Group, LayoutRect Rect, bool Primary);
+/// <summary>A group's hull: the rectilinear "tetris" outline of one edge-connected clump of its rooms
+/// (<see cref="Loops"/> — outer ring first, then holes), plus that outline's bounding <see cref="Rect"/> for
+/// the badge and framing. A group with rooms in several clumps yields several hulls; <see cref="Primary"/>
+/// marks the one the name badge hangs off (the top-most, then left-most) so the label has a stable home.</summary>
+public sealed record GroupHull(
+    SpatialGroup Group, IReadOnlyList<IReadOnlyList<LayoutPoint>> Loops, LayoutRect Rect, bool Primary);
 
 /// <summary>
 /// Where every room sits in <b>world space</b> for the spatial map — the spatial twin of
@@ -76,43 +78,36 @@ public sealed class SpatialLayout : ICameraLayout
         return (lo, hi);
     }
 
-    /// <summary>The group hulls to draw, padded by (<paramref name="padX"/>, <paramref name="padY"/>) around
-    /// each contiguous fragment. One hull per fragment, so a split group shows as several; the top-most /
-    /// left-most fragment of each group is flagged <see cref="GroupHull.Primary"/> for the name badge.</summary>
+    /// <summary>The group hulls to draw: the "tetris" outline of each edge-connected clump of a group's
+    /// rooms, its edges hugging the cells and merged where cells adjoin, held <paramref name="padX"/> /
+    /// <paramref name="padY"/> clear of the room tiles inside. One hull per clump, so a split group shows as
+    /// several; the top-most / left-most clump of each group is flagged <see cref="GroupHull.Primary"/> for
+    /// the name badge.</summary>
     public IReadOnlyList<GroupHull> Hulls(double padX, double padY)
     {
+        // Full stride cells abut, so edge-adjacent cells merge; inset back to leave `pad` around each tile.
+        double insetX = Math.Max(1, (_m.CellStride - _m.CellWidth) / 2 - padX);
+        double insetY = Math.Max(1, (_m.RowPitch - _m.CellHeight) / 2 - padY);
+
         var result = new List<GroupHull>();
         foreach (SpatialGroup g in Scene.Groups)
         {
-            List<PlacedRoom> members = _rooms.Where(r => r.Room.GroupId == g.Id).ToList();
-            if (members.Count == 0) continue;
+            var cells = _rooms.Where(r => r.Room.GroupId == g.Id).Select(r => r.Room.Pos).ToList();
+            if (cells.Count == 0) continue;
 
-            IReadOnlyList<IReadOnlyList<int>> frags =
-                SpatialClusters.Fragments(members.Select(m => m.Room.Pos).ToList());
+            IReadOnlyList<HullShape> shapes = SpatialHull.Shapes(cells, _m.CellStride, _m.RowPitch, insetX, insetY);
+            if (shapes.Count == 0) continue;
 
-            var hulls = new List<LayoutRect>(frags.Count);
-            foreach (IReadOnlyList<int> frag in frags)
-            {
-                double l = double.MaxValue, t = double.MaxValue, r = double.MinValue, b = double.MinValue;
-                foreach (int i in frag)
-                {
-                    LayoutRect rc = members[i].Rect;
-                    l = Math.Min(l, rc.Left); t = Math.Min(t, rc.Top);
-                    r = Math.Max(r, rc.Right); b = Math.Max(b, rc.Bottom);
-                }
-                hulls.Add(new LayoutRect(l - padX, t - padY, r - l + 2 * padX, b - t + 2 * padY));
-            }
-
-            // The badge hangs off the top-most (then left-most) fragment, so it has a stable home even as
-            // fragments come and go.
+            // The badge hangs off the top-most (then left-most) clump, so it has a stable home even as
+            // clumps come and go.
             int primary = 0;
-            for (int i = 1; i < hulls.Count; i++)
-                if (hulls[i].Top < hulls[primary].Top ||
-                    (hulls[i].Top == hulls[primary].Top && hulls[i].Left < hulls[primary].Left))
+            for (int i = 1; i < shapes.Count; i++)
+                if (shapes[i].Bounds.Top < shapes[primary].Bounds.Top ||
+                    (shapes[i].Bounds.Top == shapes[primary].Bounds.Top && shapes[i].Bounds.Left < shapes[primary].Bounds.Left))
                     primary = i;
 
-            for (int i = 0; i < hulls.Count; i++)
-                result.Add(new GroupHull(g, hulls[i], i == primary));
+            for (int i = 0; i < shapes.Count; i++)
+                result.Add(new GroupHull(g, shapes[i].Loops, shapes[i].Bounds, i == primary));
         }
         return result;
     }

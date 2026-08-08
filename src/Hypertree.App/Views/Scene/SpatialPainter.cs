@@ -14,8 +14,9 @@ namespace Hypertree.App.Views.Scene;
 
 /// <summary>
 /// Draws the <b>spatial map</b>: desktops as freely-placed room tiles (the board tile look, tinted to their
-/// group's colour) sitting inside translucent group hulls, one hull per contiguous fragment so a scattered
-/// group reads as broken. It only draws — <see cref="SpatialLayout"/> owns world placement and the shared
+/// group's colour) sitting inside translucent group hulls — each the rounded "tetris" outline of one
+/// edge-connected clump of the group's cells, so a scattered group reads as broken. It only draws —
+/// <see cref="SpatialLayout"/> owns world placement (and the hull outlines) and the shared
 /// <see cref="MapCamera"/> owns panning, so the spatial model frames and moves exactly like the rows.
 ///
 /// M1 is read-only (captures, previews); selection/drag/tidy interaction lands in later milestones.
@@ -145,22 +146,69 @@ internal static class SpatialPainter
         bool main = hull.Group.IsMain; // the ungrouped bucket: barely-there, dashed, no deliberate grouping
         LayoutRect r = hull.Rect;
 
-        // A selected group lifts to a stronger fill and a blue selection stroke, the same accent the room
-        // selection uses, so "this group is active" reads at a glance. Resting fills are kept very faint —
+        // The hull is the group's "tetris" outline — the rooms' cells merged along shared edges, corners
+        // rounded. A selected group lifts to a stronger fill and a blue selection stroke, the same accent the
+        // room selection uses, so "this group is active" reads at a glance. Resting fills are kept very faint —
         // the hull should whisper the grouping, not colour-wash the rooms inside it.
-        var rect = new Rectangle
+        var path = new Avalonia.Controls.Shapes.Path
         {
-            Width = r.Width, Height = r.Height, RadiusX = 20 * s, RadiusY = 20 * s,
+            Data = HullGeometry(hull.Loops, ox, oy, 18 * s),
             Fill = new SolidColorBrush(c, selected ? 0.11 : main ? 0.02 : 0.045),
             Stroke = new SolidColorBrush(selected ? Focus : c, selected ? 1.0 : main ? 0.18 : 0.34),
             StrokeThickness = Math.Max(1, (selected ? 1.8 : 1.1) * s),
+            StrokeJoin = PenLineJoin.Round,
         };
-        if (main && !selected) rect.StrokeDashArray = new AvaloniaList<double> { 2, 4 };
-        Canvas.SetLeft(rect, r.Left + ox);
-        Canvas.SetTop(rect, r.Top + oy);
-        canvas.Children.Add(rect);
+        if (main && !selected) path.StrokeDashArray = new AvaloniaList<double> { 2, 4 };
+        canvas.Children.Add(path);
 
         if (hull.Primary) PaintBadge(canvas, hull.Group, c, main, r.Left + ox, r.Top + oy, s);
+    }
+
+    // Turn the hull's rectilinear rings into a filled path with rounded corners: each corner is cut back by
+    // `radius` (clamped to half its shorter edge, so short notches stay clean) and bridged with a quadratic —
+    // which rounds convex and concave corners alike. Holes (a group encircling an empty cell) are extra rings
+    // under the even-odd rule. Points already carry the camera offset (ox, oy).
+    private static StreamGeometry HullGeometry(IReadOnlyList<IReadOnlyList<LayoutPoint>> loops, double ox, double oy, double radius)
+    {
+        var geo = new StreamGeometry();
+        using StreamGeometryContext ctx = geo.Open();
+        ctx.SetFillRule(FillRule.EvenOdd);
+
+        foreach (IReadOnlyList<LayoutPoint> loop in loops)
+        {
+            int n = loop.Count;
+            if (n < 3) continue;
+            var p = new Point[n];
+            for (int i = 0; i < n; i++) p[i] = new Point(loop[i].X + ox, loop[i].Y + oy);
+
+            double R(int i)
+            {
+                Point prev = p[(i - 1 + n) % n], next = p[(i + 1) % n];
+                return Math.Min(radius, Math.Min(Dist(p[i], prev), Dist(p[i], next)) / 2);
+            }
+            Point In(int i) => Toward(p[i], p[(i - 1 + n) % n], R(i));   // point on the incoming edge
+            Point Out(int i) => Toward(p[i], p[(i + 1) % n], R(i));      // point on the outgoing edge
+
+            ctx.BeginFigure(Out(0), isFilled: true);
+            for (int i = 0; i < n; i++)
+            {
+                int j = (i + 1) % n;
+                ctx.LineTo(In(j));                    // straight run to just before the next corner
+                ctx.QuadraticBezierTo(p[j], Out(j));  // round the corner through the true vertex
+            }
+            ctx.EndFigure(true);
+        }
+        return geo;
+    }
+
+    private static double Dist(Point a, Point b) => Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+
+    private static Point Toward(Point from, Point to, double d)
+    {
+        double len = Dist(from, to);
+        if (len < 1e-6) return from;
+        double t = d / len;
+        return new Point(from.X + (to.X - from.X) * t, from.Y + (to.Y - from.Y) * t);
     }
 
     private static void PaintBadge(Canvas canvas, SpatialGroup group, Color c, bool main, double x, double y, double s)
