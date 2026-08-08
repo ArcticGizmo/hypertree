@@ -236,10 +236,11 @@ public sealed partial class App : Application
 
         // The spatial map — the app's single map and "manage desktops" surface. Every edit is raised here and
         // serviced by App; DesktopId/Guid are resolved to the position-based model ops via Locate/IndexOfBranch.
-        _spatialOverlay = new SpatialOverlay(_stage, _mapCamera);
+        _spatialOverlay = new SpatialOverlay(_stage, _mapCamera, _settings.MapZoom);
         _spatialOverlay.JumpRoomRequested += id => JumpFromMap(() => JumpToId(id));
         _spatialOverlay.ViewStyleToggleRequested += ToggleMapStyle; // v — cycle board ↔ metro ↔ ascii (app-wide)
         _spatialOverlay.SpatialStateChanged += () => _spatialStore?.Save(_spatial); // a move or recolour is written to spatial.json
+        _spatialOverlay.ZoomChanged += zoom => { _settings.MapZoom = zoom; _settingsStore?.Save(_settings); }; // +/− — persist the map zoom
         _spatialOverlay.SetRoomGroupRequested += OpenGroupPickerForRoom; // g — pick / create the room's group
         _spatialOverlay.DeleteRoomRequested += id =>       // Del — the confirm/teardown flow, resolved to a slot
         {

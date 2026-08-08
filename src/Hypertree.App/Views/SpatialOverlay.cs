@@ -46,6 +46,13 @@ internal sealed class SpatialOverlay : IStageContent
     private Dictionary<string, GridPos>? _tidyUndo; // positions before the last tidy, for Ctrl+Z
     private bool _initialised;
 
+    // Map zoom (+/−). A whole-map scale applied to the painter's geometry; the camera reframes on each step so
+    // the selection stays put rather than sliding off. Stepped multiplicatively and clamped so the map can't
+    // shrink to illegibility or blow up past the viewport. Seeded from the persisted preference and raised back
+    // on change so App writes it to settings.json — the map reopens at the zoom you left it.
+    private double _scale = 1.0;
+    private const double MinScale = 0.5, MaxScale = 2.0, ZoomStep = 1.15;
+
     // The last render's per-room host controls (positioned at each room's cell) and the scene behind them, so
     // a drag can move a host directly — no re-render mid-gesture, which would drop the pointer capture.
     private readonly Dictionary<DesktopId, Control> _roomHosts = new();
@@ -90,11 +97,15 @@ internal sealed class SpatialOverlay : IStageContent
     public event Action? CommandPaletteRequested;
     /// <summary>o — open the application launcher over the map; Esc pops back here.</summary>
     public event Action? AppLauncherRequested;
+    /// <summary>+ / − / 0 — the map zoom changed. Carries the new (clamped) factor; App persists it to
+    /// settings.json so the map reopens at the same zoom.</summary>
+    public event Action<double>? ZoomChanged;
 
-    public SpatialOverlay(OverlayStage stage, MapCamera camera)
+    public SpatialOverlay(OverlayStage stage, MapCamera camera, double initialZoom = 1.0)
     {
         _stage = stage;
         _camera = camera;
+        _scale = Math.Clamp(initialZoom, MinScale, MaxScale);
         _root.PointerPressed += OnPointerPressed;
         _root.PointerMoved += OnPointerMoved;
         _root.PointerReleased += OnPointerReleased;
@@ -208,6 +219,10 @@ internal sealed class SpatialOverlay : IStageContent
             case Key.F: FinderRequested?.Invoke(); e.Handled = true; break;
             case Key.P: CommandPaletteRequested?.Invoke(); e.Handled = true; break;
             case Key.O: AppLauncherRequested?.Invoke(); e.Handled = true; break;
+            // Zoom. + is usually Shift+= (OemPlus), so accept OemPlus/Add either way; likewise OemMinus/Subtract.
+            case Key.Add: case Key.OemPlus: Zoom(ZoomStep); e.Handled = true; break;
+            case Key.Subtract: case Key.OemMinus: Zoom(1 / ZoomStep); e.Handled = true; break;
+            case Key.D0 when e.KeyModifiers == KeyModifiers.None: ResetZoom(); e.Handled = true; break;
             case Key.Delete when e.KeyModifiers.HasFlag(KeyModifiers.Shift): DeleteGroup(); e.Handled = true; break;
             case Key.Delete: DeleteCursorRoom(); e.Handled = true; break;
             case Key.Back: DeleteCursorRoom(); e.Handled = true; break;
@@ -299,6 +314,29 @@ internal sealed class SpatialOverlay : IStageContent
         _paletteFor = null;
         SpatialStateChanged?.Invoke();
         Render();
+    }
+
+    // ── Zoom (+/−, 0 to reset) ──────────────────────────────────────────────────
+    // Scale the whole map, clamped to a legible range. Reframe so the selection recenters at the new scale
+    // rather than the carried pixel offset (computed for the old metrics) sliding the view.
+
+    private void Zoom(double factor)
+    {
+        double next = Math.Clamp(_scale * factor, MinScale, MaxScale);
+        if (Math.Abs(next - _scale) < 1e-6) return; // already at the limit — nothing to redraw
+        _scale = next;
+        _camera.Reframe();
+        Render();
+        ZoomChanged?.Invoke(_scale);
+    }
+
+    private void ResetZoom()
+    {
+        if (Math.Abs(_scale - 1.0) < 1e-6) return;
+        _scale = 1.0;
+        _camera.Reframe();
+        Render();
+        ZoomChanged?.Invoke(_scale);
     }
 
     // ── Tidy (t) & undo (Ctrl+Z) ───────────────────────────────────────────────
@@ -489,7 +527,7 @@ internal sealed class SpatialOverlay : IStageContent
         _dragGridBase.Clear();
         if (!wasDragging) return;                              // a click, not a drag — selection handled on press
 
-        (double sx, double sy) = SpatialPainter.Stride(1.0);
+        (double sx, double sy) = SpatialPainter.Stride(_scale);
         int gdx = (int)Math.Round(dx / sx), gdy = (int)Math.Round(dy / sy);
         if (gdx == 0 && gdy == 0) { Render(); return; }        // didn't cross a cell — snap the hosts back
         foreach ((DesktopId id, GridPos basePos) in gridBase) _state.SetPosition(id.Value, basePos.Offset(gdx, gdy));
@@ -551,7 +589,7 @@ internal sealed class SpatialOverlay : IStageContent
 
         _roomHosts.Clear();
         _hits.Clear();
-        Control board = SpatialPainter.Render(display, width, height, 1.0, _camera,
+        Control board = SpatialPainter.Render(display, width, height, _scale, _camera,
             onClick: id => { _cursor = id; _selectedGroup = null; _tilePressed = true; Render(); },
             onActivate: id => JumpRoomRequested?.Invoke(id),
             hits: _hits, selectedGroup: _selectedGroup, style: _stage.MapStyle, roomHosts: _roomHosts,
@@ -585,6 +623,7 @@ internal sealed class SpatialOverlay : IStageContent
         rows.Children.Add(LegendRow("m", "move windows · Shift+m pull"));
         rows.Children.Add(LegendRow("f", "find · p palette · o apps"));
         rows.Children.Add(LegendRow("t", "tidy up (reunite groups)"));
+        rows.Children.Add(LegendRow("+ / −", "zoom in / out · 0 reset"));
         rows.Children.Add(LegendRow("v", _stage.MapStyle switch
         {
             MapStyle.Board => "metro view",
