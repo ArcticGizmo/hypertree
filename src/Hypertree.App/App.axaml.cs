@@ -227,6 +227,10 @@ public sealed partial class App : Application
         _stage = new OverlayStage(_desktops, _activator)
         {
             MapProvider = () => _model!.BuildMap(),
+            // The live card backdrop follows the user's chosen layout: the spatial scene when they're in the
+            // spatial model, else the row map. Both read live, so no sync as the model/style changes.
+            ModelProvider = () => _settings.MapModel,
+            SpatialProvider = () => (_model!.BuildSpatialSource(), _spatial),
             MapStyle = _settings.MapStyle, // board vs. metro, applied to every surface the stage draws
         };
         // Park the taskbar pill while the overlay is up (the map already shows where you are) — this also
@@ -1317,10 +1321,12 @@ public sealed partial class App : Application
         for (int i = 0; i < map.TopRow.Count; i++)
         {
             int idx = i;
-            bool last = IsLast(_model.PeekTopDesktop(i)?.id);
+            DesktopId? tid = _model.PeekTopDesktop(i)?.id;
+            bool last = IsLast(tid);
             items.Add(new PaletteItem(map.TopRow[i].Label, Detail("main", last), Icon(last),
                 () => Jump(() => _model!.GoToTop(idx)), // no flash — the preview already showed it
-                Preview: () => PreviewMap(onMain: true, topIndex: idx, branchIndex: -1, desktopIndex: -1)));
+                Preview: () => PreviewMap(onMain: true, topIndex: idx, branchIndex: -1, desktopIndex: -1),
+                SpatialPreview: tid is { } t ? () => SpatialPreviewScene(t) : null));
             if (last) lastIndex = items.Count - 1;
         }
         foreach (NavMapBranch g in map.Branches)
@@ -1329,10 +1335,12 @@ public sealed partial class App : Application
             for (int j = 0; j < g.Desktops.Count; j++)
             {
                 int dj = j;
-                bool last = IsLast(_model.PeekBranchDesktop(gi, dj)?.id);
+                DesktopId? tid = _model.PeekBranchDesktop(gi, dj)?.id;
+                bool last = IsLast(tid);
                 items.Add(new PaletteItem(g.Desktops[j].Label, Detail(g.Name, last), Icon(last),
                     () => Jump(() => _model!.GoToBranchDesktop(gi, dj)),
-                    Preview: () => PreviewMap(onMain: false, topIndex: -1, branchIndex: gi, desktopIndex: dj)));
+                    Preview: () => PreviewMap(onMain: false, topIndex: -1, branchIndex: gi, desktopIndex: dj),
+                    SpatialPreview: tid is { } t ? () => SpatialPreviewScene(t) : null));
                 if (last) lastIndex = items.Count - 1;
             }
         }
@@ -1348,9 +1356,14 @@ public sealed partial class App : Application
         OpenPalette("Jump to or create a desktop…",
             "↑↓ move · ↵ jump/create · Esc back · blue = you are here", items,
             query => new PaletteItem($"Create desktop “{query}”", "new · main", "+",
-                () => CreateAndGoToDesktop(query),
-                Preview: () => _model!.BuildMap())); // no target tile yet — show the current board
+                () => CreateAndGoToDesktop(query))); // no target tile yet — the stage shows the live board
     }
+
+    // The spatial twin of PreviewMap: the current scene with the jump's target as the blue selection (and
+    // the desktop you're on staying the green "here"), so the jump palette highlights where you'd land as a
+    // room while the user is in the spatial model.
+    private SpatialScene SpatialPreviewScene(DesktopId target)
+        => SpatialScene.From(_model!.BuildSpatialSource(), _spatial, target);
 
     // Build a board snapshot that marks a specific desktop as current (for the jump palette's preview),
     // without moving the model. Rebuilds the tiles from the live map with the target highlighted and
@@ -1436,12 +1449,13 @@ public sealed partial class App : Application
 
         _model.Reconcile(); // drop any externally-deleted desktops so the context board is accurate
 
-        // Show the live map behind each command ("blue = you are here"); commands with a distinct target
-        // supply their own board that highlights what they'll act on (green).
+        // Show the live map behind each command ("blue = you are here") — the stage draws it in the user's
+        // current model (rows or spatial). Commands with a distinct target supply their own board that
+        // highlights what they'll act on (green); a null preview falls back to the stage's live board.
         var items = BuildCommands()
             .Select(c => new PaletteItem(c.Name, c.DisabledReason,
                                          c.DisabledReason is null ? "▸" : null, c.Run,
-                                         Preview: c.Preview ?? (() => _model!.BuildMap()),
+                                         Preview: c.Preview,
                                          DisabledReason: c.DisabledReason))
             .ToList();
         var palette = new PaletteContent("Run a command…",

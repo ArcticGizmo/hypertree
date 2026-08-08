@@ -6,6 +6,7 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Hypertree.Scopes;
+using Hypertree.Spatial;
 
 namespace Hypertree.App.Views;
 
@@ -14,10 +15,13 @@ namespace Hypertree.App.Views;
 /// desktops), an optional trailing <paramref name="Glyph"/>, the action to run when it's chosen, and an
 /// optional <paramref name="Preview"/> board to show behind the palette while it's the selected row.
 /// <paramref name="LoadIcon"/>, when set, supplies a leading icon fetched asynchronously (the app
-/// launcher's app icons) — the row shows a blank slot until it resolves.</summary>
+/// launcher's app icons) — the row shows a blank slot until it resolves. <paramref name="SpatialPreview"/>
+/// is the spatial-model twin of <paramref name="Preview"/>: the scene shown behind the card while the user
+/// is in the spatial map, so a row can highlight its target as a room rather than a row-map tile.</summary>
 internal sealed record PaletteItem(string Label, string? Detail, string? Glyph, Action Choose,
                                    Func<NavMap>? Preview = null, string? DisabledReason = null,
-                                   Action? OnDelete = null, Func<Task<IImage?>>? LoadIcon = null)
+                                   Action? OnDelete = null, Func<Task<IImage?>>? LoadIcon = null,
+                                   Func<SpatialScene>? SpatialPreview = null)
 {
     /// <summary>A greyed-out row: still shown and selectable (so the reason can be read), but inert.</summary>
     public bool Enabled => DisabledReason is null;
@@ -135,6 +139,14 @@ internal sealed class PaletteContent : IStageContent
     {
         PaletteItem? sel = _selected >= 0 && _selected < _filtered.Count ? _filtered[_selected] : null;
         return sel?.Preview?.Invoke();
+    }
+
+    // The spatial scene behind the card in spatial mode: the selected row's spatial preview, or null ⇒ the
+    // stage falls back to its live spatial scene.
+    public SpatialScene? BackdropScene()
+    {
+        PaletteItem? sel = _selected >= 0 && _selected < _filtered.Count ? _filtered[_selected] : null;
+        return sel?.SpatialPreview?.Invoke();
     }
 
     public void OnPresented(OverlayStage stage)

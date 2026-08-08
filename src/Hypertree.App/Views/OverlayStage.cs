@@ -7,10 +7,13 @@ using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using Hypertree.App.Views.Scene;
 using Hypertree.Desktops;
+using Hypertree.Layout;
 using Hypertree.Platform;
 using Hypertree.Scopes;
 using Hypertree.Settings;
+using Hypertree.Spatial;
 
 namespace Hypertree.App.Views;
 
@@ -57,6 +60,15 @@ internal sealed class OverlayStage
 
     /// <summary>Supplies the live board rendered behind Card content (App: <c>() =&gt; _model.BuildMap()</c>).</summary>
     public Func<NavMap>? MapProvider;
+
+    /// <summary>Reports the map model the user is currently in, so a card's live backdrop follows their
+    /// chosen layout (rows vs spatial) rather than always showing the row map (App: <c>() =&gt;
+    /// _settings.MapModel</c>). Null ⇒ assume rows.</summary>
+    public Func<MapModel>? ModelProvider;
+
+    /// <summary>Supplies the live spatial scene rendered behind Card content while the model is
+    /// <see cref="MapModel.Spatial"/> (App: the current source + persisted state).</summary>
+    public Func<(SpatialSource Source, SpatialState State)>? SpatialProvider;
 
     /// <summary>The board style for every surface the stage draws (card backdrops here; the map and move
     /// flow read it off the stage too). App keeps this in sync with the persisted setting, so choosing the
@@ -216,13 +228,27 @@ internal sealed class OverlayStage
         if (firstShow) Shown?.Invoke();
     }
 
-    // The board to paint behind a card: the content's own override (a jump-target highlight, a snapshot
-    // preview) or, by default, the live map.
+    // The board to paint behind a card. By default it's the live map in whichever model the user is in, so
+    // the backdrop always matches their chosen layout. A card can override: a spatial scene (the jump
+    // palette highlighting its target), or a NavMap (a snapshot's would-be layout) — the latter is kept as
+    // an explicit row depiction even in spatial mode, since it deliberately shows a concrete other layout.
     private Control? RenderBackdrop(IStageContent content)
     {
+        double w = HostWidth > 0 ? HostWidth : 1280, h = HostHeight > 0 ? HostHeight : 800;
+        MapModel model = ModelProvider?.Invoke() ?? MapModel.Rows;
+
+        if (model == MapModel.Spatial && SpatialProvider is { } spatial)
+        {
+            if (content.BackdropScene() is { } scene)
+                return SpatialPainter.Render(scene, w, h, 1.0, new MapCamera(), style: MapStyle);
+            if (content.BackdropBoard() is { } previewMap)
+                return MapSurface.Render(previewMap, w, h, MapStyle);
+            (SpatialSource source, SpatialState state) = spatial();
+            return SpatialPainter.Render(SpatialScene.From(source, state), w, h, 1.0, new MapCamera(), style: MapStyle);
+        }
+
         NavMap? map = content.BackdropBoard() ?? MapProvider?.Invoke();
         if (map is null) return null;
-        double w = HostWidth > 0 ? HostWidth : 1280, h = HostHeight > 0 ? HostHeight : 800;
         return MapSurface.Render(map, w, h, MapStyle);
     }
 
@@ -382,6 +408,11 @@ internal interface IStageContent
     /// <summary>The board to paint behind this card, or null to use the stage's live map. Full-surface
     /// content ignores this (it draws its own board).</summary>
     NavMap? BackdropBoard() => null;
+
+    /// <summary>The spatial scene to paint behind this card while the user is in the spatial model, or null
+    /// to fall back to <see cref="BackdropBoard"/> / the live spatial scene. Lets a card highlight its
+    /// target spatially (the jump palette) instead of only on the row map.</summary>
+    SpatialScene? BackdropScene() => null;
 
     /// <summary>Called after the view is hosted and the host is foregrounded — take focus, start timers,
     /// register DWM thumbnails, etc. The stage is passed for host handle / focus helpers.</summary>
