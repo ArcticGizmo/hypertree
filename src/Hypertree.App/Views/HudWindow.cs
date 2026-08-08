@@ -20,7 +20,7 @@ namespace Hypertree.App.Views;
 /// draws (F1: one presentation, two modes). It stays up while you hold the nav modifiers (Ctrl+Alt),
 /// so you get time to find your bearings mid-navigation, and only fades out a short beat after you
 /// release them. This is the transient mode: click-through and non-activating, so it never blocks
-/// input or steals focus. The interactive mode (<see cref="MapOverlay"/>) draws the same board but
+/// input or steals focus. The interactive mode (<see cref="SpatialOverlay"/>) draws the same board but
 /// stays open, takes clicks, and pins across desktops.
 /// </summary>
 internal sealed class HudWindow : Window

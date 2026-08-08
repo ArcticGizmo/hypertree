@@ -13,14 +13,15 @@ using Hypertree.Spatial;
 namespace Hypertree.App.Views;
 
 /// <summary>
-/// The interactive <b>spatial map</b> — the second map model, presented on the same <see cref="OverlayStage"/>
-/// as the row <see cref="MapOverlay"/>. Desktops are freely-placed rooms; a blue selection cursor moves over
-/// a stationary map (arrow keys pick the nearest room in that direction, or click a room), <c>Enter</c> /
-/// double-click switches, and <c>Tab</c> flips back to the row model. It shares the app's dead-zone
-/// <see cref="MapCamera"/> with the flash and the row map, so switching models never teleports the view.
+/// The interactive <b>spatial map</b> — the app's single map and "manage desktops" surface, presented on the
+/// shared <see cref="OverlayStage"/>. Desktops are freely-placed rooms; a blue selection cursor moves over a
+/// stationary map (arrow keys pick the nearest room in that direction, or click a room), <c>Enter</c> /
+/// double-click switches. It shares the app's dead-zone <see cref="MapCamera"/> with the flash, so raising
+/// the map never teleports the view.
 ///
-/// M2 covers viewing, navigation, jump and the model swap. Placement, groups, delete and tidy — the edits —
-/// arrive in later milestones; the overlay is built to grow those in without touching the row map.
+/// Every edit is raised as an event for <c>App</c> (which owns the <see cref="NavigationModel"/> and the
+/// desktop controller): navigate, jump, place/move rooms, groups &amp; colours, rename, new desktop/branch,
+/// delete, move/pull windows, and the finder/palette/launcher — the overlay never mutates model state.
 /// </summary>
 internal sealed class SpatialOverlay : IStageContent
 {
@@ -51,10 +52,8 @@ internal sealed class SpatialOverlay : IStageContent
 
     /// <summary>Switch to a room (Enter / double-click) — App resolves the id to a jump.</summary>
     public event Action<DesktopId>? JumpRoomRequested;
-    /// <summary>Tab — swap back to the row map. App flips the persisted model and re-opens.</summary>
-    public event Action? SwapModelRequested;
     /// <summary>v — cycle the whole-app Map style (Board → Metro → ASCII). App persists it and pushes it back,
-    /// so the room glyphs follow and List stays consistent.</summary>
+    /// so the room glyphs follow.</summary>
     public event Action? ViewStyleToggleRequested;
     /// <summary>A move or a recolour changed the spatial state: it's already written to the shared
     /// <see cref="SpatialState"/>; App just persists it to spatial.json.</summary>
@@ -66,6 +65,25 @@ internal sealed class SpatialOverlay : IStageContent
     public event Action<DesktopId>? DeleteRoomRequested;
     /// <summary>Shift+Del — remove a whole group (a branch). App resolves the group id to a branch.</summary>
     public event Action<Guid>? DeleteGroupRequested;
+    /// <summary>r — rename the highlighted room (the desktop). App prompts and relabels.</summary>
+    public event Action<DesktopId>? RenameRoomRequested;
+    /// <summary>Shift+R — rename the highlighted room's group (a branch). Not raised for main.</summary>
+    public event Action<Guid>? RenameGroupRequested;
+    /// <summary>n — create a new desktop in the highlighted room's group (branch, or main). App prompts,
+    /// creates it, and homes the cursor onto it.</summary>
+    public event Action<DesktopId>? NewDesktopRequested;
+    /// <summary>b — create a new branch (a new group). App opens the branch card over the map.</summary>
+    public event Action? NewBranchRequested;
+    /// <summary>m — start the move-windows flow (relocate this desktop's windows elsewhere).</summary>
+    public event Action? MoveWindowsRequested;
+    /// <summary>Shift+M — start the pull-windows flow (bring windows from other desktops onto this one).</summary>
+    public event Action? PullWindowsRequested;
+    /// <summary>f — open the finder (jump/create spotlight) over the map; Esc pops back here.</summary>
+    public event Action? FinderRequested;
+    /// <summary>p — open the command palette over the map; Esc pops back here.</summary>
+    public event Action? CommandPaletteRequested;
+    /// <summary>o — open the application launcher over the map; Esc pops back here.</summary>
+    public event Action? AppLauncherRequested;
 
     public SpatialOverlay(OverlayStage stage, MapCamera camera)
     {
@@ -106,6 +124,21 @@ internal sealed class SpatialOverlay : IStageContent
         Render();
     }
 
+    /// <summary>The room the cursor is on (for App: where a new branch attaches, which desktop an action
+    /// targets). Null until the cursor is homed.</summary>
+    public DesktopId? SelectedRoom => _cursor;
+
+    /// <summary>Point the blue selection at a specific room — e.g. a freshly created desktop. Redraws now if
+    /// current; else it's held for the next present (stash the scene via <see cref="SetSource"/> first, so
+    /// the room exists in the scene being drawn).</summary>
+    public void SelectRoom(DesktopId id)
+    {
+        _cursor = id;
+        _selectedGroup = null;
+        _initialised = true; // keep this selection — don't let InitCursor override it on re-present
+        if (IsOpen) Render();
+    }
+
     public void Close()
     {
         if (IsOpen) _stage.Back();
@@ -142,12 +175,20 @@ internal sealed class SpatialOverlay : IStageContent
         switch (e.Key)
         {
             case Key.Escape: OnEscape(); e.Handled = true; break;
-            case Key.Tab: SwapModelRequested?.Invoke(); e.Handled = true; break;
             case Key.Enter: if (_cursor is { } c) JumpRoomRequested?.Invoke(c); e.Handled = true; break;
             case Key.G when e.KeyModifiers.HasFlag(KeyModifiers.Shift): ToggleGroupsPanel(); e.Handled = true; break;
             case Key.G: RequestSetGroup(); e.Handled = true; break;
             case Key.V: ViewStyleToggleRequested?.Invoke(); e.Handled = true; break;
             case Key.T: Tidy(); e.Handled = true; break;
+            case Key.R when e.KeyModifiers.HasFlag(KeyModifiers.Shift): RequestRenameGroup(); e.Handled = true; break;
+            case Key.R: RequestRenameRoom(); e.Handled = true; break;
+            case Key.N: RequestNewDesktop(); e.Handled = true; break;
+            case Key.B: NewBranchRequested?.Invoke(); e.Handled = true; break;
+            case Key.M when e.KeyModifiers.HasFlag(KeyModifiers.Shift): PullWindowsRequested?.Invoke(); e.Handled = true; break;
+            case Key.M: MoveWindowsRequested?.Invoke(); e.Handled = true; break;
+            case Key.F: FinderRequested?.Invoke(); e.Handled = true; break;
+            case Key.P: CommandPaletteRequested?.Invoke(); e.Handled = true; break;
+            case Key.O: AppLauncherRequested?.Invoke(); e.Handled = true; break;
             case Key.Delete when e.KeyModifiers.HasFlag(KeyModifiers.Shift): DeleteGroup(); e.Handled = true; break;
             case Key.Delete: DeleteCursorRoom(); e.Handled = true; break;
             case Key.Back: DeleteCursorRoom(); e.Handled = true; break;
@@ -203,6 +244,24 @@ internal sealed class SpatialOverlay : IStageContent
     private void RequestSetGroup()
     {
         if (_cursor is { } id && RoomOf(id) is not null) SetRoomGroupRequested?.Invoke(id);
+    }
+
+    // r / Shift+R / n — desktop and group edits App owns. The overlay hands over the highlighted room (or its
+    // group); App prompts, mutates the model, and homes the cursor back via SelectRoom.
+    private void RequestRenameRoom()
+    {
+        if (_cursor is { } id && RoomOf(id) is not null) RenameRoomRequested?.Invoke(id);
+    }
+
+    private void RequestRenameGroup()
+    {
+        // main (the ungrouped bucket) has no branch to rename.
+        if (_cursor is { } id && RoomOf(id) is { IsMainGroup: false } room) RenameGroupRequested?.Invoke(room.GroupId);
+    }
+
+    private void RequestNewDesktop()
+    {
+        if (_cursor is { } id && RoomOf(id) is not null) NewDesktopRequested?.Invoke(id);
     }
 
     private IReadOnlyList<SpatialRoom> GroupRooms(Guid group)
@@ -451,6 +510,10 @@ internal sealed class SpatialOverlay : IStageContent
         rows.Children.Add(LegendRow("Ctrl+Shift+←→↑↓", "move the block"));
         rows.Children.Add(LegendRow("g", "set the room's group"));
         rows.Children.Add(LegendRow("Shift+g", "groups & colours"));
+        rows.Children.Add(LegendRow("r", "rename room · Shift+r group"));
+        rows.Children.Add(LegendRow("n", "new desktop · b new branch"));
+        rows.Children.Add(LegendRow("m", "move windows · Shift+m pull"));
+        rows.Children.Add(LegendRow("f", "find · p palette · o apps"));
         rows.Children.Add(LegendRow("t", "tidy up (reunite groups)"));
         rows.Children.Add(LegendRow("v", _stage.MapStyle switch
         {
@@ -460,7 +523,6 @@ internal sealed class SpatialOverlay : IStageContent
         }));
         rows.Children.Add(LegendRow("Del", "remove room · Shift+Del group"));
         rows.Children.Add(LegendRow("Ctrl+z", "undo the last tidy"));
-        rows.Children.Add(LegendRow("Tab", "back to the list view"));
         rows.Children.Add(LegendRow("Esc", "close"));
         rows.Children.Add(new TextBlock
         {

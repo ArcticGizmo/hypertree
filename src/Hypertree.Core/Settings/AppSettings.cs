@@ -71,14 +71,6 @@ public sealed class AppSettings
     /// pressing <c>v</c> on the map.</summary>
     public MapStyle MapStyle { get; set; } = MapStyle.Ascii;
 
-    /// <summary>Which <b>map model</b> is showing — the organisational structure, distinct from the visual
-    /// <see cref="MapStyle"/> theme. <see cref="MapModel.Rows"/> (default) is the classic vertical stack of
-    /// timelines drawn with the current <see cref="MapStyle"/>; <see cref="MapModel.Spatial"/> is the 2-D
-    /// map where desktops are freely-placed rooms and branches become logical groups. Swapped with
-    /// <c>Tab</c> on the map or in Settings → Appearance; the two are lenses on one arrangement, so the
-    /// choice is pure taste and persists across restarts.</summary>
-    public MapModel MapModel { get; set; } = MapModel.Rows;
-
     /// <summary>Reusable branch recipes, offered via the branch card's "Load from template" button so you
     /// don't retype the desktop set each time. Empty by default — you build and delete them in the
     /// "Manage templates…" command.</summary>
@@ -127,18 +119,6 @@ public enum MapStyle
 
     /// <summary>The terminal look: desktops as monospace box-drawing cards joined by an ASCII spine.</summary>
     Ascii,
-}
-
-/// <summary>Which organisational model the map presents. Persisted as a string in settings.json (via the
-/// enum converter), so the names are load-bearing — don't rename without a migration.</summary>
-public enum MapModel
-{
-    /// <summary>The classic vertical stack of timelines (main + branches), drawn with the current
-    /// <see cref="MapStyle"/> theme.</summary>
-    Rows,
-
-    /// <summary>The 2-D spatial map: desktops as freely-placed rooms, branches as logical groups.</summary>
-    Spatial,
 }
 
 /// <summary>

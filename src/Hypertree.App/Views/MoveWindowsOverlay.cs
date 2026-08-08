@@ -104,7 +104,7 @@ internal sealed class MoveContent : WindowPickerContent
         Root.Children.Add(banner);
 
         // Navigating switched desktops, which can surface that desktop's foreground window above the
-        // pinned host — re-lift so the board stays visible (mirrors MapOverlay.Refresh via Update).
+        // pinned host — re-lift so the board stays visible (mirrors SpatialOverlay.Render).
         Stage?.BringToFront();
     }
 }

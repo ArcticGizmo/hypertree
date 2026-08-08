@@ -29,7 +29,7 @@ namespace Hypertree.App.Views;
 /// root, <see cref="Present"/> pushes a sub-surface on top, <see cref="Back"/> pops one step (Esc /
 /// Cancel), and <see cref="CompleteToBase"/> unwinds to the durable base — the map — when an action
 /// finishes (or dismisses outright if there's no map in the chain). Card-style content floats over a
-/// live <b>map backdrop</b> (<see cref="MapProvider"/>), so every non-special view shows the board
+/// live <b>map backdrop</b> (<see cref="SpatialProvider"/>), so every non-special view shows the board
 /// behind it; full-surface content (the map, the move flow) draws its own board and gets no backdrop.
 /// </summary>
 internal sealed class OverlayStage
@@ -58,16 +58,8 @@ internal sealed class OverlayStage
     /// return there rather than dismiss. App uses this to decide whether to prime the map or flash the HUD.</summary>
     public bool HasDurableBase => _stack.Any(c => c.Durable);
 
-    /// <summary>Supplies the live board rendered behind Card content (App: <c>() =&gt; _model.BuildMap()</c>).</summary>
-    public Func<NavMap>? MapProvider;
-
-    /// <summary>Reports the map model the user is currently in, so a card's live backdrop follows their
-    /// chosen layout (rows vs spatial) rather than always showing the row map (App: <c>() =&gt;
-    /// _settings.MapModel</c>). Null ⇒ assume rows.</summary>
-    public Func<MapModel>? ModelProvider;
-
-    /// <summary>Supplies the live spatial scene rendered behind Card content while the model is
-    /// <see cref="MapModel.Spatial"/> (App: the current source + persisted state).</summary>
+    /// <summary>Supplies the live spatial scene rendered behind Card content (App: the current source +
+    /// persisted state). A card can still override with its own board (a jump target, a snapshot's layout).</summary>
     public Func<(SpatialSource Source, SpatialState State)>? SpatialProvider;
 
     /// <summary>The board style for every surface the stage draws (card backdrops here; the map and move
@@ -228,28 +220,24 @@ internal sealed class OverlayStage
         if (firstShow) Shown?.Invoke();
     }
 
-    // The board to paint behind a card. By default it's the live map in whichever model the user is in, so
-    // the backdrop always matches their chosen layout. A card can override: a spatial scene (the jump
-    // palette highlighting its target), or a NavMap (a snapshot's would-be layout) — the latter is kept as
-    // an explicit row depiction even in spatial mode, since it deliberately shows a concrete other layout.
+    // The board to paint behind a card. By default it's the live spatial map, so the backdrop matches what
+    // you'd see on the map. A card can override: a spatial scene (the jump palette highlighting its target),
+    // or a NavMap (a snapshot / template's would-be layout) — the latter is a deliberate row depiction of a
+    // concrete other layout, so it's kept as-is.
     private Control? RenderBackdrop(IStageContent content)
     {
         double w = HostWidth > 0 ? HostWidth : 1280, h = HostHeight > 0 ? HostHeight : 800;
-        MapModel model = ModelProvider?.Invoke() ?? MapModel.Rows;
 
-        if (model == MapModel.Spatial && SpatialProvider is { } spatial)
+        if (content.BackdropScene() is { } scene)
+            return SpatialPainter.Render(scene, w, h, 1.0, new MapCamera(), style: MapStyle);
+        if (content.BackdropBoard() is { } previewMap)
+            return MapSurface.Render(previewMap, w, h, MapStyle);
+        if (SpatialProvider is { } spatial)
         {
-            if (content.BackdropScene() is { } scene)
-                return SpatialPainter.Render(scene, w, h, 1.0, new MapCamera(), style: MapStyle);
-            if (content.BackdropBoard() is { } previewMap)
-                return MapSurface.Render(previewMap, w, h, MapStyle);
             (SpatialSource source, SpatialState state) = spatial();
             return SpatialPainter.Render(SpatialScene.From(source, state), w, h, 1.0, new MapCamera(), style: MapStyle);
         }
-
-        NavMap? map = content.BackdropBoard() ?? MapProvider?.Invoke();
-        if (map is null) return null;
-        return MapSurface.Render(map, w, h, MapStyle);
+        return null;
     }
 
     /// <summary>Re-render the current card's backdrop board — after its selection moved (palette preview).</summary>

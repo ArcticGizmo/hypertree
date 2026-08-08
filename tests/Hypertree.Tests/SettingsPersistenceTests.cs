@@ -92,17 +92,6 @@ public class SettingsPersistenceTests
     }
 
     [Fact]
-    public void MapModel_defaults_to_rows_and_round_trips()
-    {
-        Assert.Equal(MapModel.Rows, new AppSettings().MapModel);          // default is the classic stack
-        Assert.Equal(MapModel.Rows, StoreInTempDir().Load().MapModel);    // and a missing file yields it too
-
-        var store = StoreInTempDir();
-        store.Save(new AppSettings { MapModel = MapModel.Spatial });
-        Assert.Equal(MapModel.Spatial, store.Load().MapModel);
-    }
-
-    [Fact]
     public void Custom_commands_round_trip_including_optional_fields()
     {
         var store = StoreInTempDir();
