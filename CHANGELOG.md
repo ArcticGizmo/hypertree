@@ -7,18 +7,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [v0.4.0] - 2026-08-08
+
 ### Added
 
-- **Spatial map** — a second map model, swapped to with **Tab** on the map or from **Settings → Appearance → Map model**. Desktops become **rooms** you place anywhere on a 2-D grid (they stay where you drop them), and branches become logical, stable-coloured **groups**. Move a room (`Ctrl`+arrows or drag), its contiguous **block** (`Ctrl+Shift`+arrows or `⇧`-drag), or a whole selected group; **`g`** cycles the group selection and **`Shift+G`** opens a groups-and-colours panel (pick from the palette — a group keeps its colour). **`t`** tidies drifted groups back together, reuniting scattered pieces as rigid blocks so their shape survives, and packing groups so none overlap (`Ctrl+Z` undoes it). **`Del`** removes a room and leaves its spot empty rather than shuffling the rest; **`Shift+Del`** removes a group. Rooms are drawn in whichever **Map style** is set (Board / Metro / ASCII), so List and Spatial stay visually consistent; if a move lands two rooms on one cell it's flagged with an overlap marker rather than shoving your layout around. The two models are lenses on one arrangement — swapping never changes your actual desktops. **`Ctrl+Alt+Arrow` navigates the spatial layout directly** in spatial mode — the nearest room in the pressed direction — and the navigation flash shows the spatial board; with **show before moving** on, a move that would leave the current group raises the board first (the spatial analog of diving/surfacing), while moves within a group go straight away. (Design notes: [docs/design/spatial-map-plan.md](docs/design/spatial-map-plan.md).)
-
-- **Off-screen rooms point the way.** When a room sits beyond the edge of the map, an arrow in the room's group colour rides the screen border where the line from the map's centre to that room crosses it — with a soft colour bleed washing in from the edge — so a desktop scrolled or zoomed out of view still tells you which direction it lies.
-- **Toggle the map legend with `l`.** The key legend hides for good (and comes back) with a keypress — power users can reclaim the screen space it takes — and the choice is remembered across sessions. Hidden, a small `l legend` pill keeps the toggle discoverable.
+- **The map is now a 2-D spatial map.** Desktops are **rooms** you place anywhere on a grid and they stay put; branches are stable-coloured **groups**, drawn as merged "tetris" hulls.
+- `Ctrl`+arrows (or drag) move a room; `Ctrl+Shift`+arrows (or `⇧`-drag) move its contiguous block; a selected group moves as one.
+- `g` sets a room's group — pick an existing one or create it; `Shift+G` opens the groups-and-colours panel, where a palette pick sticks to the group.
+- `t` tidies drifted groups back into rigid blocks and packs them apart; `Ctrl+Z` undoes it.
+- `Del` removes a room and leaves its cell empty; `Shift+Del` removes a group.
+- `Ctrl+Alt+Arrow` navigates the map — the nearest room in that direction — and the flash shows the same board.
+- `+` / `−` zoom the map and `0` resets, persisted across sessions and applied wherever the map is drawn.
+- Off-screen rooms get a border arrow in their group colour pointing the way.
+- `l` toggles the key legend, remembered across sessions.
 
 ### Changed
 
-- **Map zoom now applies everywhere the map is drawn.** The `+`/`−` zoom you set on the map is honoured by the navigation flash, the board behind cards and palettes, and the move-windows flow — not just the interactive map — so the whole app shows the map at the size you chose.
-- **The legend gives each `Shift` shortcut its own line.** `Shift+r` (rename group), `Shift+m` (pull windows) and `Shift+Del` (remove group) are listed on their own rows rather than tucked in beside the plain key, so each is easy to spot.
-- **Saved layouts remember the spatial arrangement.** Saving a layout now captures each room's grid position and each group's colour alongside the desktops-and-branches structure, and restoring puts them back — so a restored layout lands as the 2-D map you saved instead of collapsing to the default rows. The Layouts palette previews a saved layout as its spatial board. Older saved layouts (and never-arranged maps) restore to the derived layout exactly as before.
+- The row/list map model is gone — the spatial map is the only map.
+- Rooms render in the current **Map style** (Board / Metro / ASCII), cycled with `v`.
+- A move that would leave the current group raises the board first (dive/surface); moves within a group go straight away.
+- Two rooms on one cell show an overlap marker instead of shoving your layout around.
+- Saved layouts remember room positions and group colours; the Layouts palette previews the spatial board. Older layouts restore to the derived rows as before.
+- The legend lists each `Shift` shortcut on its own line.
+- Larger map text.
 
 ---
 
