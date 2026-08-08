@@ -10,9 +10,10 @@ public sealed record HullShape(IReadOnlyList<IReadOnlyList<LayoutPoint>> Loops, 
 
 /// <summary>
 /// Turns a set of occupied grid cells into <b>polyomino outlines</b> — the "tetris piece" hulls the spatial
-/// map draws around a group. Cells that share an edge merge into one ring (the shared edge dissolves);
-/// cells touching only at a corner stay separate shapes, since they share no edge. Each ring hugs the cells
-/// and is pulled inward by an inset so it clears the room tiles inside and neighbouring groups outside.
+/// map draws around a group. Cells that touch — sharing an edge <em>or</em> just a corner — merge into one
+/// ring; a shared edge dissolves outright, and a corner-only (diagonal) touch becomes a concave "neck" where
+/// the two cells pinch together, so the group reads as one connected piece. Each ring hugs the cells and is
+/// pulled inward by an inset so it clears the room tiles inside and neighbouring groups outside.
 ///
 /// A cell <c>(gx, gy)</c> owns the world box centred on its room, <c>strideX × strideY</c>, so edge-adjacent
 /// cells' boxes abut exactly and their shared edge cancels. Pure geometry, no Avalonia — the painter turns
@@ -47,7 +48,8 @@ public static class SpatialHull
         return shapes;
     }
 
-    // Split the cells into edge-connected (4-neighbour) components — one drawn shape each.
+    // Split the cells into touching (8-neighbour, diagonals included) components — one drawn shape each, so a
+    // diagonally-adjacent clump reads as one connected piece.
     private static IEnumerable<HashSet<(int X, int Y)>> Components(HashSet<(int X, int Y)> cells)
     {
         var seen = new HashSet<(int, int)>();
@@ -60,8 +62,13 @@ public static class SpatialHull
             while (stack.Count > 0)
             {
                 (int x, int y) = stack.Pop();
-                foreach ((int nx, int ny) in new[] { (x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1) })
-                    if (cells.Contains((nx, ny)) && seen.Add((nx, ny))) { comp.Add((nx, ny)); stack.Push((nx, ny)); }
+                for (int dx = -1; dx <= 1; dx++)
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        if (dx == 0 && dy == 0) continue;
+                        (int nx, int ny) = (x + dx, y + dy);
+                        if (cells.Contains((nx, ny)) && seen.Add((nx, ny))) { comp.Add((nx, ny)); stack.Push((nx, ny)); }
+                    }
             }
             yield return comp;
         }
@@ -71,6 +78,10 @@ public static class SpatialHull
     // runs merged so each ring is the minimal set of corners. A cell (x,y) owns the corner box (x,y)..(x+1,y+1);
     // a side is a boundary edge when the neighbour across it is empty. Edges run clockwise around each cell
     // (screen y-down), so the outer ring comes out clockwise and holes anticlockwise.
+    //
+    // A diagonal touch makes a "pinch" corner where two cells meet at a point — that corner has two ways out.
+    // We start each ring on an unambiguous (single-exit) corner and, at a pinch, take the sharpest left turn,
+    // which hugs the outside of both cells so the pinch becomes a concave neck rather than splitting them.
     private static IEnumerable<List<LayoutPoint>> Rings(
         HashSet<(int X, int Y)> comp, double strideX, double strideY, double insetX, double insetY)
     {
@@ -91,16 +102,35 @@ public static class SpatialHull
 
         while (outgoing.Count > 0)
         {
-            (int X, int Y) startCorner = outgoing.Keys.First();
+            // Start on a single-exit corner so the first step is unambiguous (a pinch corner is never a start).
+            (int X, int Y) startCorner = outgoing.FirstOrDefault(kv => kv.Value.Count == 1).Key;
+            if (!outgoing.ContainsKey(startCorner)) startCorner = outgoing.Keys.First();
+
             var corners = new List<(int X, int Y)>();
             (int X, int Y) cur = startCorner;
+            (int X, int Y)? prev = null;
             while (true)
             {
                 corners.Add(cur);
                 List<(int X, int Y)> ends = outgoing[cur];
-                (int X, int Y) next = ends[^1];
-                ends.RemoveAt(ends.Count - 1);
+
+                int pick = ends.Count - 1;
+                if (ends.Count > 1 && prev is { } p) // a pinch: keep to the outside via the sharpest left turn
+                {
+                    (int dx, int dy) = (cur.X - p.X, cur.Y - p.Y);
+                    double best = double.MaxValue;
+                    for (int k = 0; k < ends.Count; k++)
+                    {
+                        (int ex, int ey) = (ends[k].X - cur.X, ends[k].Y - cur.Y);
+                        double cross = dx * ey - dy * ex; // y-down: most-negative = sharpest left
+                        if (cross < best) { best = cross; pick = k; }
+                    }
+                }
+
+                (int X, int Y) next = ends[pick];
+                ends.RemoveAt(pick);
                 if (ends.Count == 0) outgoing.Remove(cur);
+                prev = cur;
                 cur = next;
                 if (cur == startCorner) break;
             }

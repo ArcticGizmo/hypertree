@@ -7,8 +7,8 @@ namespace Hypertree.Tests;
 
 /// <summary>
 /// Covers the "tetris" group outline: cells sharing an edge merge into one ring with the shared edge gone,
-/// cells touching only at a corner stay separate shapes, and the inset holds the ring off the cell edges.
-/// Pure geometry — no Avalonia, no painter.
+/// cells touching only at a corner merge too (via a concave neck), and the inset holds the ring off the cell
+/// edges. Pure geometry — no Avalonia, no painter.
 /// </summary>
 public class SpatialHullTests
 {
@@ -56,10 +56,19 @@ public class SpatialHullTests
     }
 
     [Fact]
-    public void Corner_touching_cells_stay_two_shapes()
+    public void Corner_touching_cells_merge_through_a_pinch()
     {
-        // A diagonal pair shares no edge, so it is not one tetris piece — two separate hulls.
-        Assert.Equal(2, Shapes((0, 0), (1, 1)).Count);
+        // A diagonal pair touches only at a corner; it still reads as one connected piece — one shape, one
+        // ring that visits the shared corner twice (the concave neck), so eight corners in all.
+        HullShape shape = Assert.Single(Shapes((0, 0), (1, 1)));
+        IReadOnlyList<LayoutPoint> ring = Assert.Single(shape.Loops);
+        Assert.Equal(8, ring.Count);
+    }
+
+    [Fact]
+    public void A_diagonal_staircase_is_one_shape()
+    {
+        Assert.Single(Shapes((0, 0), (1, 1), (2, 2)));
     }
 
     [Fact]
