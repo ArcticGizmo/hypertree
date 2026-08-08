@@ -176,30 +176,20 @@ internal sealed class SpatialOverlay : IStageContent
     }
 
     // Arrow-select: step to the nearest room in the pressed direction, favouring the axis of travel — the
-    // 2-D analog of the row map's ←/→ along a row and ↑/↓ between rows.
+    // 2-D analog of the row map's ←/→ along a row and ↑/↓ between rows. Shares the resolver with live
+    // navigation, so the map and Ctrl+Alt+Arrow agree on where each arrow lands.
     private void Nudge(int dx, int dy)
     {
-        var rooms = Scene().Rooms;
-        if (rooms.Count == 0) return;
-        DesktopId curId = _cursor ?? rooms.First().Id;
-        SpatialRoom? cur = rooms.FirstOrDefault(r => r.Id == curId);
-        if (cur is null) { _cursor = rooms[0].Id; Render(); return; }
-
-        SpatialRoom? best = null;
-        int bestScore = int.MaxValue;
-        foreach (SpatialRoom r in rooms)
+        SpatialScene scene = Scene();
+        if (scene.Rooms.Count == 0) return;
+        DesktopId curId = _cursor ?? scene.Rooms[0].Id;
+        if (SpatialNavigation.NextInDirection(scene, curId, dx, dy) is { } next)
         {
-            if (r.Id == curId) continue;
-            int ox = r.Pos.X - cur.Pos.X, oy = r.Pos.Y - cur.Pos.Y;
-            if (dx != 0 && Math.Sign(ox) != dx) continue;
-            if (dy != 0 && Math.Sign(oy) != dy) continue;
-            if (dx != 0 && Math.Abs(oy) > Math.Abs(ox)) continue; // keep to the travel axis
-            if (dy != 0 && Math.Abs(ox) > Math.Abs(oy)) continue;
-            int d = Math.Abs(ox) + Math.Abs(oy);
-            if (d < bestScore) { bestScore = d; best = r; }
+            _cursor = next;
+            _selectedGroup = null; // plain navigation exits group mode: the room is the active unit again
+            Render();
         }
-        // Plain navigation exits group mode: the room is now the active unit again.
-        if (best is not null) { _cursor = best.Id; _selectedGroup = null; Render(); }
+        else if (_cursor is null) { _cursor = scene.Rooms[0].Id; Render(); }
     }
 
     // ── Groups (select, cycle, recolour) ───────────────────────────────────────

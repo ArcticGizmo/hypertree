@@ -701,43 +701,72 @@ public sealed partial class App : Application
         // them can record it as "last visited". A poll watches for the release (flashing or in the map).
         _gestureFrom ??= _desktops.Current;
         _gestureMods = mods;
-        // A cold press with "show before moving" on only raises the board — it doesn't move, so it gets a
-        // plain fade rather than a directional wipe (null move below). Only dive/surface reveal first (see
-        // RevealOnly); a left/right move within the current row goes straight away.
-        bool revealOnly = RevealOnly(action);
-        // Two separate gates. The board fades up whenever the flash appears from nothing — that's about not
-        // punching a lit board onto the desktop, so it isn't the "Animate navigation moves" setting's business
-        // (that setting is the directional wipe, per its own hint). Both still answer to Windows' "show
-        // animations": the OS reduce-motion preference wins either way.
+
+        bool spatial = _settings.MapModel == MapModel.Spatial;
         bool softMotion = WindowFx.SystemAnimationsEnabled();
         bool animate = _settings.AnimateNavigation && softMotion;
         bool inMap = AnyMapOpen();
 
-        // Cover the screen BEFORE switching. The switch presents the destination desktop the moment it
-        // completes — foreground handover included — so raising the flash afterwards left the desktop fully
-        // lit and uncovered for ~68ms, which is the punch of light that reads as the overlay flashing. With
-        // the dim already up, the switch happens behind it. (The map is its own always-up surface, and a
-        // reveal press doesn't switch at all, so neither needs covering — and a reveal keeps its soft fade.)
+        // In spatial mode the direction resolves to the nearest room, and "crossing a group" is the analog of
+        // a dive/surface: it's what the show-before-moving reveal keys off. In rows it's the vertical moves.
+        DesktopId? target = null;
+        bool crossing = false;
+        if (spatial)
+        {
+            (int dx, int dy) = DirectionOf(action);
+            SpatialScene pre = SpatialScene.From(_model.BuildSpatialSource(), _spatial);
+            target = SpatialNavigation.NextInDirection(pre, _desktops.Current, dx, dy);
+            crossing = target is { } t &&
+                       SpatialNavigation.GroupOf(pre, t) != SpatialNavigation.GroupOf(pre, _desktops.Current);
+        }
+
+        // A cold press with "show before moving" on only raises the board — it doesn't move (a plain fade,
+        // no wipe). It applies to a dive/surface (rows) or a move out of the current group (spatial); a move
+        // that stays on the same row/group goes straight away, and the map never needs the reveal.
+        bool wouldReveal = spatial ? crossing : action is NavAction.Dive or NavAction.Surface;
+        bool revealOnly = _settings.DisplayBeforeMoving && wouldReveal && !inMap && _hud is { IsVisible: false };
+
+        // Cover the screen BEFORE switching, so the switch happens behind the dim rather than flashing the lit
+        // destination desktop for a beat. The map is its own always-up surface, and a reveal doesn't switch.
         if (!inMap && !revealOnly) _hud?.Cover();
 
-        // Apply reports whether the desktop actually changed: false at a row's edge or when already there.
-        // A move that goes nowhere must not animate — no wipe, just leave the board as is. (We can't know
-        // that before covering, so a blocked move at a row edge raises the dim without the fade. Harmless:
-        // it's the same board arriving, a beat sooner.)
-        bool moved = !revealOnly && _model.Apply(action);
-        // In the map, the nav chord switches for real, so the selection follows onto the new desktop
-        // (green "here" and blue selection rejoin); in the transient flash, the green outline marks the
-        // gesture's origin so the jump's direction/distance reads at a glance.
+        // Apply the move. It reports whether the desktop actually changed (false at an edge / already there),
+        // so a move that goes nowhere doesn't play a directional wipe.
+        bool moved = !revealOnly &&
+                     (spatial ? target is { } tid && JumpToId(tid) : _model.Apply(action));
+
+        // In the map, the nav chord switches for real and the selection follows; otherwise the flash shows,
+        // with the green marker on the gesture origin so direction/distance reads at a glance.
         if (inMap) SyncOpenMapToCurrent();
+        else FlashBoard(_gestureFrom, mods, moved ? action : null, animate && moved, softMotion);
+        StartGesturePoll();
+    }
+
+    private static (int X, int Y) DirectionOf(NavAction action) => action switch
+    {
+        NavAction.MoveLeft => (-1, 0),
+        NavAction.MoveRight => (1, 0),
+        NavAction.Surface => (0, -1),
+        NavAction.Dive => (0, 1),
+        _ => (0, 0),
+    };
+
+    // Raise the transient flash on the current arrangement, in whichever model is configured — the spatial
+    // board when spatial mode is on, else the row list. <paramref name="cameFrom"/> marks the gesture origin
+    // with the green "here" outline (null for a plain result/peek flash).
+    private void FlashBoard(DesktopId? cameFrom, HotkeyModifiers mods, NavAction? move, bool animate, bool fade)
+    {
+        if (_hud is null || _model is null) return;
+        if (_settings.MapModel == MapModel.Spatial)
+        {
+            SpatialScene scene = SpatialScene.From(_model.BuildSpatialSource(cameFrom), _spatial);
+            _hud.Flash(scene, _settings.MapStyle, mods, move, animate, _settings.SweepFromLeadingEdge, fade);
+        }
         else
         {
-            // Only a move that actually went somewhere wipes; a reveal press or a blocked move (row edge,
-            // already there) has no direction to carry. The fade is unconditional — every appearance softens.
-            bool doAnimate = animate && moved;
-            _hud?.Flash(_model.BuildMap(_gestureFrom), mods, moved ? action : null, doAnimate,
-                        _settings.SweepFromLeadingEdge, _settings.MapStyle, fade: softMotion);
+            _hud.Flash(_model.BuildMap(cameFrom), mods, move, animate, _settings.SweepFromLeadingEdge,
+                       _settings.MapStyle, fade);
         }
-        StartGesturePoll();
     }
 
     // Peek: raise the flash on where we actually are and hold it while <paramref name="mods"/> stay down,
@@ -753,23 +782,8 @@ public sealed partial class App : Application
         if (AnyMapOpen()) return;
         _model.AnchorToCurrent(); // show where we stand now, not our stale cursor
         // A peek has no direction, so there's nothing to wipe — it's pure appearance, and fades up.
-        _hud?.Flash(_model.BuildMap(), mods, move: null, style: _settings.MapStyle,
-                    fade: WindowFx.SystemAnimationsEnabled());
+        FlashBoard(null, mods, move: null, animate: false, fade: WindowFx.SystemAnimationsEnabled());
     }
-
-    // "Show before moving": with the setting on, a dive/surface chord that arrives while the flash is off
-    // screen spends itself raising the flash — you read where you are, then keep holding the modifiers and
-    // press again to actually move. Only the cold press is swallowed; once the board is up (which it stays
-    // for as long as the modifiers are held) every press navigates, so a held run of arrows is uninterrupted.
-    //
-    // It applies only to the vertical moves — diving into a branch or surfacing out — because that's where
-    // the disorientation is: you land among a fresh set of lookalike desktops. Left/right stays within the
-    // row you can already see, so it's not worth the extra press and moves immediately. The map is an
-    // always-visible surface of its own, so it never needs the reveal press.
-    private bool RevealOnly(NavAction action) =>
-        _settings.DisplayBeforeMoving
-        && action is NavAction.Dive or NavAction.Surface
-        && !AnyMapOpen() && _hud is { IsVisible: false };
 
     // A double-click / arrow-driven jump from the map: switch to the chosen desktop, record where we
     // came from, then re-home the selection onto it (green + blue rejoin), keeping the map open.
@@ -871,8 +885,7 @@ public sealed partial class App : Application
         else _model.GoToBranchDesktop(at.branchIndex, at.desktopIndex);
 
         if (AnyMapOpen()) SyncOpenMapToCurrent();
-        else _hud?.Flash(_model.BuildMap(cur), mods, move: null, style: _settings.MapStyle,
-                         fade: WindowFx.SystemAnimationsEnabled());
+        else FlashBoard(cur, mods, move: null, animate: false, fade: WindowFx.SystemAnimationsEnabled());
     }
 
     // The history panel's rows (newest last): each crumb's display label — branch-qualified, resolved
@@ -1918,8 +1931,7 @@ public sealed partial class App : Application
             if (_spatialOverlay is { IsOpen: true }) _spatialOverlay.SetSource(_model.BuildSpatialSource(), _spatial);
         }
         // A result flash, not a gesture — just times out. It appears over a bare desktop, so it fades up too.
-        else _hud?.Flash(map, HotkeyModifiers.None, style: _settings.MapStyle,
-                         fade: WindowFx.SystemAnimationsEnabled());
+        else FlashBoard(null, HotkeyModifiers.None, move: null, animate: false, fade: WindowFx.SystemAnimationsEnabled());
     }
 
     // The product version for the tray header, read from the assembly (set by <Version> in the csproj) so
