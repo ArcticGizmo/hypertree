@@ -52,12 +52,25 @@ Extract types with **injected dependencies** (not just partials — real seams):
 - `SpatialOverlayPresenter` (owns the ~15 `_spatialOverlay.XxxRequested +=` subscriptions and the
   `DesktopId`→`DesktopSelection` resolution at `App.axaml.cs:240-283`)
 
-### Step 3 — `NavigationModel`
-- Extract the 4 projection builders (`BuildMap`/`BuildSpatialSource`/`BuildStatus`/`CaptureSnapshot`)
-  into a `NavProjection` mapper over an immutable read model.
+### Step 3 — `NavigationModel` (Core, test-covered)
+Done so far (each a commit, 291 tests green throughout) — prioritized the duplicated-invariant
+de-duplication first, since that's where the latent off-by-one risk lived:
+- ✅ **One source of truth for row order + cursor⇄row mapping.** The "branches-above / main /
+  branches-below" splice was hand-rebuilt in 3 places and the cursor↔row bijection in 3 more (two using
+  raw `_mainSlot`, one a clamped slot — a divergence flagged in review). Collapsed to `RowOrder()` +
+  `CurrentRow()`/`CursorToRow()`.
+- ✅ **Single persistence mapper.** `Save` and `CaptureSnapshot` shared `ToPersisted()` helpers instead of
+  two hand-written `Branch`→`PersistedBranch` projections.
+- ✅ **`Resync` reuses `Locate`** instead of re-scanning (matches `AnchorToCurrent`).
+
+> Note: the line count barely moved (905 → 911) — the win here is removing duplication and the
+> divergent-clamping bug risk, not shrinking the file.
+
+Remaining (optional, lower value — mostly moves code without reducing risk):
+- Extract the 4 projection builders into a `NavProjection` mapper over an immutable read model.
 - Extract the OS-sync trio (`Reconcile`/`Resync`/`AnchorToCurrent`) into a `NavSync` collaborator.
-- Fix the misleading doc: it claims "holds no Win32/UI, fully unit-testable" but `Commit` calls
-  `_desktops.SwitchTo`. Either correct the doc or separate pure-cursor-computation from OS-commit.
+- Fix the misleading class doc: it claims "holds no Win32/UI, fully unit-testable" but `Commit` calls
+  `_desktops.SwitchTo`.
 
 ### Step 4 — `SpatialOverlay`
 - Extract the pointer-drag gesture engine (`_grab`/`_dragging`/`_pressAt`/... at `:483-566`) into a
