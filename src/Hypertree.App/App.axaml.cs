@@ -1687,12 +1687,11 @@ public sealed partial class App : Application
         _stage.RefreshBackdrop();
     }
 
-    // Show or hide the persistent taskbar label to match the setting.
+    // Position (or hide) the persistent taskbar label to match the placement setting.
     private void ApplyTaskbarLabel()
     {
         if (_taskbarLabel is null) return;
-        if (_settings.ShowTaskbarLabel) _taskbarLabel.Enable();
-        else _taskbarLabel.Disable();
+        _taskbarLabel.SetPlacement(_settings.TaskbarLabelPlacement);
     }
 
     // Show or hide the floating branch switcher to match the setting.

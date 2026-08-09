@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.4.1] - 2026-08-09
+
+### Changed
+
+- The desktop label is a placement dropdown in Settings — dock the pill to any corner or edge (top/bottom, left/center/right), or Off. Off is now the default; an existing on label moves to bottom center.
+
+---
+
 ## [v0.4.0] - 2026-08-08
 
 ### Added

@@ -34,10 +34,10 @@ internal sealed record UpdateHooks(Action Check, Action Install, Func<UpdateChec
 /// <see cref="IForegroundActivator"/> so it takes input immediately. There's no Save button — every edit
 /// applies and persists at once (see <see cref="ApplyLive"/>); closing the window (or Esc) just dismisses it.
 ///
-/// Startup is the first option (a right-aligned toggle), the desktop label and "show the board before
-/// moving" are matching toggles, and every global hotkey can be rebound: click a chord and press the new
-/// combination. The navigation-flash timings are no longer configurable (fixed constants in
-/// <c>HudWindow</c>).
+/// Startup is the first option (a right-aligned toggle), the desktop label is a placement dropdown (Off,
+/// or a corner/edge to dock to), "show the board before moving" is a toggle, and every global hotkey can be
+/// rebound: click a chord and press the new combination. The navigation-flash timings are no longer
+/// configurable (fixed constants in <c>HudWindow</c>).
 /// </summary>
 internal sealed class SettingsWindow : Window
 {
@@ -52,7 +52,7 @@ internal sealed class SettingsWindow : Window
     private readonly AppSettings _initial; // carries fields this window doesn't edit (e.g. templates) through Save
 
     private readonly ToggleSwitch _startOnLogin;
-    private readonly ToggleSwitch _showTaskbarLabel;
+    private readonly ComboBox _taskbarLabelPlacement;
     private readonly ToggleSwitch _showSwitcher;
     private readonly ComboBox _mapStyle;
     private readonly ToggleSwitch _displayBeforeMoving;
@@ -99,7 +99,7 @@ internal sealed class SettingsWindow : Window
         Background = new SolidColorBrush(Color.Parse("#12161F"));
 
         _startOnLogin = Toggle(startOnLogin);
-        _showTaskbarLabel = Toggle(settings.ShowTaskbarLabel);
+        _taskbarLabelPlacement = LabelPlacementSelector(settings.TaskbarLabelPlacement);
         _showSwitcher = Toggle(settings.ShowSwitcher);
         _mapStyle = MapStyleSelector(settings.MapStyle);
         _displayBeforeMoving = Toggle(settings.DisplayBeforeMoving);
@@ -128,10 +128,11 @@ internal sealed class SettingsWindow : Window
 
         // No Save/Cancel — each control applies (and persists) the moment it changes; see ApplyLive.
         foreach (ToggleSwitch t in new[]
-                 { _startOnLogin, _showTaskbarLabel, _showSwitcher, _displayBeforeMoving,
+                 { _startOnLogin, _showSwitcher, _displayBeforeMoving,
                    _animateNavigation, _sweepFromLeadingEdge, _showChangelog })
             t.IsCheckedChanged += (_, _) => ApplyLive();
         _mapStyle.SelectionChanged += (_, _) => ApplyLive();
+        _taskbarLabelPlacement.SelectionChanged += (_, _) => ApplyLive();
 
         var options = new StackPanel
         {
@@ -143,7 +144,10 @@ internal sealed class SettingsWindow : Window
 
                     Divider(),
                     Title2("Desktop label"),
-                    ToggleRow("Show the current desktop name over the taskbar", _showTaskbarLabel),
+                    SelectRow("Show the current desktop name", _taskbarLabelPlacement),
+                    Hint("A small pill naming the desktop you're on, docked to the corner or edge you pick "
+                         + "(“Bottom center” sits over the taskbar). It fades out while the cursor is near "
+                         + "so what's underneath stays clickable. Choose “Off” to hide it."),
 
                     Divider(),
                     Title2("Switcher"),
@@ -235,7 +239,7 @@ internal sealed class SettingsWindow : Window
 
         return new AppSettings
         {
-            ShowTaskbarLabel = _showTaskbarLabel.IsChecked ?? true,
+            TaskbarLabelPlacement = (LabelPlacement)Math.Max(0, _taskbarLabelPlacement.SelectedIndex),
             ShowSwitcher = _showSwitcher.IsChecked ?? false,
             MapStyle = (MapStyle)Math.Max(0, _mapStyle.SelectedIndex),
             DisplayBeforeMoving = _displayBeforeMoving.IsChecked ?? true,
@@ -539,6 +543,18 @@ internal sealed class SettingsWindow : Window
         HorizontalAlignment = HorizontalAlignment.Right, MinWidth = 132,
         ItemsSource = new[] { "Board", "Metro", "ASCII" },
         SelectedIndex = (int)style,
+    };
+
+    // The desktop-label placement dropdown. Item order matches the LabelPlacement enum (Off first, then the
+    // corners/edges), so the selected index is the enum value — read back in CurrentSettings.
+    private static ComboBox LabelPlacementSelector(LabelPlacement placement) => new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Right, MinWidth = 132,
+        ItemsSource = new[]
+        {
+            "Off", "Top left", "Top center", "Top right", "Bottom left", "Bottom center", "Bottom right",
+        },
+        SelectedIndex = (int)placement,
     };
 
     // A label on the left, its selector pinned right — the ToggleRow shape for a non-toggle control.

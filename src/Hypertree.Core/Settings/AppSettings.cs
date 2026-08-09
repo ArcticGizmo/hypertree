@@ -14,10 +14,12 @@ namespace Hypertree.Settings;
 /// </summary>
 public sealed class AppSettings
 {
-    /// <summary>When true a persistent pill sits over the bottom of the primary screen naming the
-    /// desktop you're on (prefixed with the branch name, in the branch's colour, when inside a branch).
-    /// It auto-hides while the cursor is near it so the taskbar underneath stays clickable.</summary>
-    public bool ShowTaskbarLabel { get; set; } = true;
+    /// <summary>Where the persistent desktop-name pill sits (or <see cref="LabelPlacement.Off"/> to hide
+    /// it). The pill names the desktop you're on — prefixed with the branch name, in the branch's colour,
+    /// when inside a branch — docked to the chosen corner/edge of the primary screen, and auto-hides while
+    /// the cursor is near it so whatever's underneath stays clickable. Superseded the old on/off
+    /// <c>ShowTaskbarLabel</c> bool; see <see cref="FileSettingsStore.Load"/> for how old files migrate.</summary>
+    public LabelPlacement TaskbarLabelPlacement { get; set; } = LabelPlacement.Off;
 
     /// <summary>When true a floating, draggable panel (default top-right) lists every row of the stack in
     /// map order — main and each branch — with the desktop a click would land on, so you can jump between
@@ -118,6 +120,22 @@ public sealed class AppSettings
     }
 }
 
+/// <summary>Where the desktop-name pill docks on the primary screen — a corner or an edge center — with
+/// <see cref="Off"/> hiding it entirely. <see cref="Off"/> is deliberately first (value 0) so it's the
+/// default. Persisted as a string in settings.json (via the enum converter), so the names are
+/// load-bearing — don't rename without a migration.</summary>
+public enum LabelPlacement
+{
+    /// <summary>The pill is hidden. The default, and the first option in the settings dropdown.</summary>
+    Off,
+    TopLeft,
+    TopCenter,
+    TopRight,
+    BottomLeft,
+    BottomCenter,
+    BottomRight,
+}
+
 /// <summary>How the board is rendered across the app. Persisted as a string in settings.json (via the
 /// enum converter), so the names are load-bearing — don't rename without a migration.</summary>
 public enum MapStyle
@@ -192,15 +210,34 @@ public sealed class FileSettingsStore : ISettingsStore
         try
         {
             if (!File.Exists(Path)) return new AppSettings();
+            string json = File.ReadAllText(Path);
             // Read with the SAME options used to write (crucially the string-enum converter) — otherwise a
             // string-serialised enum like "MapStyle": "Metro" can't be parsed back, the whole load throws,
             // and every setting silently reverts to its default.
-            return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Path), Options) ?? new AppSettings();
+            var settings = JsonSerializer.Deserialize<AppSettings>(json, Options) ?? new AppSettings();
+            MigrateLegacyTaskbarLabel(json, settings);
+            return settings;
         }
         catch
         {
             return new AppSettings();
         }
+    }
+
+    // Pre-placement builds stored the desktop label as an on/off bool ("ShowTaskbarLabel"); it's now the
+    // "TaskbarLabelPlacement" enum. When an old file has the bool but not the new key, carry the choice
+    // across — on → its old fixed spot (bottom center), off → hidden. A current file has the enum and no
+    // bool, so this is a no-op. (The stray "ShowTaskbarLabel" is simply ignored on load and drops out the
+    // next time settings are saved.)
+    private static void MigrateLegacyTaskbarLabel(string json, AppSettings settings)
+    {
+        using var doc = JsonDocument.Parse(json);
+        JsonElement root = doc.RootElement;
+        if (root.ValueKind != JsonValueKind.Object) return;
+        if (root.TryGetProperty("TaskbarLabelPlacement", out _)) return;              // already on the new key
+        if (!root.TryGetProperty("ShowTaskbarLabel", out JsonElement legacy)) return; // nothing to migrate
+        settings.TaskbarLabelPlacement =
+            legacy.ValueKind == JsonValueKind.True ? LabelPlacement.BottomCenter : LabelPlacement.Off;
     }
 
     public void Save(AppSettings settings)

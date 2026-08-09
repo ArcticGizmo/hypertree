@@ -32,7 +32,7 @@ public class SettingsPersistenceTests
         var saved = new AppSettings
         {
             MapStyle = MapStyle.Metro,
-            ShowTaskbarLabel = false,
+            TaskbarLabelPlacement = LabelPlacement.TopRight,
             DisplayBeforeMoving = false,
             AnimateNavigation = false,
             ShowChangelogOnUpdate = false,
@@ -45,7 +45,7 @@ public class SettingsPersistenceTests
 
         AppSettings loaded = store.Load();
         Assert.Equal(MapStyle.Metro, loaded.MapStyle);
-        Assert.False(loaded.ShowTaskbarLabel);
+        Assert.Equal(LabelPlacement.TopRight, loaded.TaskbarLabelPlacement);
         Assert.False(loaded.DisplayBeforeMoving);
         Assert.False(loaded.AnimateNavigation);
         Assert.False(loaded.ShowChangelogOnUpdate);
@@ -99,6 +99,39 @@ public class SettingsPersistenceTests
     {
         // A fresh store with no file loads defaults rather than throwing (MapStyle defaults to ASCII).
         Assert.Equal(MapStyle.Ascii, StoreInTempDir().Load().MapStyle);
+    }
+
+    [Fact]
+    public void TaskbarLabelPlacement_defaults_off_and_round_trips()
+    {
+        Assert.Equal(LabelPlacement.Off, new AppSettings().TaskbarLabelPlacement);
+
+        var store = StoreInTempDir();
+        store.Save(new AppSettings { TaskbarLabelPlacement = LabelPlacement.BottomLeft });
+        Assert.Equal(LabelPlacement.BottomLeft, store.Load().TaskbarLabelPlacement);
+    }
+
+    [Theory]
+    [InlineData("true", LabelPlacement.BottomCenter)] // an old "on" label kept its fixed bottom-center spot
+    [InlineData("false", LabelPlacement.Off)]         // an old "off" label stays hidden
+    public void Legacy_ShowTaskbarLabel_bool_migrates_to_a_placement(string legacyValue, LabelPlacement expected)
+    {
+        var store = StoreInTempDir();
+        // A pre-placement settings.json: the old bool, no new placement key.
+        File.WriteAllText(store.Path, $"{{ \"ShowTaskbarLabel\": {legacyValue} }}");
+
+        Assert.Equal(expected, store.Load().TaskbarLabelPlacement);
+    }
+
+    [Fact]
+    public void New_placement_key_wins_over_a_stray_legacy_bool()
+    {
+        var store = StoreInTempDir();
+        // Both keys present (e.g. a hand-edited file): the new placement key is authoritative, not the bool.
+        File.WriteAllText(store.Path,
+            "{ \"ShowTaskbarLabel\": true, \"TaskbarLabelPlacement\": \"TopLeft\" }");
+
+        Assert.Equal(LabelPlacement.TopLeft, store.Load().TaskbarLabelPlacement);
     }
 
     [Fact]
