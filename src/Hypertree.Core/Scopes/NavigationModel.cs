@@ -27,7 +27,9 @@ public enum GoToResult
 ///   • <b>Up</b> / <b>Down</b>: move the cursor one row up / down, crossing main in place (no leap).
 ///   • <b>Left/Right</b>: within the current row (main desktops, or the current branch's desktops).
 /// Branches above main stay above; branches below stay below. A newly-added branch appears directly below
-/// main. Ends clamp (no wrap). Holds no Win32/UI, so the whole feel is unit-testable against a fake.
+/// main. Ends clamp (no wrap). It commands the OS only through the injected <see cref="IDesktopController"/>
+/// (navigation calls <c>SwitchTo</c>), and holds no Win32/UI itself — so the whole feel is unit-testable
+/// against a fake controller. Render/status projection lives in <see cref="NavProjection"/>.
 /// </summary>
 public sealed class NavigationModel
 {
@@ -106,6 +108,12 @@ public sealed class NavigationModel
             ? _topRow[Math.Clamp(_topIndex, 0, Math.Max(0, _topRow.Count - 1))]
             : _branches[_currentBranch].Desktops[_branches[_currentBranch].LastUsedIndex];
 
+    // An immutable read-only view of the current layout for the projection builders (see NavProjection).
+    // Cheap to build and discarded per call — the projections run at summon time, not per keystroke.
+    private NavLayout Layout() => new(
+        _topRow, _branches, _onMain, _currentBranch, _topIndex,
+        Math.Clamp(_mainSlot, 0, _branches.Count), RowOrder(), CurrentRow());
+
     /// <summary>Render-ready snapshot: main timeline + branches in their fixed stack order, split around
     /// main at its fixed slot (branches before the slot render above main, the rest below).
     /// <paramref name="cameFrom"/>, when supplied, marks that desktop with the green "here" outline —
@@ -113,27 +121,7 @@ public sealed class NavigationModel
     public NavMap BuildMap(DesktopId? cameFrom = null)
     {
         IReadOnlyDictionary<DesktopId, int> counts = _desktops.WindowCounts();
-        int Windows(DesktopId id) => counts.TryGetValue(id, out int n) ? n : 0;
-        bool CameFrom(DesktopId id) => cameFrom == id;
-
-        var top = new List<NavMapTile>(_topRow.Count);
-        for (int i = 0; i < _topRow.Count; i++)
-            top.Add(new NavMapTile(_topRow[i].Label, _onMain && i == _topIndex,
-                                   IsHere: CameFrom(_topRow[i].Id), WindowCount: Windows(_topRow[i].Id)));
-
-        var branches = new List<NavMapBranch>(_branches.Count);
-        for (int gi = 0; gi < _branches.Count; gi++)
-        {
-            Branch g = _branches[gi];
-            bool current = !_onMain && gi == _currentBranch;
-            var tiles = new List<NavMapTile>(g.Desktops.Count);
-            for (int j = 0; j < g.Desktops.Count; j++)
-                tiles.Add(new NavMapTile(g.Desktops[j].Label, current && j == g.LastUsedIndex,
-                                         IsHere: CameFrom(g.Desktops[j].Id), WindowCount: Windows(g.Desktops[j].Id)));
-            branches.Add(new NavMapBranch(gi, g.Name, tiles, current, g.LastUsedIndex));
-        }
-
-        return new NavMap(top, _topRow.Count == 0 ? 0 : _topIndex, _onMain, branches, Math.Clamp(_mainSlot, 0, _branches.Count));
+        return NavProjection.Map(Layout(), id => counts.TryGetValue(id, out int n) ? n : 0, cameFrom);
     }
 
     /// <summary>
@@ -148,30 +136,7 @@ public sealed class NavigationModel
     public SpatialSource BuildSpatialSource(DesktopId? cameFrom = null)
     {
         IReadOnlyDictionary<DesktopId, int> counts = _desktops.WindowCounts();
-        int Windows(DesktopId id) => counts.TryGetValue(id, out int n) ? n : 0;
-        bool CameFrom(DesktopId id) => cameFrom == id;
-
-        SpatialGroupSource MainGroup() => new(Guid.Empty, "main", IsMain: true,
-            _topRow.Select((d, i) => new SpatialDesktop(
-                d.Id, d.Label, _onMain && i == _topIndex, CameFrom(d.Id), Windows(d.Id))).ToList());
-
-        SpatialGroupSource BranchGroup(int gi)
-        {
-            Branch g = _branches[gi];
-            bool current = !_onMain && gi == _currentBranch;
-            var desks = new List<SpatialDesktop>(g.Desktops.Count);
-            for (int j = 0; j < g.Desktops.Count; j++)
-            {
-                DesktopRef d = g.Desktops[j];
-                desks.Add(new SpatialDesktop(d.Id, d.Label, current && j == g.LastUsedIndex,
-                                             CameFrom(d.Id), Windows(d.Id)));
-            }
-            return new SpatialGroupSource(g.Id, g.Name, IsMain: false, desks);
-        }
-
-        var groups = new List<SpatialGroupSource>(_branches.Count + 1);
-        foreach (int r in RowOrder()) groups.Add(r == MainRowMarker ? MainGroup() : BranchGroup(r));
-        return new SpatialSource(groups);
+        return NavProjection.Spatial(Layout(), id => counts.TryGetValue(id, out int n) ? n : 0, cameFrom);
     }
 
     /// <summary>
@@ -184,40 +149,7 @@ public sealed class NavigationModel
     /// but this runs on every navigation, and nothing downstream of the status file wants the counts. So
     /// this reads only what it publishes.
     /// </remarks>
-    public StatusSnapshot BuildStatus()
-    {
-        StatusRow MainRow() => new()
-        {
-            Kind = RowKind.Main,
-            Name = RowKind.Main,
-            Cursor = _topRow.Count == 0 ? 0 : Math.Clamp(_topIndex, 0, _topRow.Count - 1),
-            Desktops = _topRow.Select(d => new StatusDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
-        };
-
-        StatusRow BranchRow(Branch g) => new()
-        {
-            Kind = RowKind.Branch,
-            Id = g.Id,
-            Name = g.Name,
-            Cursor = g.LastUsedIndex,
-            Desktops = g.Desktops.Select(d => new StatusDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
-        };
-
-        var rows = new List<StatusRow>(_branches.Count + 1);
-        foreach (int r in RowOrder())
-            rows.Add(r == MainRowMarker ? MainRow() : BranchRow(_branches[r]));
-
-        int currentRow = CurrentRow();
-        return new StatusSnapshot
-        {
-            Rows = rows,
-            Current = new StatusPosition
-            {
-                Row = currentRow,
-                Desktop = rows.Count > currentRow ? rows[currentRow].Cursor : 0,
-            },
-        };
-    }
+    public StatusSnapshot BuildStatus() => NavProjection.Status(Layout());
 
     // ── Navigation (stable pivot ladder) ───────────────────────────────────────────
 
@@ -235,7 +167,7 @@ public sealed class NavigationModel
     // spatial, status) and every re-slot walks this one order, and the cursor's row is derived from it here —
     // so the "splice main in at its slot" invariant and its off-by-one live in exactly one place.
 
-    private const int MainRowMarker = -1; // stands in for the main timeline within a row-index sequence
+    internal const int MainRowMarker = -1; // stands in for the main timeline within a row-index sequence (shared with NavProjection)
 
     // Branch indices in draw order with main (MainRowMarker) spliced in at its clamped slot.
     private IReadOnlyList<int> RowOrder()
