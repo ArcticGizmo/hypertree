@@ -169,11 +169,8 @@ public sealed class NavigationModel
             return new SpatialGroupSource(g.Id, g.Name, IsMain: false, desks);
         }
 
-        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
         var groups = new List<SpatialGroupSource>(_branches.Count + 1);
-        for (int i = 0; i < slot; i++) groups.Add(BranchGroup(i));
-        groups.Add(MainGroup());
-        for (int i = slot; i < _branches.Count; i++) groups.Add(BranchGroup(i));
+        foreach (int r in RowOrder()) groups.Add(r == MainRowMarker ? MainGroup() : BranchGroup(r));
         return new SpatialSource(groups);
     }
 
@@ -189,8 +186,6 @@ public sealed class NavigationModel
     /// </remarks>
     public StatusSnapshot BuildStatus()
     {
-        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
-
         StatusRow MainRow() => new()
         {
             Kind = RowKind.Main,
@@ -209,17 +204,10 @@ public sealed class NavigationModel
         };
 
         var rows = new List<StatusRow>(_branches.Count + 1);
-        for (int i = 0; i < slot; i++) rows.Add(BranchRow(_branches[i]));
-        int mainRow = rows.Count;
-        rows.Add(MainRow());
-        for (int i = slot; i < _branches.Count; i++) rows.Add(BranchRow(_branches[i]));
+        foreach (int r in RowOrder())
+            rows.Add(r == MainRowMarker ? MainRow() : BranchRow(_branches[r]));
 
-        // The cursor's row in the same flattened order. On a branch, its index shifts by one once we're
-        // past main's slot, because main occupies a row of its own in this list.
-        int currentRow = _onMain || _branches.Count == 0
-            ? mainRow
-            : (_currentBranch < slot ? _currentBranch : _currentBranch + 1);
-
+        int currentRow = CurrentRow();
         return new StatusSnapshot
         {
             Rows = rows,
@@ -242,17 +230,44 @@ public sealed class NavigationModel
         _ => false,
     };
 
-    // The cursor's index in the combined row sequence: branches[0..mainSlot-1] / main / branches[mainSlot..].
-    // Rows run 0.._branches.Count (main occupies index _mainSlot).
+    // ── Row order & cursor⇄row mapping ──────────────────────────────────────────────
+    // The stack drawn top-to-bottom is branches[0..slot-1] / MAIN / branches[slot..]. Every projection (map,
+    // spatial, status) and every re-slot walks this one order, and the cursor's row is derived from it here —
+    // so the "splice main in at its slot" invariant and its off-by-one live in exactly one place.
+
+    private const int MainRowMarker = -1; // stands in for the main timeline within a row-index sequence
+
+    // Branch indices in draw order with main (MainRowMarker) spliced in at its clamped slot.
+    private IReadOnlyList<int> RowOrder()
+    {
+        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
+        var seq = new List<int>(_branches.Count + 1);
+        for (int i = 0; i < slot; i++) seq.Add(i);
+        seq.Add(MainRowMarker);
+        for (int i = slot; i < _branches.Count; i++) seq.Add(i);
+        return seq;
+    }
+
+    // The cursor's index in that combined sequence. A branch below main is pushed down one row because main
+    // occupies a row of its own.
     private int CurrentRow()
-        => _onMain ? _mainSlot : (_currentBranch < _mainSlot ? _currentBranch : _currentBranch + 1);
+    {
+        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
+        return _onMain || _branches.Count == 0 ? slot : (_currentBranch < slot ? _currentBranch : _currentBranch + 1);
+    }
+
+    // The inverse: point the cursor at a combined-row index (caller clamps to 0.._branches.Count).
+    private void CursorToRow(int row)
+    {
+        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
+        if (row == slot) _onMain = true;
+        else { _onMain = false; _currentBranch = row < slot ? row : row - 1; }
+    }
 
     // Move the cursor to a row in the combined sequence (clamped), then map it back to main/branch.
     private bool SetRow(int row)
     {
-        row = Math.Clamp(row, 0, _branches.Count);
-        if (row == _mainSlot) _onMain = true;
-        else { _onMain = false; _currentBranch = row < _mainSlot ? row : row - 1; }
+        CursorToRow(Math.Clamp(row, 0, _branches.Count));
         return Commit();
     }
 
@@ -434,12 +449,8 @@ public sealed class NavigationModel
     {
         if (index < 0 || index >= _branches.Count) return null;
 
-        // The row sequence as a list of branch indices, with -1 standing in for main.
-        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
-        var seq = new List<int>(_branches.Count + 1);
-        for (int i = 0; i < slot; i++) seq.Add(i);
-        seq.Add(-1);
-        for (int i = slot; i < _branches.Count; i++) seq.Add(i);
+        // The row sequence as a list of branch indices, with main (MainRowMarker) standing in for its slot.
+        var seq = RowOrder().ToList();
 
         int at = seq.IndexOf(index);
         row = Math.Clamp(row, 0, seq.Count - 1);
@@ -451,8 +462,8 @@ public sealed class NavigationModel
         // branch objects rather than on indices that have just shifted.
         Branch? cursorBranch = _onMain ? null : _branches[_currentBranch];
         Branch theBranch = _branches[index];
-        var reordered = seq.Where(i => i >= 0).Select(i => _branches[i]).ToList();
-        _mainSlot = seq.IndexOf(-1);
+        var reordered = seq.Where(i => i != MainRowMarker).Select(i => _branches[i]).ToList();
+        _mainSlot = seq.IndexOf(MainRowMarker);
         _branches.Clear();
         _branches.AddRange(reordered);
         if (cursorBranch is not null) _currentBranch = _branches.IndexOf(cursorBranch);
