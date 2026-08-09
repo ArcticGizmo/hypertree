@@ -75,10 +75,9 @@ public sealed partial class App
         // palette current, so Choose unwinds to the start. Either way, no flash — one surface throughout.
         // When the last check found a newer release, the palette offers to apply it directly ("Update
         // now — vX") instead of re-checking; otherwise it's a plain "Check for updates".
-        bool updateReady = _lastUpdate is { Availability: UpdateAvailability.Available };
-        var update = updateReady
-            ? new Command($"Update now — v{_lastUpdate!.AvailableVersion}", ApplyLastUpdate)
-            : new Command("Check for updates", CheckForUpdates);
+        var update = _updates is { UpdateReady: true }
+            ? new Command($"Update now — v{_updates.Last!.AvailableVersion}", () => _updates.ApplyLast())
+            : new Command("Check for updates", () => _updates?.Check());
 
         var commands = new List<Command>
         {

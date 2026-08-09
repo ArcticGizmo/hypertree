@@ -35,7 +35,7 @@ public sealed partial class App
         SuspendHotkeys();
 
         _settingsWindow = new SettingsWindow(_settings, _startup.IsEnabled, SaveSettings, _activator,
-            new UpdateHooks(CheckForUpdates, ApplyLastUpdate, () => _lastUpdate));
+            new UpdateHooks(() => _updates?.Check(), () => _updates?.ApplyLast(), () => _updates?.Last));
         _settingsWindow.Topmost = true; // sit above the map/flash if one is showing
         // Settings is the one surface that's still its own window; when it closes, re-register the hotkeys
         // (picking up any rebind) and hand the stage its key focus back so an underlying map resumes.
