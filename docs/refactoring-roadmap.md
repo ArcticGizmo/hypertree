@@ -137,10 +137,11 @@ Then (done — completing the step):
 - ✅ **`Args.UnknownFlags` dead code.** The documented typo guard was never called; misspelled flags were
   silently dropped. Wired into `Program.Main` (per-command known set → `BadUsage`). Test-covered (e2e
   `status --jsonn` → exit 3, +1). **Fully verified.**
-- ⏳ **`SettingsWindow.CurrentSettings()` hand-copies 9 pass-through fields** (`SettingsWindow.cs:240`);
-  any new `AppSettings` field this window doesn't edit gets **reset to default on the next toggle**.
-  → Use a record `with`-expression. (Remaining; Views/UI layer — not covered by the suite, so needs a
-  smoke-test, unlike the two above.)
+- ✅ **`SettingsWindow.CurrentSettings()` silently reset unedited settings.** It hand-copied only 8
+  pass-through fields, dropping `MapZoom`/`ShowMapLegend`/`PickerZoom` — so toggling any setting reverted
+  the map/picker zoom and legend. Made `AppSettings` a record and used `_initial with { …edited… }` so
+  every other field carries by construction. Build 0/0, 295 green. ⚠️ UI layer — smoke-test: change zoom/
+  legend, toggle an unrelated setting, confirm they survive.
 - ✅ **`HString.Create` ignored the `WindowsCreateString` HRESULT.** Now returns a clean null handle on any
   non-success HRESULT (explicit best-effort contract; throwing would crash the tray). Build-verified.
 - ✅ **`ControlClient.ReadLine` had no 64KB cap** (the server copy did). Added the matching bound so a tray
