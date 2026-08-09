@@ -44,6 +44,11 @@ internal static class SpatialPainter
     private const double BaseStrideX = 202, BaseStrideY = 140, BaseHullPad = 16;
     private static double TileH => BaseScrH + BaseCapH; // 72
 
+    // Per-room brightness, three tiers: the focused room (blue selection/cursor or green "here") reads at
+    // full strength; its groupmates in the same live group sit a notch down so the focus stands out within
+    // the group; every room in a group you're not in is dimmer still, so the map isn't colour-washed.
+    private const double RoomFocusedOpacity = 1.0, RoomGroupmateOpacity = 0.75, RoomRestOpacity = 0.5;
+
     /// <summary>The spatial metrics — a near-square grid, unlike the tall row pitch, since 2-D placement
     /// wants comparable breathing room on both axes.</summary>
     public static SceneMetrics Metrics(double s) => new(
@@ -101,10 +106,16 @@ internal static class SpatialPainter
             }
             if (overlapping.Contains(id)) AddOverlapBadge(host, local, s);
 
-            // A desktop dims unless its group is "live" (the selection, "here", hover, or a whole-group pick
-            // sits in it). This is the de-emphasis 0-window rooms used to carry, now repurposed to mean "not
-            // the group you're in" — so a room reads the same whether or not it holds windows.
-            host.Opacity = activeGroups.Contains(placed.Room.GroupId) ? 1.0 : 0.5;
+            // Brightness by focus, not just by group: the focused room (blue selection/cursor or green
+            // "here") reads at full strength; its groupmates in the same live group sit a notch down so the
+            // focus stands out within the group rather than the whole group blazing at once; every room in a
+            // group you're not in is dimmer still. This is the de-emphasis 0-window rooms used to carry, now
+            // repurposed to mean "not the room/group you're on" — so a room reads the same whether or not it
+            // holds windows.
+            bool focused = placed.Room.Selected || placed.Room.Here;
+            host.Opacity = focused ? RoomFocusedOpacity
+                         : activeGroups.Contains(placed.Room.GroupId) ? RoomGroupmateOpacity
+                         : RoomRestOpacity;
 
             if (onClick is not null || onActivate is not null)
             {
