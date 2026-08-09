@@ -114,8 +114,10 @@ Then (done — completing the step):
 2. **The core row-order splice** (`branches[0..slot] / MAIN / branches[slot..]`) hand-rebuilt **6×**
    across `NavigationModel` + `SpatialSnapshot`; the branch-index↔row mapping has **3 copies with
    divergent clamping**. → One `RowsInDrawOrder()` enumerator + one `RowOfCursor()`/`CursorForRow()` pair.
-3. **Topmost / click-through / tool-window P/Invoke** copied across 5 window classes (`HudWindow`,
-   `OverlayStage`, `SwitcherWindow`, `TaskbarLabel`, `RestoreCurtain`). → Consolidate into `WindowFx`.
+3. ✅ **Topmost / click-through / tool-window P/Invoke** copied across 5 window classes (`HudWindow`,
+   `OverlayStage`, `SwitcherWindow`, `TaskbarLabel`, `RestoreCurtain`). Consolidated into `WindowFx` as
+   `SetClickThrough`/`SetNoActivate`/`SetToolWindow`/`LiftTopmost`; each class's wrapper now delegates
+   (call sites unchanged), per-class constants + P/Invoke deleted. Build 0/0, 295 green.
 4. **Five prompt-card classes** duplicate the entire card scaffold + an identical arrow-key focus
    handler, and have already drifted (widths 360/380/440). → Abstract `CardContent` base.
 5. **Scene abstraction bypassed** — `SpatialPainter` doesn't implement `IScenePainter` and re-codes all
