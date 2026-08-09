@@ -53,11 +53,17 @@ What remains in `App.axaml.cs` (712) is a coherent "app shell": fields, lifecycl
   `_stage.Dismiss()`. ⚠️ **Needs a runtime smoke-test** (check / up-to-date / apply, tray retitle, Settings
   inline status). Also surfaced a pre-existing quirk: launcher-failure and update notifications share the
   `"update-check"` notice key (so they replace each other) — preserved and flagged, not changed here.
-- ⏳ **`SpatialOverlayPresenter`** (remaining) — owns the ~15 `_spatialOverlay.XxxRequested +=` subscriptions
-  and the `DesktopId`→`DesktopSelection` resolution. The most entangled of the three (touches model, stage,
-  map region), so highest risk; needs a smoke-test.
+- ✅ **Spatial-map wiring** — extracted the ~45-line subscription block into `WireSpatialOverlay()` in
+  App.Map.cs and deduped the resolution with `WithSelection(id, act)` / `WithBranch(guid, act)`.
+  ⛔ **Deliberately did NOT create a `SpatialOverlayPresenter` class** as the review suggested: every handler
+  is thin glue onto a distinct App command, so a presenter would carry ~18 delegates back into App —
+  relocating coupling without a real seam (the param-obsession the review warns against). Conscious
+  deviation, like `NavSync`. ⚠️ Map edits want a smoke-test.
 
-`App.axaml.cs`: 712 → 600 with the two controllers out.
+`App.axaml.cs`: 712 → 557 with the two controllers + map wiring out.
+
+**Step 2 complete** (as an injected-seam pass; two review items consciously declined where a class would
+have relocated coupling rather than reduced it).
 
 ### Step 3 — `NavigationModel` (Core, test-covered)
 Done so far (each a commit, 291 tests green throughout) — prioritized the duplicated-invariant
