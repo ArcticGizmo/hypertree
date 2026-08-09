@@ -141,8 +141,10 @@ Then (done — completing the step):
   any new `AppSettings` field this window doesn't edit gets **reset to default on the next toggle**.
   → Use a record `with`-expression. (Remaining; Views/UI layer — not covered by the suite, so needs a
   smoke-test, unlike the two above.)
-- **`HString.Create` ignores the `WindowsCreateString` HRESULT** → silent empty desktop name.
-- **`ControlClient.ReadLine` has no 64KB cap** (the server copy does) → unbounded buffering.
+- ✅ **`HString.Create` ignored the `WindowsCreateString` HRESULT.** Now returns a clean null handle on any
+  non-success HRESULT (explicit best-effort contract; throwing would crash the tray). Build-verified.
+- ✅ **`ControlClient.ReadLine` had no 64KB cap** (the server copy did). Added the matching bound so a tray
+  streaming an endless newline-less reply can't make `htree` buffer forever. Build-verified.
 - **~20 blank `catch { }` blocks with no logging** in the interop/IPC layer — the one place the
   interesting bugs live. → A tiny `Diagnostics.Swallowed(ex, context)` sink + narrow the catch types.
 
