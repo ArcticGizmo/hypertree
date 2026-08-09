@@ -24,17 +24,26 @@ green and the app running identically.
 statements — a symptom of lazy field-init instead of injected collaborators. The entire App layer has
 **zero tests** as a result (contrast Core: `NavigationModel` alone has 709 lines of tests).
 
-### Step 1 (start here — no behaviour change)
+### Step 1 — ✅ DONE (no behaviour change)
 Split `App.axaml.cs` into `partial` files along its existing `// ──` banner regions, to expose the
-seams before extracting types. Candidate partial files:
-- `App.MonitorLayout.cs` — `OnRestoreAvailable`, `DoRestoreMonitorLayout`, `ApplyRestore`,
-  `BuildMonitorDebugView`, `TraceRestoreToFile`, `OpenMonitorDebugOverlay` (~180 lines, much dev-only)
-- `App.Updates.cs` — `CheckForUpdates`, `ResolveUpdateAsync`, `ApplyLastUpdate`, `NotifyUpdateResult`,
-  tray update-item plumbing
-- `App.Navigation.cs` — `Navigate`, `Peek`, gesture poll, history (`StepHistory`/`ToggleHistory`/`RecordVisit`)
-- `App.SpatialMap.cs` — the map event wiring + manage-map actions (rename/delete/new/group)
-- `App.Layouts.cs` — snapshots + templates + implode
-- `App.Lifecycle.cs` — `Startup`/`Teardown`/tray/notifier (keep in the main file if small enough)
+seams before extracting types. **`App.axaml.cs`: 2,227 → 712 lines.** Each extraction was a separate
+commit, compiled clean (0 warnings/errors), tests stayed green (291 pass). Partials created:
+- `App.MonitorLayout.cs` (241) — monitor restore + debug/trace
+- `App.Navigation.cs` (225) — nav gesture flow + breadcrumb history
+- `App.Layouts.cs` (222) — implode/reset + snapshot save/restore
+- `App.Settings.cs` (167) — settings apply/save, map-style toggle, switcher plumbing
+- `App.Branches.cs` (250) — branch definition, templates, desktop delete/teardown helpers
+- `App.Map.cs` (467) — map open/close, group picker, move/pull, manage-map actions, spotlight, preview
+- `App.CommandPalette.cs` (111) — command palette toggle/show + `BuildCommands` registry
+- (pre-existing: `App.Launcher.cs`)
+
+What remains in `App.axaml.cs` (712) is a coherent "app shell": fields, lifecycle
+(`Initialize`/`OnFrameworkInitializationCompleted`/`Startup`/`Teardown`), the outside-world surface
+(watcher/status/control pipe), changelog, hotkeys, updates + notification plumbing, tray/notifier.
+
+> **Note:** the Updates methods were left in the shell file — they interleave with cross-cutting
+> notification plumbing (`Notify`/`OnNotificationActivated`/`OnUi`) that genuinely belongs to the shell,
+> so they'll be teased out properly in Step 2 as an injected `UpdateController` rather than a partial.
 
 ### Step 2
 Extract types with **injected dependencies** (not just partials — real seams):
