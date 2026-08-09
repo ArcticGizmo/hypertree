@@ -127,15 +127,18 @@ Then (done — completing the step):
 
 ## Tier 3 — Latent bugs surfaced by the review (fix regardless of refactoring)
 
-- **State directory splits under redirection.** `HYPERTREE_STATE_DIR` is honoured only by `StatusFile`;
-  the other four stores (`state.json`/`settings.json`/`spatial.json`/`snapshots.json`) compute
-  `%APPDATA%\hypertree` inline. Also those four lack `StatusFile`'s atomic temp-file+move, so a crash
-  mid-write corrupts `state.json`. → Shared `JsonFileStore<T>` / `StateDirectory` resolver.
-- **`Args.UnknownFlags` is dead code** — the documented typo guard (so `--jsonn` errors instead of
-  silently emitting human output) is never called.
-- **`SettingsWindow.CurrentSettings()` hand-copies 9 pass-through fields** (`SettingsWindow.cs:240`);
+- ✅ **State directory split + non-atomic writes.** `HYPERTREE_STATE_DIR` was honoured only by `StatusFile`;
+  the five file stores hardcoded `%APPDATA%\hypertree`, splitting a redirected/portable install's state
+  across two dirs, and wrote in-place (crash mid-write could corrupt `state.json`). Fixed: one
+  `StateDirectory` resolver + `WriteAtomic`, used by `StatusFile` (now a delegator, public API unchanged)
+  and all five stores. Test-covered (`StateDirectoryTests`, +3). **Fully verified — no smoke-test needed.**
+- ✅ **`Args.UnknownFlags` dead code.** The documented typo guard was never called; misspelled flags were
+  silently dropped. Wired into `Program.Main` (per-command known set → `BadUsage`). Test-covered (e2e
+  `status --jsonn` → exit 3, +1). **Fully verified.**
+- ⏳ **`SettingsWindow.CurrentSettings()` hand-copies 9 pass-through fields** (`SettingsWindow.cs:240`);
   any new `AppSettings` field this window doesn't edit gets **reset to default on the next toggle**.
-  → Use a record `with`-expression.
+  → Use a record `with`-expression. (Remaining; Views/UI layer — not covered by the suite, so needs a
+  smoke-test, unlike the two above.)
 - **`HString.Create` ignores the `WindowsCreateString` HRESULT** → silent empty desktop name.
 - **`ControlClient.ReadLine` has no 64KB cap** (the server copy does) → unbounded buffering.
 - **~20 blank `catch { }` blocks with no logging** in the interop/IPC layer — the one place the
