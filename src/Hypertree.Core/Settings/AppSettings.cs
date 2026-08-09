@@ -198,11 +198,7 @@ public sealed class FileSettingsStore : ISettingsStore
 
     public string Path { get; }
 
-    public FileSettingsStore()
-        : this(System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "hypertree"))
-    {
-    }
+    public FileSettingsStore() : this(Hypertree.Store.StateDirectory.Path) { }
 
     /// <summary>Testing seam: keep <c>settings.json</c> in an explicit directory instead of the roaming
     /// profile, so a round-trip can be exercised without touching a real install's settings.</summary>
@@ -249,7 +245,7 @@ public sealed class FileSettingsStore : ISettingsStore
 
     public void Save(AppSettings settings)
     {
-        try { File.WriteAllText(Path, JsonSerializer.Serialize(settings, Options)); }
+        try { Hypertree.Store.StateDirectory.WriteAtomic(Path, JsonSerializer.Serialize(settings, Options)); }
         catch { /* best-effort; losing a write is better than crashing the tray */ }
     }
 }

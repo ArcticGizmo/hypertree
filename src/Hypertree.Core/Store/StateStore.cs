@@ -54,13 +54,7 @@ public sealed class FileStateStore : IStateStore
 
     public string Path { get; }
 
-    public FileStateStore()
-    {
-        string dir = System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "hypertree");
-        Directory.CreateDirectory(dir);
-        Path = System.IO.Path.Combine(dir, "state.json");
-    }
+    public FileStateStore() => Path = StateDirectory.Combine("state.json");
 
     public PersistedState Load()
     {
@@ -77,7 +71,7 @@ public sealed class FileStateStore : IStateStore
 
     public void Save(PersistedState state)
     {
-        try { File.WriteAllText(Path, JsonSerializer.Serialize(state, Options)); }
+        try { StateDirectory.WriteAtomic(Path, JsonSerializer.Serialize(state, Options)); }
         catch { /* best-effort; losing a write is better than crashing the tray */ }
     }
 }

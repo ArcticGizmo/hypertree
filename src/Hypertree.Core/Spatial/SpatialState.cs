@@ -59,11 +59,7 @@ public sealed class FileSpatialStore : ISpatialStore
 
     public string Path { get; }
 
-    public FileSpatialStore()
-        : this(System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "hypertree"))
-    {
-    }
+    public FileSpatialStore() : this(Hypertree.Store.StateDirectory.Path) { }
 
     /// <summary>Testing seam: keep <c>spatial.json</c> in an explicit directory instead of the roaming
     /// profile, so a round-trip can be exercised without touching a real install.</summary>
@@ -88,7 +84,7 @@ public sealed class FileSpatialStore : ISpatialStore
 
     public void Save(SpatialState state)
     {
-        try { File.WriteAllText(Path, JsonSerializer.Serialize(state, Options)); }
+        try { Hypertree.Store.StateDirectory.WriteAtomic(Path, JsonSerializer.Serialize(state, Options)); }
         catch { /* best-effort; losing a write is better than crashing the tray */ }
     }
 }
