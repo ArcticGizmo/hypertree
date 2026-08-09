@@ -105,10 +105,12 @@ Then (done — completing the step):
 
 ## Tier 2 — Duplicated invariants (copies that MUST stay identical, but nothing enforces it)
 
-1. **Win32 window-enumeration filter copied byte-for-byte** — `IsCountableWindow`/`IsShellWindow`/
-   `TitleOf`/`ProcessOf` + ~9 DllImports duplicated between `VirtualDesktopController.cs:143-177` and
-   `WindowsWindowLayoutController.cs:295-355`. The "window counts match layout captures" invariant
-   depends on these never diverging. → Extract `internal static class NativeWindows`.
+1. ✅ **Win32 window-enumeration filter copied byte-for-byte** — `IsCountableWindow`/`IsShellWindow`/
+   `TitleOf`/`ProcessOf` (+ `ClassOf`) and their DllImports/constants were duplicated between the two
+   controllers, held in sync only by a comment; the "counts match layout captures" invariant depended on
+   it. Extracted to `internal static class NativeWindows`; each controller keeps only the imports it uses
+   directly. Build 0/0, 295 tests green. ⚠️ Interop, no unit coverage — wants a light smoke-test (map
+   window counts, move/pull pickers).
 2. **The core row-order splice** (`branches[0..slot] / MAIN / branches[slot..]`) hand-rebuilt **6×**
    across `NavigationModel` + `SpatialSnapshot`; the branch-index↔row mapping has **3 copies with
    divergent clamping**. → One `RowsInDrawOrder()` enumerator + one `RowOfCursor()`/`CursorForRow()` pair.
