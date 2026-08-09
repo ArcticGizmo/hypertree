@@ -846,14 +846,8 @@ public sealed class NavigationModel
     {
         Name = name,
         MainSlot = _mainSlot,
-        MainDesktops = _topRow.Select(d => new PersistedDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
-        Branches = _branches.Select(g => new PersistedBranch
-        {
-            Id = g.Id,
-            Name = g.Name,
-            LastUsedIndex = g.LastUsedIndex,
-            Desktops = g.Desktops.Select(d => new PersistedDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
-        }).ToList(),
+        MainDesktops = _topRow.Select(ToPersisted).ToList(),
+        Branches = _branches.Select(ToPersisted).ToList(),
     };
 
     /// <summary>
@@ -871,6 +865,18 @@ public sealed class NavigationModel
     }
 
     // ── Persistence ────────────────────────────────────────────────────────────
+
+    // Project the in-memory model onto its persisted shapes. Shared by Save (the live state file) and
+    // CaptureSnapshot (a named layout) so the two never drift — add a field to a branch/desktop and both
+    // paths pick it up from here.
+    private static PersistedDesktop ToPersisted(DesktopRef d) => new() { Id = d.Id.Value, Label = d.Label };
+    private static PersistedBranch ToPersisted(Branch g) => new()
+    {
+        Id = g.Id,
+        Name = g.Name,
+        LastUsedIndex = g.LastUsedIndex,
+        Desktops = g.Desktops.Select(ToPersisted).ToList(),
+    };
 
     private void RestoreBranches()
     {
@@ -904,13 +910,7 @@ public sealed class NavigationModel
         {
             ActiveBranch = _currentBranch,
             MainSlot = _mainSlot,
-            Branches = _branches.Select(g => new PersistedBranch
-            {
-                Id = g.Id,
-                Name = g.Name,
-                LastUsedIndex = g.LastUsedIndex,
-                Desktops = g.Desktops.Select(d => new PersistedDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
-            }).ToList(),
+            Branches = _branches.Select(ToPersisted).ToList(),
         });
     }
 }
