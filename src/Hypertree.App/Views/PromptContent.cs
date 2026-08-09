@@ -22,8 +22,8 @@ namespace Hypertree.App.Views;
 internal sealed class PromptContent : IStageContent
 {
     // Matches PaletteContent so prompts read as one surface family.
-    private static readonly IBrush CardBg = new SolidColorBrush(Color.Parse("#12161F"));
-    private static readonly IBrush CardStroke = new SolidColorBrush(Color.Parse("#2A3444"));
+    private static readonly IBrush CardBg = Palette.CardBgBrush;
+    private static readonly IBrush CardStroke = Palette.StrokeBrush;
     private static readonly IBrush Muted = new SolidColorBrush(Color.Parse("#999"));
 
     private readonly Action<string> _onConfirm;

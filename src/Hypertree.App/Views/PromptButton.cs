@@ -19,8 +19,8 @@ internal sealed class PromptButton : Border
     public event Action? Invoked;
 
     private static readonly Color Bg = Color.Parse("#2A3444"), BgHover = Color.Parse("#37455B");
-    private static readonly Color Edge = Color.Parse("#3C4A5E"), Focused = Color.Parse("#6EA8FF");
-    private static readonly IBrush Ink = new SolidColorBrush(Color.Parse("#E8EDF5"));
+    private static readonly Color Edge = Color.Parse("#3C4A5E"), Focused = Palette.Accent;
+    private static readonly IBrush Ink = Palette.InkBrush;
 
     private bool _hover;
 

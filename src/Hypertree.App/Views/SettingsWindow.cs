@@ -41,9 +41,9 @@ internal sealed record UpdateHooks(Action Check, Action Install, Func<UpdateChec
 /// </summary>
 internal sealed class SettingsWindow : Window
 {
-    private static readonly IBrush Ink = new SolidColorBrush(Color.Parse("#E8EDF5"));
-    private static readonly IBrush Muted = new SolidColorBrush(Color.Parse("#9AA6B8"));
-    private static readonly IBrush Accent = new SolidColorBrush(Color.Parse("#6EA8FF"));
+    private static readonly IBrush Ink = Palette.InkBrush;
+    private static readonly IBrush Muted = Palette.MutedBrush;
+    private static readonly IBrush Accent = Palette.AccentBrush;
     private static readonly IBrush Warn = new SolidColorBrush(Color.Parse("#F0B84E"));
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
 

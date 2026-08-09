@@ -19,17 +19,17 @@ internal sealed class AsciiPainter : IScenePainter
     private static readonly Color Ground = Color.Parse("#0C0F16"); // opaque card fill: masks the spine, lifts contrast
     private static readonly Color MainLine = Color.Parse("#C5D0E0");
     private static readonly Color SpineColour = Color.Parse("#3A4453");
-    private static readonly Color Focus = Color.Parse("#6EA8FF");
-    private static readonly Color Here = Color.Parse("#34D399");
+    private static readonly Color Focus = Palette.Accent;
+    private static readonly Color Here = Palette.Here;
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
 
-    private static readonly Color[] Palette =
+    private static readonly Color[] LinePalette =
     {
         Color.Parse("#F4795B"), Color.Parse("#5BC8F4"), Color.Parse("#7BD88F"), Color.Parse("#C99BF4"),
         Color.Parse("#F4C95B"), Color.Parse("#F45B9C"), Color.Parse("#63D6C4"), Color.Parse("#9CB2F4"),
     };
 
-    private static Color BranchColour(int i) => Palette[((i % Palette.Length) + Palette.Length) % Palette.Length];
+    private static Color BranchColour(int i) => LinePalette[((i % LinePalette.Length) + LinePalette.Length) % LinePalette.Length];
 
     private const double FontSize = 15;
     private const int InnerW = 13;          // characters between the vertical box borders

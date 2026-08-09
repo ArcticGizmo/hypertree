@@ -33,13 +33,13 @@ namespace Hypertree.App.Views;
 /// </summary>
 internal sealed class SwitcherWindow : Window
 {
-    private static readonly IBrush Ink = new SolidColorBrush(Color.Parse("#E8EDF5"));
+    private static readonly IBrush Ink = Palette.InkBrush;
     private static readonly IBrush Dim = new SolidColorBrush(Color.Parse("#B4C0D0"));
-    private static readonly IBrush Muted = new SolidColorBrush(Color.Parse("#9AA6B8"));
-    private static readonly IBrush Accent = new SolidColorBrush(Color.Parse("#6EA8FF"));
-    private static readonly IBrush PanelBg = new SolidColorBrush(Color.Parse("#12161F"));
-    private static readonly IBrush PanelBorder = new SolidColorBrush(Color.Parse("#2A3444"));
-    private static readonly IBrush Divider = new SolidColorBrush(Color.Parse("#2A3444"));
+    private static readonly IBrush Muted = Palette.MutedBrush;
+    private static readonly IBrush Accent = Palette.AccentBrush;
+    private static readonly IBrush PanelBg = Palette.CardBgBrush;
+    private static readonly IBrush PanelBorder = Palette.StrokeBrush;
+    private static readonly IBrush Divider = Palette.StrokeBrush;
     private static readonly IBrush RowHover = new SolidColorBrush(Color.FromArgb(0x22, 0xFF, 0xFF, 0xFF));
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
 

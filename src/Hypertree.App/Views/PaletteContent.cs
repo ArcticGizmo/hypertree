@@ -46,13 +46,13 @@ internal sealed record PaletteItem(string Label, string? Detail, string? Glyph, 
 internal sealed class PaletteContent : IStageContent
 {
     // Reuse the board's dark palette so it reads as one app.
-    private static readonly IBrush CardBg = new SolidColorBrush(Color.Parse("#12161F"));
-    private static readonly IBrush Stroke = new SolidColorBrush(Color.Parse("#2A3444"));
+    private static readonly IBrush CardBg = Palette.CardBgBrush;
+    private static readonly IBrush Stroke = Palette.StrokeBrush;
     private static readonly IBrush RowSel = new SolidColorBrush(Color.Parse("#232C3C"));
     private static readonly IBrush SearchBg = new SolidColorBrush(Color.Parse("#181D28"));
-    private static readonly IBrush Ink = new SolidColorBrush(Color.Parse("#E8EDF5"));
-    private static readonly IBrush Muted = new SolidColorBrush(Color.Parse("#9AA6B8"));
-    private static readonly IBrush Accent = new SolidColorBrush(Color.Parse("#6EA8FF"));
+    private static readonly IBrush Ink = Palette.InkBrush;
+    private static readonly IBrush Muted = Palette.MutedBrush;
+    private static readonly IBrush Accent = Palette.AccentBrush;
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
 
     private readonly IReadOnlyList<PaletteItem> _all;

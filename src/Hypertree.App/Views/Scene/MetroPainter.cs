@@ -22,8 +22,8 @@ internal sealed class MetroPainter : IScenePainter
     private static readonly Color MainLine = Color.Parse("#C5D0E0");
     private static readonly Color ChipBase = Color.Parse("#111722");
     private static readonly Color ChipInk = Color.Parse("#0A0D12");
-    private static readonly Color Focus = Color.Parse("#6EA8FF");
-    private static readonly Color Here = Color.Parse("#34D399");
+    private static readonly Color Focus = Palette.Accent;
+    private static readonly Color Here = Palette.Here;
     private static readonly FontFamily Sans = new("Inter,Segoe UI,sans-serif");
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
 

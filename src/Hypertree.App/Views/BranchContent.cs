@@ -19,8 +19,8 @@ internal sealed record BranchSpec(string Name, IReadOnlyList<string> Labels);
 /// </summary>
 internal sealed class BranchContent : IStageContent
 {
-    private static readonly IBrush CardBg = new SolidColorBrush(Color.Parse("#12161F"));
-    private static readonly IBrush CardStroke = new SolidColorBrush(Color.Parse("#2A3444"));
+    private static readonly IBrush CardBg = Palette.CardBgBrush;
+    private static readonly IBrush CardStroke = Palette.StrokeBrush;
     private static readonly IBrush Muted = new SolidColorBrush(Color.Parse("#999"));
 
     /// <summary>What an empty Desktops box provisions: one desktop, so a branch is only ever a name away.</summary>

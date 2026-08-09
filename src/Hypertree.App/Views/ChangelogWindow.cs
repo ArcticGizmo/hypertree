@@ -22,8 +22,8 @@ namespace Hypertree.App.Views;
 /// </summary>
 internal sealed class ChangelogWindow : Window
 {
-    private static readonly IBrush Ink = new SolidColorBrush(Color.Parse("#E8EDF5"));
-    private static readonly IBrush Muted = new SolidColorBrush(Color.Parse("#9AA6B8"));
+    private static readonly IBrush Ink = Palette.InkBrush;
+    private static readonly IBrush Muted = Palette.MutedBrush;
 
     private readonly IForegroundActivator _activator;
     private readonly Action? _onSuppress;

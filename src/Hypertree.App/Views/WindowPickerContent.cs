@@ -25,10 +25,10 @@ namespace Hypertree.App.Views;
 /// </summary>
 internal abstract class WindowPickerContent : IStageContent
 {
-    protected static readonly IBrush Fg = new SolidColorBrush(Color.Parse("#E8EDF5"));
-    protected static readonly IBrush FgDim = new SolidColorBrush(Color.Parse("#9AA6B8"));
-    private static readonly IBrush Accent = new SolidColorBrush(Color.Parse("#6EA8FF"));
-    private static readonly Color CardStroke = Color.Parse("#2A3444");
+    protected static readonly IBrush Fg = Palette.InkBrush;
+    protected static readonly IBrush FgDim = Palette.MutedBrush;
+    private static readonly IBrush Accent = Palette.AccentBrush;
+    private static readonly Color CardStroke = Palette.Stroke;
     private static readonly Color FocusRing = Color.Parse("#C9D4E5"); // near-white cursor outline (transient)
     private static readonly Color SelBorder = Color.Parse("#4C9AFF"); // strong blue — a selected (ticked) card
     private static readonly Color SelBg = Color.Parse("#182740");     // bluish card fill when selected

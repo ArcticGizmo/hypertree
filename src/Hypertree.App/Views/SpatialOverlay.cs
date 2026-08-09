@@ -25,9 +25,9 @@ namespace Hypertree.App.Views;
 /// </summary>
 internal sealed class SpatialOverlay : IStageContent
 {
-    private static readonly IBrush Fg = new SolidColorBrush(Color.Parse("#E8EDF5"));
-    private static readonly IBrush FgDim = new SolidColorBrush(Color.Parse("#9AA6B8"));
-    private static readonly IBrush Accent = new SolidColorBrush(Color.Parse("#6EA8FF"));
+    private static readonly IBrush Fg = Palette.InkBrush;
+    private static readonly IBrush FgDim = Palette.MutedBrush;
+    private static readonly IBrush Accent = Palette.AccentBrush;
     private static readonly Color LegendBg = Color.FromArgb(0xC8, 0x14, 0x19, 0x22);
     private static readonly Color KeyCapBg = Color.FromArgb(0xFF, 0x22, 0x2C, 0x3A);
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");

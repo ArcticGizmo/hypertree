@@ -22,10 +22,10 @@ namespace Hypertree.App.Views.Scene;
 /// </summary>
 internal static class SpatialPainter
 {
-    private static readonly Color TileBg = Color.Parse("#1F2836"), TileBorder = Color.Parse("#2A3444");
+    private static readonly Color TileBg = Color.Parse("#1F2836"), TileBorder = Palette.Stroke;
     private static readonly Color CapBg = Color.Parse("#161C27");
-    private static readonly Color Ink = Color.Parse("#E8EDF5"), InkSoft = Color.Parse("#9AA6B8");
-    private static readonly Color Focus = Color.Parse("#6EA8FF"), Here = Color.Parse("#34D399");
+    private static readonly Color Ink = Palette.Ink, InkSoft = Palette.Muted;
+    private static readonly Color Focus = Palette.Accent, Here = Palette.Here;
     private static readonly Color WinBase = Color.Parse("#374357");
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
     // ASCII / Metro room styling, matching AsciiPainter and MetroPainter so a room reads the same in either model.
