@@ -494,36 +494,16 @@ internal sealed class SwitcherWindow : Window
         try { _desktops.PinWindow(h); _pinned = true; } catch { /* best-effort — losing the pin isn't fatal */ }
     }
 
-    private const int GWL_EXSTYLE = -20;
-    private const long WS_EX_TOOLWINDOW = 0x80;
-    private static readonly nint HWND_TOPMOST = new(-1);
-    private const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOACTIVATE = 0x0010;
-
     [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT p);
-    [DllImport("user32.dll", SetLastError = true)] private static extern long GetWindowLongPtr(nint hWnd, int nIndex);
-    [DllImport("user32.dll", SetLastError = true)] private static extern long SetWindowLongPtr(nint hWnd, int nIndex, long dwNewLong);
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
 
-    private void Relift()
-    {
-        nint h = TryGetPlatformHandle()?.Handle ?? 0;
-        if (h != 0) SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    }
+    private void Relift() => WindowFx.LiftTopmost(TryGetPlatformHandle()?.Handle ?? 0);
 
-    // Keep it out of the taskbar / alt-tab (TOOLWINDOW). We deliberately do NOT set WS_EX_NOACTIVATE: that
-    // stops a window activating on click, which would stop the desktop-picker flyout taking clicks. Focus
+    // Keep it out of the taskbar / alt-tab (TOOLWINDOW only). Deliberately NOT click-through / no-activate:
+    // the switcher must take clicks (WindowFx.SetToolWindow, unlike SetClickThrough, adds neither). Focus
     // isn't stolen on *show* either way (ShowActivated = false); a click briefly activates it, which the
-    // desktop switch hides. And unlike the taskbar label we do NOT set WS_EX_TRANSPARENT — the switcher
-    // must take clicks.
-    private void MakeToolWindow()
-    {
-        nint h = TryGetPlatformHandle()?.Handle ?? 0;
-        if (h == 0) return;
-        long ex = GetWindowLongPtr(h, GWL_EXSTYLE);
-        SetWindowLongPtr(h, GWL_EXSTYLE, ex | WS_EX_TOOLWINDOW);
-    }
+    // desktop switch hides.
+    private void MakeToolWindow() => WindowFx.SetToolWindow(TryGetPlatformHandle()?.Handle ?? 0);
 
     private static bool IsWithin(Control node, Control ancestor)
     {
