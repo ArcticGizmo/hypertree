@@ -256,4 +256,17 @@ public sealed class CliEndToEndTests : IDisposable
         Assert.Equal(0, Run("--version").code);
         Assert.Equal(3, Run().code); // no command usually means a script built an empty argument
     }
+
+    [Fact]
+    public void A_misspelled_flag_is_a_usage_error_not_a_silent_ignore()
+    {
+        RequireExe();
+
+        // --jsonn is the canonical trap: without the guard it's ignored, status prints human output, and a
+        // script that asked for JSON silently mis-parses. It must fail loudly (BadUsage) instead.
+        var (code, _, stderr) = Run("status", "--jsonn");
+
+        Assert.Equal(3, code);
+        Assert.Contains("--jsonn", stderr);
+    }
 }

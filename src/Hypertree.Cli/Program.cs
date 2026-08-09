@@ -37,6 +37,24 @@ internal static class Program
                 : ExitCode.Ok;
         }
 
+        // Reject a flag no command recognises rather than silently ignoring it — a typo like --jsonn must
+        // not quietly produce human output a script then fails to parse (see Args.UnknownFlags). Only the
+        // real commands carry a known set; help / unknown-command fall through to their own handling.
+        string[]? known = args.Command switch
+        {
+            "status" => new[] { "--json", "--branch", "--desktop" },
+            "list" or "ls" => new[] { "--json", "--all", "-a" },
+            "goto" or "go" => new[] { "--id", "--verbose", "-v" },
+            "watch" => new[] { "--json" },
+            _ => null,
+        };
+        if (known is not null)
+            foreach (string bad in args.UnknownFlags(known))
+            {
+                Output.Error($"Unknown option '{bad}'. Try: htree help");
+                return ExitCode.BadUsage;
+            }
+
         return args.Command switch
         {
             "status" => Commands.Status(args),
