@@ -66,11 +66,17 @@ de-duplication first, since that's where the latent off-by-one risk lived:
 > Note: the line count barely moved (905 → 911) — the win here is removing duplication and the
 > divergent-clamping bug risk, not shrinking the file.
 
-Remaining (optional, lower value — mostly moves code without reducing risk):
-- Extract the 4 projection builders into a `NavProjection` mapper over an immutable read model.
-- Extract the OS-sync trio (`Reconcile`/`Resync`/`AnchorToCurrent`) into a `NavSync` collaborator.
-- Fix the misleading class doc: it claims "holds no Win32/UI, fully unit-testable" but `Commit` calls
-  `_desktops.SwitchTo`.
+Then (done — completing the step):
+- ✅ **Extracted `NavProjection`** — the 3 projection builders (`BuildMap`/`BuildSpatialSource`/`BuildStatus`)
+  moved to a pure `NavProjection` over an immutable `NavLayout` read-model; the model keeps thin delegators
+  so callers/tests are unchanged. NavigationModel 911 → 843; NavProjection 123. 291 green.
+- ✅ **Fixed the misleading class doc** (it commands the OS via `IDesktopController`; it isn't side-effect-free).
+- ⛔ **Deliberately did NOT extract `NavSync`** from `Reconcile`/`Resync`/`AnchorToCurrent`. Unlike the pure
+  projections, those all mutate the same private cursor state; a separate class would force breaking
+  `NavigationModel`'s encapsulation and reduce cohesion — following the review here would make it worse.
+  Recording this as a conscious deviation from the review, not an omission.
+
+**Step 3 complete.**
 
 ### Step 4 — `SpatialOverlay`
 - Extract the pointer-drag gesture engine (`_grab`/`_dragging`/`_pressAt`/... at `:483-566`) into a
