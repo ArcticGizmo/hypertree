@@ -464,4 +464,53 @@ public sealed partial class App
     {
         _stage?.Present(new PaletteContent(placeholder, hint, items, createRow));
     }
+
+    // ── Spatial map wiring ──────────────────────────────────────────────────────────
+
+    // Create the spatial map overlay and connect its keyboard-driven edit requests to the App command that
+    // services each. Called once from Startup. The map raises a DesktopId (a room) or a Guid (a group);
+    // WithSelection / WithBranch resolve those to the position-based ops the commands take, so the glue here
+    // stays one line each.
+    private void WireSpatialOverlay()
+    {
+        _spatialOverlay = new SpatialOverlay(_stage!, _mapCamera, _settings.MapZoom, _settings.ShowMapLegend);
+        _spatialOverlay.JumpRoomRequested += id => JumpFromMap(() => JumpToId(id));
+        _spatialOverlay.ViewStyleToggleRequested += ToggleMapStyle; // v — cycle board ↔ metro ↔ ascii (app-wide)
+        _spatialOverlay.SpatialStateChanged += () => _spatialStore?.Save(_spatial); // a move or recolour is written to spatial.json
+        _spatialOverlay.ZoomChanged += zoom =>                      // +/− — persist the map zoom and mirror it to
+        {                                                          // every other surface that draws the map (flash, backdrops, move flow)
+            _settings.MapZoom = zoom;
+            _settingsStore?.Save(_settings);
+            if (_stage is not null) _stage.MapZoom = zoom;
+            if (_hud is not null) _hud.MapZoom = zoom;
+        };
+        _spatialOverlay.LegendVisibilityChanged += show => { _settings.ShowMapLegend = show; _settingsStore?.Save(_settings); }; // l — persist the legend
+        _spatialOverlay.SetRoomGroupRequested += OpenGroupPickerForRoom;            // g — pick / create the room's group
+        _spatialOverlay.DeleteRoomRequested += id => WithSelection(id, DeleteSelectedDesktop); // Del — confirm/teardown
+        _spatialOverlay.DeleteGroupRequested += g => WithBranch(g, ConfirmRemoveBranch);        // Shift+Del — a group is a branch
+        _spatialOverlay.RenameRoomRequested += id => WithSelection(id, RenameSelected);         // r — rename the desktop
+        _spatialOverlay.RenameGroupRequested += g => WithBranch(g, RenameBranchOnMap);          // Shift+R — rename the branch
+        _spatialOverlay.NewDesktopRequested += id => WithSelection(id, PromptNewDesktop);       // n — new desktop in the room's group
+        _spatialOverlay.NewBranchRequested += () => OpenNewBranchDialog(null);      // b — branch card over the map
+        _spatialOverlay.MoveWindowsRequested += ToggleMoveWindows;                  // m — move this desktop's windows elsewhere
+        _spatialOverlay.PullWindowsRequested += TogglePullWindows;                  // Shift+m — pull windows onto this desktop
+        _spatialOverlay.FinderRequested += OpenSpotlight;                           // f — finder over the map; Esc pops back
+        _spatialOverlay.CommandPaletteRequested += () => ShowCommandPalette(overCurrent: true); // p — palette over the map
+        _spatialOverlay.AppLauncherRequested += () => OpenAppLauncher(overCurrent: true);        // o — launcher over the map
+    }
+
+    // Resolve a room's DesktopId to its position-based selection and run <paramref name="act"/>; a no-op if
+    // the room is gone (e.g. an external delete since the map was drawn).
+    private void WithSelection(DesktopId id, Action<DesktopSelection> act)
+    {
+        if (_model?.Locate(id) is { } at) act(new DesktopSelection(at.onMain, at.branchIndex, at.desktopIndex));
+    }
+
+    // Resolve a group's stable id to its branch index and run <paramref name="act"/>; a no-op if no branch
+    // carries that id.
+    private void WithBranch(Guid groupId, Action<int> act)
+    {
+        int i = _model?.IndexOfBranch(groupId) ?? -1;
+        if (i >= 0) act(i);
+    }
 }
