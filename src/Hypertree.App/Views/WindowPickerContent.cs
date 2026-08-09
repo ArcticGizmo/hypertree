@@ -27,6 +27,7 @@ internal abstract class WindowPickerContent : IStageContent
 {
     protected static readonly IBrush Fg = new SolidColorBrush(Color.Parse("#E8EDF5"));
     protected static readonly IBrush FgDim = new SolidColorBrush(Color.Parse("#9AA6B8"));
+    private static readonly IBrush Accent = new SolidColorBrush(Color.Parse("#6EA8FF"));
     private static readonly Color CardStroke = Color.Parse("#2A3444");
     private static readonly Color FocusRing = Color.Parse("#C9D4E5"); // near-white cursor outline (transient)
     private static readonly Color SelBorder = Color.Parse("#4C9AFF"); // strong blue — a selected (ticked) card
@@ -34,24 +35,43 @@ internal abstract class WindowPickerContent : IStageContent
     private static readonly Color BodyBg = Color.Parse("#0B0E14");
     private static readonly Color CapBg = Color.Parse("#161C27");
     private static readonly Color SearchBg = Color.Parse("#181D28");
+    private static readonly Color KeyCapBg = Color.FromArgb(0xFF, 0x22, 0x2C, 0x3A); // legend keycap chip
     protected static readonly Color BarBg = Color.FromArgb(0xC8, 0x14, 0x19, 0x22); // instruction pill background
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
 
-    // Card geometry (DIPs) — deliberately large so near-identical windows (ten terminals) are tellable apart.
-    private const double CardW = 340, BodyH = 196, CapH = 34, Gap = 18, BodyPad = 4;
+    // Base card geometry (DIPs, at 100% zoom) — deliberately large so near-identical windows (ten terminals)
+    // are tellable apart. The card grows/shrinks with the zoom factor; the padding stays put.
+    private const double BaseCardW = 340, BaseBodyH = 196, Gap = 18, BodyPad = 4;
+    private const double CapH = 34; // caption bar height — a fixed label strip, so it doesn't scale with zoom
+
+    // Thumbnail zoom (Ctrl+ / Ctrl−). A whole-card scale so near-identical windows are easier to tell apart
+    // when the default cards are too small to read. Stepped multiplicatively and clamped to a legible range;
+    // seeded from the persisted preference and raised back on change so App writes it to settings.json — the
+    // picker reopens at the size you left it.
+    private double _zoom = 1.0;
+    private const double MinZoom = 0.6, MaxZoom = 2.5, ZoomStep = 1.15;
+
+    private double CardW => BaseCardW * _zoom;
+    private double BodyH => BaseBodyH * _zoom;
 
     protected readonly WindowMoveSession Session;
     protected readonly Grid Root = new();
     private readonly List<Card> _cards = new();
     private ScrollViewer? _scroll;
     private TextBox? _search;
+    private TextBlock? _zoomLabel; // the "100%" readout in the top-left zoom legend
     protected OverlayStage? Stage;
     private int _columns = 1;
     private bool _pickerActive = true; // false once a subclass takes the surface over (e.g. move's phase 2)
 
-    protected WindowPickerContent(WindowMoveSession session)
+    /// <summary>Ctrl+ / Ctrl− (Ctrl+0 to reset) changed the thumbnail zoom. Carries the new (clamped) factor;
+    /// App persists it to settings.json so the picker reopens at the same size.</summary>
+    public event Action<double>? ZoomChanged;
+
+    protected WindowPickerContent(WindowMoveSession session, double initialZoom = 1.0)
     {
         Session = session;
+        _zoom = Math.Clamp(initialZoom, MinZoom, MaxZoom);
         Root.LayoutUpdated += (_, _) => { if (_pickerActive) PlaceThumbnails(); };
         // Tunnel so the grid keys win before the focused search box consumes them.
         Root.AddHandler(InputElement.KeyDownEvent, OnPickerPreviewKey, RoutingStrategies.Tunnel);
@@ -76,6 +96,7 @@ internal abstract class WindowPickerContent : IStageContent
         DisposeThumbnails();
         _scroll = null;
         _search = null;
+        _zoomLabel = null;
     }
 
     protected bool PickerActive => _pickerActive;
@@ -104,6 +125,11 @@ internal abstract class WindowPickerContent : IStageContent
         if (!_pickerActive) return; // a subclass phase owns the surface — let its keys through to OnKey
         switch (e.Key)
         {
+            // Ctrl+ / Ctrl− scale the thumbnails; Ctrl+0 resets to 100%. '+' usually arrives as Shift+OemPlus,
+            // so accept OemPlus/Add (and OemMinus/Subtract) and just require Ctrl to be down.
+            case Key.Add or Key.OemPlus when e.KeyModifiers.HasFlag(KeyModifiers.Control): Zoom(ZoomStep); e.Handled = true; break;
+            case Key.Subtract or Key.OemMinus when e.KeyModifiers.HasFlag(KeyModifiers.Control): Zoom(1 / ZoomStep); e.Handled = true; break;
+            case Key.D0 or Key.NumPad0 when e.KeyModifiers.HasFlag(KeyModifiers.Control): ResetZoom(); e.Handled = true; break;
             case Key.Escape: Stage?.Back(); e.Handled = true; break; // return to the map if we opened over it, else hide
             case Key.Left: if (Session.MoveFocus(-1)) Highlight(); e.Handled = true; break;
             case Key.Right: if (Session.MoveFocus(+1)) Highlight(); e.Handled = true; break;
@@ -116,6 +142,73 @@ internal abstract class WindowPickerContent : IStageContent
                 break;
         }
     }
+
+    // ── Thumbnail zoom (Ctrl+ / Ctrl− / Ctrl+0) ─────────────────────────────────────
+    // Scale the cards, clamped to a legible range, then rebuild the grid at the new size. The layout hook
+    // re-places the thumbnails once the new geometry settles. Persisted via App off ZoomChanged.
+
+    private void Zoom(double factor)
+    {
+        double next = Math.Clamp(_zoom * factor, MinZoom, MaxZoom);
+        // The multiplicative steps don't line up with 100%, so a step that crosses it snaps to exactly 1.0 —
+        // otherwise you could never get back to the default size once you'd stepped off it.
+        if ((_zoom < 1.0 && next > 1.0) || (_zoom > 1.0 && next < 1.0)) next = 1.0;
+        if (Math.Abs(next - _zoom) < 1e-6) return; // already at the limit — nothing to redo
+        _zoom = next;
+        BuildGrid();
+        if (_zoomLabel is not null) _zoomLabel.Text = ZoomText();
+        ZoomChanged?.Invoke(_zoom);
+    }
+
+    private void ResetZoom()
+    {
+        if (Math.Abs(_zoom - 1.0) < 1e-6) return;
+        _zoom = 1.0;
+        BuildGrid();
+        if (_zoomLabel is not null) _zoomLabel.Text = ZoomText();
+        ZoomChanged?.Invoke(_zoom);
+    }
+
+    private string ZoomText() => $"{Math.Round(_zoom * 100)}%";
+
+    // A small legend pinned top-left: the thumbnails can be tiny for near-identical windows, so surface the
+    // zoom keys and the current scale. Clicking it never falls through to a card behind.
+    private Control BuildZoomLegend()
+    {
+        _zoomLabel = new TextBlock
+        {
+            Text = ZoomText(), FontSize = 11, FontWeight = FontWeight.SemiBold, Foreground = Fg,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var legend = new Border
+        {
+            Background = new SolidColorBrush(BarBg),
+            CornerRadius = new CornerRadius(9), Padding = new Thickness(11, 7),
+            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(24, 24, 0, 0),
+            Child = new StackPanel
+            {
+                Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    KeyCap("Ctrl"),
+                    new TextBlock { Text = "+ / −", FontSize = 11, FontFamily = Mono, Foreground = Fg, VerticalAlignment = VerticalAlignment.Center },
+                    new TextBlock { Text = "zoom windows", FontSize = 11, Foreground = FgDim, VerticalAlignment = VerticalAlignment.Center },
+                    _zoomLabel,
+                },
+            },
+        };
+        legend.PointerPressed += (_, e) => e.Handled = true;
+        return legend;
+    }
+
+    private static Control KeyCap(string key) => new Border
+    {
+        Background = new SolidColorBrush(KeyCapBg),
+        CornerRadius = new CornerRadius(5), Padding = new Thickness(7, 2),
+        VerticalAlignment = VerticalAlignment.Center,
+        Child = new TextBlock { Text = key, FontSize = 11, FontWeight = FontWeight.SemiBold, Foreground = Accent, FontFamily = Mono },
+    };
 
     // ── The window-card grid ────────────────────────────────────────────────────────
 
@@ -167,6 +260,7 @@ internal abstract class WindowPickerContent : IStageContent
 
         var dock = new DockPanel { LastChildFill = true, Children = { header, _scroll } };
         Root.Children.Add(dock);
+        Root.Children.Add(BuildZoomLegend()); // top-left: the Ctrl+/Ctrl− zoom keys + current scale
 
         BuildGrid();
 
@@ -309,7 +403,7 @@ internal abstract class WindowPickerContent : IStageContent
         }
     }
 
-    private static void MarkNoThumbnail(Card c, WindowInfo w)
+    private void MarkNoThumbnail(Card c, WindowInfo w)
     {
         c.Body.Child = new TextBlock
         {

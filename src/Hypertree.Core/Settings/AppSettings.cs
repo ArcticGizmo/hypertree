@@ -84,6 +84,13 @@ public sealed class AppSettings
     /// <c>SpatialOverlay</c>.</summary>
     public bool ShowMapLegend { get; set; } = true;
 
+    /// <summary>The window-picker's zoom factor — the size of the live window thumbnails in the "move" and
+    /// "pull" flows, set by pressing <c>Ctrl</c>+<c>+</c> / <c>Ctrl</c>+<c>-</c> in the picker. 1.0 is the
+    /// default 100%; the picker clamps it to a legible range when applied. Persisted so the picker reopens at
+    /// the size you left it — near-identical windows are easier to tell apart when scaled up. See
+    /// <c>WindowPickerContent</c>.</summary>
+    public double PickerZoom { get; set; } = 1.0;
+
     /// <summary>Reusable branch recipes, offered via the branch card's "Load from template" button so you
     /// don't retype the desktop set each time. Empty by default — you build and delete them in the
     /// "Manage templates…" command.</summary>

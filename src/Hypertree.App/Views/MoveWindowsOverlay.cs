@@ -31,7 +31,7 @@ internal sealed class MoveContent : WindowPickerContent
     /// <summary>Dismissed without dropping (Esc / Backspace / click-away) — App restores the origin.</summary>
     public event Action? Cancelled;
 
-    public MoveContent(WindowMoveSession session) : base(session) { }
+    public MoveContent(WindowMoveSession session, double initialZoom = 1.0) : base(session, initialZoom) { }
 
     protected override string PickerHint => "←→↑↓ move · Space tick · Enter choose destination · Esc cancel";
     protected override string EmptyHint => "No windows to move on this desktop · Esc to close";

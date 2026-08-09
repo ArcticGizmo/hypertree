@@ -17,7 +17,7 @@ internal sealed class PullContent : WindowPickerContent
     /// <summary>Enter — App moves these windows onto the current desktop.</summary>
     public event Action<IReadOnlyList<nint>>? PullRequested;
 
-    public PullContent(WindowMoveSession session) : base(session) { }
+    public PullContent(WindowMoveSession session, double initialZoom = 1.0) : base(session, initialZoom) { }
 
     protected override string PickerHint => "←→↑↓ move · Space tick · Enter pull here · Esc cancel";
     protected override string EmptyHint => "No windows on other desktops to pull · Esc to close";

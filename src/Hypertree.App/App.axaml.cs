@@ -1020,10 +1020,11 @@ public sealed partial class App : Application
 
         // Presenting the move content on the stage swaps out any open map/palette in place. Navigation
         // and the move are serviced here; the board is pulled live from the model, centred on the origin.
-        var content = new MoveContent(session) { BoardProvider = () => _model!.BuildMap(_moveOrigin) };
+        var content = new MoveContent(session, _settings.PickerZoom) { BoardProvider = () => _model!.BuildMap(_moveOrigin) };
         content.NavigateRequested += a => _model!.Apply(a);
         content.MoveRequested += MoveSelectedWindows;
         content.Cancelled += CancelMove;
+        content.ZoomChanged += PersistPickerZoom; // Ctrl+/Ctrl− — remember the thumbnail size
         // Launched from the map → push over it so completing/cancelling unwinds back to the map (its durable
         // base). Otherwise (hotkey / tray, no map open) it's a fresh root that dismisses to the desktop —
         // Back/CompleteToBase then behave exactly like the old Dismiss.
@@ -1068,8 +1069,9 @@ public sealed partial class App : Application
 
         _model.Reconcile();
         var session = new WindowMoveSession(_desktops.WindowsElsewhere());
-        var content = new PullContent(session);
+        var content = new PullContent(session, _settings.PickerZoom);
         content.PullRequested += PullSelectedWindows;
+        content.ZoomChanged += PersistPickerZoom; // Ctrl+/Ctrl− — remember the thumbnail size
         // Launched from the map → push over it so completing/cancelling unwinds back to the map. Otherwise
         // (hotkey / tray, no map open) it's a fresh root that dismisses to the desktop.
         if (_spatialOverlay?.IsOpen == true) _stage.Present(content);
@@ -1087,6 +1089,14 @@ public sealed partial class App : Application
             try { _desktops.MoveWindowToDesktop(h, here); } catch { /* window may have closed — best-effort */ }
         }
         RefreshOrFlash();
+    }
+
+    // Both picker flows share one persisted thumbnail size (settings.PickerZoom), so a zoom set in "move"
+    // carries over to "pull" and survives a restart — mirrors how the map's zoom is remembered.
+    private void PersistPickerZoom(double zoom)
+    {
+        _settings.PickerZoom = zoom;
+        _settingsStore?.Save(_settings);
     }
 
     // ── Manage-map actions (r / Del / Shift+Del / n) ───────────────────────────────

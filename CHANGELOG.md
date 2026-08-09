@@ -9,6 +9,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.4.2] - 2026-08-09
+
+### Added
+
+- `Ctrl`+`+` / `Ctrl`+`−` scale the window thumbnails in the move and pull pickers, so near-identical windows are easier to tell apart; `Ctrl+0` resets to 100%. Persisted across sessions.
+- A top-left legend in the pickers shows the zoom keys and the current scale.
+
+---
+
 ## [v0.4.1] - 2026-08-09
 
 ### Changed
