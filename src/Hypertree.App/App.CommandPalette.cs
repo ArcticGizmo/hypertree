@@ -103,8 +103,9 @@ public sealed partial class App
         // trace overlay, which is a debugging aid — gated on a dev build (DevChrome.Active) so it never shows
         // in a release/installed copy. Sits just above "Exit Hypertree".
         if (DevChrome.Active)
-            commands.Insert(commands.Count - 1, new Command("Monitor placement (debug)", OpenMonitorDebugOverlay,
-                DisabledReason: _layout is null ? "monitor tracking unavailable" : null));
+            commands.Insert(commands.Count - 1, new Command("Monitor placement (debug)",
+                () => _monitorLayout?.OpenDebugOverlay(),
+                DisabledReason: _monitorLayout?.IsAvailable != true ? "monitor tracking unavailable" : null));
 
         return commands;
     }

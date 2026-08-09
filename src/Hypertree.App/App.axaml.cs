@@ -105,11 +105,9 @@ public sealed partial class App : Application
     private ControlServer? _control;
 
     // Monitor-layout restore (the physical-screen axis, see docs/design/monitor-layout-restore.md): a
-    // service that snapshots windows-per-monitor and puts them back across a dock cycle, driven by a poll
-    // timer, plus the offer we hold between raising the redock notification and the user clicking it.
-    private MonitorLayoutService? _layout;
-    private DispatcherTimer? _layoutTimer;
-    private Views.MonitorDebugWindow? _monitorDebugWindow;
+    // controller that snapshots windows-per-monitor and puts them back across a dock cycle. Owns its
+    // service, poll timer and debug overlay; see MonitorLayoutController.
+    private MonitorLayoutController? _monitorLayout;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -216,7 +214,10 @@ public sealed partial class App : Application
         ApplySwitcher();
 
         StartWatchingDesktops();
-        StartWatchingMonitors();
+        // The notifier is built later in Startup (BuildNotifier), so the controller reads it through an
+        // accessor rather than a captured value — matching the original "_notifier?.Show at call time".
+        _monitorLayout = new MonitorLayoutController(_desktops, _activator, () => _notifier);
+        _monitorLayout.Start();
         StartPublishingStatus();
         StartControlServer();
 
@@ -534,10 +535,6 @@ public sealed partial class App : Application
     // Every step of the update flow reuses this key, so checking → result → downloading update one
     // notification in place instead of leaving three behind in the Action Center.
     private const string UpdateNoticeKey = "update-check";
-    // The redock "restore your layout?" offer and its follow-up share one key, so the confirmation replaces
-    // the offer rather than stacking beside it.
-    private const string RestoreLayoutAction = "restore-monitor-layout";
-    private const string MonitorLayoutNoticeKey = "monitor-layout";
 
     // Raise a Windows notification. Informational unless given an action, which the user can click.
     private void Notify(string title, string message, string? action = null, bool silent = false)
@@ -547,7 +544,7 @@ public sealed partial class App : Application
     private void OnNotificationActivated(string action)
     {
         if (action == ApplyUpdateAction) OnUi(ApplyLastUpdate);
-        else if (action == RestoreLayoutAction) OnUi(RestoreCurrentSetLayout);
+        else if (action == MonitorLayoutController.RestoreAction) OnUi(() => _monitorLayout?.RestoreCurrentSetLayout());
     }
 
     // The tray menu's and command palette's "Update now", the Settings install button, and a click on the
@@ -695,13 +692,12 @@ public sealed partial class App : Application
     {
         _shuttingDown = true; // stop the settings window's Closed handler from re-registering hotkeys on exit
         _gesturePoll?.Stop();
-        _layoutTimer?.Stop();
+        _monitorLayout?.Dispose(); // stops the poll timer and closes the debug overlay
         _watcher?.Dispose();
         _control?.Dispose();  // stop accepting before the status file says we've gone
         _status?.Dispose();   // deletes status.json, so nothing reports a tray that isn't here
         SuspendHotkeys();
         if (_tray is not null) _tray.IsVisible = false;
-        _monitorDebugWindow?.Close();
         _stage?.Close(); // closes the shared host + dims (map / palettes / prompts / move all live here)
         _hud?.Close();
         _taskbarLabel?.Close();
