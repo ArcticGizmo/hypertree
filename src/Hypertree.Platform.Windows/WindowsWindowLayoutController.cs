@@ -16,8 +16,8 @@ namespace Hypertree.Platform.Windows;
 /// <remarks>
 /// The process must be Per-Monitor-V2 DPI aware (declared in <c>app.manifest</c>) or the coordinates and
 /// per-monitor DPI read here are virtualised and wrong on mixed-DPI rigs. The window filter is
-/// <see cref="IsCountableWindow"/>, kept identical to <see cref="VirtualDesktopController"/>'s so a layout
-/// captures exactly the "real app windows" the map counts — no more.
+/// <see cref="NativeWindows.IsCountableWindow"/>, shared with <see cref="VirtualDesktopController"/> so a
+/// layout captures exactly the "real app windows" the map counts — no more.
 /// </remarks>
 public sealed class WindowsWindowLayoutController : IWindowLayoutController
 {
@@ -40,7 +40,7 @@ public sealed class WindowsWindowLayoutController : IWindowLayoutController
         uint own = GetCurrentProcessId();
         EnumWindows((hwnd, _) =>
         {
-            if (!IsCountableWindow(hwnd, own)) return true;
+            if (!NativeWindows.IsCountableWindow(hwnd, own)) return true;
             var wp = new WINDOWPLACEMENT { length = (uint)Marshal.SizeOf<WINDOWPLACEMENT>() };
             if (!GetWindowPlacement(hwnd, ref wp)) return true;
 
@@ -57,7 +57,7 @@ public sealed class WindowsWindowLayoutController : IWindowLayoutController
                 wp.rcNormalPosition.right - wp.rcNormalPosition.left,
                 wp.rcNormalPosition.bottom - wp.rcNormalPosition.top);
 
-            windows.Add(new WindowPlacement((long)hwnd, m?.StableId ?? "", TitleOf(hwnd), offset, ShowOf(wp.showCmd)));
+            windows.Add(new WindowPlacement((long)hwnd, m?.StableId ?? "", NativeWindows.TitleOf(hwnd), offset, ShowOf(wp.showCmd)));
             return true;
         }, 0);
 
@@ -149,7 +149,7 @@ public sealed class WindowsWindowLayoutController : IWindowLayoutController
             nint hwnd = (nint)w.Hwnd;
             byStable.TryGetValue(w.MonitorStableId, out MonitorRef? mon);
             string wantName = mon?.Friendly ?? w.MonitorStableId;
-            string cls = ClassOf(hwnd), proc = ProcessOf(hwnd);
+            string cls = NativeWindows.ClassOf(hwnd), proc = NativeWindows.ProcessOf(hwnd);
             Recti before = RectOf(hwnd);
 
             if (!IsWindow(hwnd))
@@ -199,20 +199,6 @@ public sealed class WindowsWindowLayoutController : IWindowLayoutController
 
     private static Recti RectOf(nint hwnd)
         => GetWindowRect(hwnd, out RECT r) ? new Recti(r.left, r.top, r.right - r.left, r.bottom - r.top) : default;
-
-    private static string ClassOf(nint hwnd)
-    {
-        var sb = new StringBuilder(64);
-        GetClassName(hwnd, sb, sb.Capacity);
-        return sb.ToString();
-    }
-
-    private static string ProcessOf(nint hwnd)
-    {
-        GetWindowThreadProcessId(hwnd, out uint pid);
-        try { return System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; }
-        catch { return ""; }
-    }
 
     // ── Monitor enumeration + the stable-id chain ─────────────────────────────────────────────────────
     // Each MonitorRef is paired with its GDI name (\\.\DISPLAYn) — internal only, used to attribute a
@@ -291,37 +277,8 @@ public sealed class WindowsWindowLayoutController : IWindowLayoutController
         return GetMonitorInfo(hmon, ref mi) ? mi.szDevice : "";
     }
 
-    // ── Window filter — kept identical to VirtualDesktopController.IsCountableWindow ──────────────────
-    private static bool IsCountableWindow(nint hwnd, uint ownPid)
-    {
-        if (!IsWindowVisible(hwnd)) return false;
-        if (GetAncestor(hwnd, GA_ROOTOWNER) != hwnd) return false;      // owned popup/dialog — skip
-        if (GetWindowTextLength(hwnd) == 0) return false;               // untitled → not a real app window
-        long ex = (long)GetWindowLongPtr(hwnd, GWL_EXSTYLE);
-        if ((ex & WS_EX_TOOLWINDOW) != 0) return false;                 // palettes/toolbars
-        GetWindowThreadProcessId(hwnd, out uint pid);
-        if (pid == ownPid) return false;                               // Hypertree's own windows
-        return !IsShellWindow(hwnd);
-    }
-
-    private static bool IsShellWindow(nint hwnd)
-    {
-        var sb = new StringBuilder(64);
-        GetClassName(hwnd, sb, sb.Capacity);
-        string cls = sb.ToString();
-        return cls is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd"
-                   or "Windows.UI.Core.CoreWindow" or "ApplicationManager_DesktopShellWindow";
-    }
-
-    private static string TitleOf(nint hwnd)
-    {
-        int len = GetWindowTextLength(hwnd);
-        if (len <= 0) return "";
-        var sb = new StringBuilder(len + 1);
-        GetWindowText(hwnd, sb, sb.Capacity);
-        return sb.ToString();
-    }
-
+    // The countable-window filter, TitleOf / ProcessOf / ClassOf live in NativeWindows — shared with
+    // VirtualDesktopController so the two apply the exact same window filter (see NativeWindows).
     private static ShowState ShowOf(uint showCmd) => showCmd switch
     {
         SW_MAXIMIZE => ShowState.Maximized,
@@ -330,8 +287,6 @@ public sealed class WindowsWindowLayoutController : IWindowLayoutController
     };
 
     // ── P/Invoke ──────────────────────────────────────────────────────────────────────────────────────
-    private const int GWL_EXSTYLE = -20, GA_ROOTOWNER = 3;
-    private const long WS_EX_TOOLWINDOW = 0x00000080;
     private const uint MONITOR_DEFAULTTONEAREST = 2, MONITORINFOF_PRIMARY = 1, MDT_EFFECTIVE_DPI = 0;
     private const uint SW_RESTORE = 9, SW_MAXIMIZE = 3, SW_MINIMIZE = 6, SW_SHOWMINIMIZED = 2;
     private const uint SW_SHOWNOACTIVATE = 4, SW_SHOWMINNOACTIVE = 7;
@@ -346,13 +301,6 @@ public sealed class WindowsWindowLayoutController : IWindowLayoutController
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc cb, nint p);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint h);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
-    [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint h);
-    [DllImport("user32.dll")] private static extern nint GetAncestor(nint h, int flags);
-    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint h, int i);
-    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint h, out uint pid);
-    [DllImport("user32.dll")] private static extern int GetWindowTextLength(nint h);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetWindowTextW")] private static extern int GetWindowText(nint h, StringBuilder b, int max);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetClassNameW")] private static extern int GetClassName(nint h, StringBuilder b, int max);
     [DllImport("kernel32.dll")] private static extern uint GetCurrentProcessId();
     [DllImport("user32.dll", SetLastError = true)] private static extern bool GetWindowPlacement(nint h, ref WINDOWPLACEMENT wp);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool SetWindowPlacement(nint h, ref WINDOWPLACEMENT wp);
