@@ -155,7 +155,9 @@ Then (done — completing the step):
 
 - **CLI is untestable static-on-static** (`Commands.cs` reads `StatusFile`, calls static
   `ControlClient.Send`, writes static `Output`); `UpdateChecker` too. → Inject seams.
-- **Style constants scattered across 14 files** with divergent names for the same hex. → A `Theme` static.
+- ✅ **Style constants scattered across ~14 files** with divergent names for the same hex → consolidated
+  into one `Palette` class (Ink/Muted/Accent/Here/Stroke/CardBg, as both `Color` and cached `IBrush`).
+  Named `Palette` not `Theme` (Avalonia's `StyledElement.Theme` would shadow it). Build 0/0, 295 green.
 - **Primitive obsession**: `MoveDesktop(bool,int,int,bool,int,int)` + ad-hoc `(bool,int,int)` tuple.
   → `readonly record struct DesktopAddress`.
 - **Naming trap**: `Teardown()` (app shutdown) vs `TearDown(Branch?)` (destroy branch desktops).
