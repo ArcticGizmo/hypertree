@@ -815,18 +815,13 @@ public sealed class NavigationModel
     public void Resync()
     {
         SyncTopRow();
-        DesktopId cur = _desktops.Current;
 
-        int ti = _topRow.FindIndex(d => d.Id == cur);
-        if (ti >= 0) { _onMain = true; _topIndex = ti; }
-        else
+        // Re-anchor onto whatever desktop the OS is showing, reusing the same scan the map/history use
+        // (mirrors AnchorToCurrent). A desktop we don't track leaves the cursor put, then ClampState fixes up.
+        if (Locate(_desktops.Current) is { } at)
         {
-            for (int gi = 0; gi < _branches.Count; gi++)
-            {
-                int di = -1;
-                for (int j = 0; j < _branches[gi].Desktops.Count; j++) if (_branches[gi].Desktops[j].Id == cur) di = j;
-                if (di >= 0) { _onMain = false; _currentBranch = gi; _branches[gi].LastUsedIndex = di; break; }
-            }
+            if (at.onMain) { _onMain = true; _topIndex = at.desktopIndex; }
+            else { _onMain = false; _currentBranch = at.branchIndex; _branches[at.branchIndex].LastUsedIndex = at.desktopIndex; }
         }
         ClampState();
 
