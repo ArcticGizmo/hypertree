@@ -11,8 +11,12 @@ namespace Hypertree.Settings;
 ///
 /// The navigation flash is no longer configurable — its hold-to-keep behaviour and timings are fixed
 /// constants in <c>HudWindow</c>.
+///
+/// A <c>record</c> so a partial edit can be expressed as <c>original with { ChangedField = … }</c> —
+/// carrying every other field (including ones a given surface doesn't edit) by construction, instead of
+/// hand-copying pass-through fields and silently resetting any that were forgotten.
 /// </summary>
-public sealed class AppSettings
+public sealed record AppSettings
 {
     /// <summary>Where the persistent desktop-name pill sits (or <see cref="LabelPlacement.Off"/> to hide
     /// it). The pill names the desktop you're on — prefixed with the branch name, in the branch's colour,

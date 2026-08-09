@@ -237,7 +237,11 @@ internal sealed class SettingsWindow : Window
                 overrides.Add(new HotkeyBinding(cmd, chord.Modifiers, chord.Key));
         }
 
-        return new AppSettings
+        // Only the fields this window actually edits are listed; every other setting — the switcher's
+        // position/collapse state, map & picker zoom, the map legend, templates, custom commands, the
+        // stamped last-seen version, and anything added to AppSettings in future — rides across untouched
+        // via `with`, so toggling one option can never silently reset an unrelated one.
+        return _initial with
         {
             TaskbarLabelPlacement = (LabelPlacement)Math.Max(0, _taskbarLabelPlacement.SelectedIndex),
             ShowSwitcher = _showSwitcher.IsChecked ?? false,
@@ -246,16 +250,6 @@ internal sealed class SettingsWindow : Window
             AnimateNavigation = _animateNavigation.IsChecked ?? true,
             SweepFromLeadingEdge = _sweepFromLeadingEdge.IsChecked ?? true,
             ShowChangelogOnUpdate = _showChangelog.IsChecked ?? true,
-            LastSeenVersion = _initial.LastSeenVersion, // stamped at startup, not edited here — carry through
-            BranchTemplates = _initial.BranchTemplates, // not edited here — carry through untouched
-            CustomCommands = _initial.CustomCommands,   // managed from the launcher, not here — carry through
-            // The switcher's own collapse state and dragged position aren't edited here (only whether it
-            // shows); carry them so toggling any setting doesn't reset where it sits.
-            SwitcherCollapsed = _initial.SwitcherCollapsed,
-            SwitcherX = _initial.SwitcherX,
-            SwitcherY = _initial.SwitcherY,
-            SwitcherCollapsedX = _initial.SwitcherCollapsedX,
-            SwitcherCollapsedY = _initial.SwitcherCollapsedY,
             HotkeyBindings = overrides,
         };
     }
