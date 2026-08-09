@@ -45,12 +45,19 @@ What remains in `App.axaml.cs` (712) is a coherent "app shell": fields, lifecycl
 > notification plumbing (`Notify`/`OnNotificationActivated`/`OnUi`) that genuinely belongs to the shell,
 > so they'll be teased out properly in Step 2 as an injected `UpdateController` rather than a partial.
 
-### Step 2
-Extract types with **injected dependencies** (not just partials — real seams):
-- `MonitorLayoutController` (takes `MonitorLayoutService` + `INotifier`)
-- `UpdateController` (takes an update source + `INotifier` + settings)
-- `SpatialOverlayPresenter` (owns the ~15 `_spatialOverlay.XxxRequested +=` subscriptions and the
-  `DesktopId`→`DesktopSelection` resolution at `App.axaml.cs:240-283`)
+### Step 2 — injected types (real seams, not just partials)
+- ✅ **`MonitorLayoutController`** — owns its `MonitorLayoutService` + poll timer + debug overlay; notifier
+  read via `Func<INotifier?>` accessor (built later). **Smoke-tested & confirmed.**
+- ✅ **`UpdateController`** — owns the check/apply flow, last-result state, and the tray update menu item;
+  notifier + transient Settings window read via accessors; `dismissOverlay` callback for the one
+  `_stage.Dismiss()`. ⚠️ **Needs a runtime smoke-test** (check / up-to-date / apply, tray retitle, Settings
+  inline status). Also surfaced a pre-existing quirk: launcher-failure and update notifications share the
+  `"update-check"` notice key (so they replace each other) — preserved and flagged, not changed here.
+- ⏳ **`SpatialOverlayPresenter`** (remaining) — owns the ~15 `_spatialOverlay.XxxRequested +=` subscriptions
+  and the `DesktopId`→`DesktopSelection` resolution. The most entangled of the three (touches model, stage,
+  map region), so highest risk; needs a smoke-test.
+
+`App.axaml.cs`: 712 → 600 with the two controllers out.
 
 ### Step 3 — `NavigationModel` (Core, test-covered)
 Done so far (each a commit, 291 tests green throughout) — prioritized the duplicated-invariant
