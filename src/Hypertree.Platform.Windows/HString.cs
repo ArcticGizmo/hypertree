@@ -20,11 +20,14 @@ internal static class HString
     private static extern nint WindowsGetStringRawBuffer(nint hstring, out uint length);
 
     /// <summary>Create an HSTRING. Free it with <see cref="Delete"/>.</summary>
+    /// <remarks>
+    /// On any non-success HRESULT the string wasn't created, so we return a clean null handle rather than
+    /// the (possibly partial) out value: <see cref="Delete"/> then no-ops and the caller degrades to an
+    /// empty name. That's the right failure mode here — the desktop-name APIs this feeds are best-effort
+    /// and tolerate an empty name, whereas throwing would take the tray down on a create/rename.
+    /// </remarks>
     public static nint Create(string s)
-    {
-        WindowsCreateString(s, s.Length, out nint h);
-        return h;
-    }
+        => WindowsCreateString(s, s.Length, out nint h) == 0 ? h : 0; // 0 == S_OK
 
     public static void Delete(nint h)
     {

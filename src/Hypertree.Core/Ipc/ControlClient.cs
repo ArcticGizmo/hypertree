@@ -71,6 +71,7 @@ public static class ControlClient
                 sb.Append(Encoding.UTF8.GetString(buffer, 0, n));
                 int nl = sb.ToString().IndexOf('\n');
                 if (nl >= 0) return sb.ToString(0, nl);
+                if (sb.Length > 64 * 1024) return ""; // no newline in a sane reply — refuse to buffer forever (mirrors the server)
             }
         }
         catch (OperationCanceledException) { return ""; }
