@@ -13,17 +13,17 @@ green and the app running identically.
 
 ## 🧭 Handoff — where we are & what's next (read this first)
 
-**Anchor:** branch `refactor`, **43 commits** ahead of `main` (tip `46cb963`, 2026-08-10). Working tree
+**Anchor:** branch `refactor`, **45 commits** ahead of `main` (tip `bb81d0d`, 2026-08-10). Working tree
 clean. Test suite: **299 pass** (was 291 at the start; +4 Tier-3 fixes, +4 the diagnostics sink).
-`App.axaml.cs` is down from **2,227 → 557** lines; `SpatialOverlay` from **833 → 575**.
+`App.axaml.cs` is down from **2,227 → 557** lines; `SpatialOverlay` from **833 → 575**;
+`WindowsWindowLayoutController` from **347 → 149** (+ 3 partials).
 
-**Done:** Tier 1 Steps 1–4 ✅ · Tier 2 items 1, 3, 4 ✅ (items 2 & 6 *partially* — Core half done; item 5
-*partially* — colour/hit-cell dedup done, glyph merge consciously declined) · Tier 3 **all six**
-point-bugs / cleanups ✅ · Tier 4 `Palette` ✅.
+**Done:** Tier 1 Steps 1–5 ✅ (all four God classes addressed) · Tier 2 items 1, 3, 4 ✅ (items 2 & 6
+*partially* — Core half done; item 5 *partially* — colour/hit-cell dedup done, glyph merge consciously
+declined) · Tier 3 **all six** point-bugs / cleanups ✅ · Tier 4 `Palette` ✅.
 
 **Remaining, in recommended order** (full detail in "Where to go next" at the bottom):
-1. **Tier 1 Step 5 — `WindowsWindowLayoutController`** split (topology / placement / diagnostics).
-2. **Finish Tier 2 items 2 & 6** (the non-Core halves) + the Tier-4 tail (primitive obsession, `Teardown`
+1. **Finish Tier 2 items 2 & 6** (the non-Core halves) + the Tier-4 tail (primitive obsession, `Teardown`
    naming, COM RCW disposal, dead code, IPC versioning).
 
 ### ⚠️ Pending smoke-test (build-verified only — NOT yet run in a dev build)
@@ -43,6 +43,9 @@ and test-green but **unverified at runtime** (the App/Views layers have no autom
   the chrome: the legend renders identically, `l` hides/shows it (small "l legend" pill when hidden), the `v`
   row names the next style, ⇧G groups panel — row-click selects the group (cursor jumps into it), a swatch
   opens the palette, picking a colour recolours the group.
+- **`WindowsWindowLayoutController` split** — pure partial reorg (no behaviour change), but interop with no
+  coverage: dock/undock (or add/remove a monitor) should still auto-capture the arrangement and offer a
+  restore, and the monitor-placement debug overlay's "Restore" and "Trace restore → file" should still work.
 
 ### Working conventions (so a fresh context matches what's been done)
 - **Build check (App/Views/Platform):** a dev instance of Hypertree often holds the output DLLs locked, so
@@ -154,9 +157,19 @@ Then (done — completing the step):
 - Build 0/0, 299 green. ⚠️ **Runtime-unverified — smoke-test** (see the pending list): room drag / ⇧-block /
   group drag / snap-back, and the legend + `l` toggle + ⇧G groups panel + swatch recolour.
 
-### Step 5 — `WindowsWindowLayoutController`
-- Split into `MonitorTopology` (enum + stable-id map + its structs/DllImports),
-  `WindowPlacementApplier`, and move `RestoreTraced`/`Probe` diagnostics to a debug-only partial/type.
+### Step 5 — `WindowsWindowLayoutController` ✅ DONE (347 → 149-line shell + 3 partials)
+Split along its banner regions into partials (the App Step 1 playbook), not separate types:
+- ✅ **`.cs`** (149) — the `IWindowLayoutController` production path: `Snapshot`/`Restore`/`Monitors` +
+  `ApplyPlacement`/`CurrentStableId`/`ShowOf`.
+- ✅ **`.Topology.cs`** (84) — `EnumMonitors`/`BuildStableIdMap`/`GdiNameOf` (the DISPLAYCONFIG stable-id chain).
+- ✅ **`.Diagnostics.cs`** (74) — `RestoreTraced`/`Probe`/`RectOf`, the debug-overlay path.
+- ✅ **`.Interop.cs`** (68) — every DllImport/delegate/struct/const, shared.
+- ⛔ **Deliberately did NOT extract `MonitorTopology`/`WindowPlacementApplier` as separate types**: `RECT`
+  (shared by `MONITORINFOEX` + `WINDOWPLACEMENT`) and `MonitorFromWindow`/`GdiNameOf` straddle enumeration
+  and placement, so separate types would force shared internals + cross-type calls — real interop risk on a
+  no-coverage surface. Partial split gets the seams at zero behaviour risk; type extraction is the follow-up.
+- Also dropped the dead `SW_RESTORE`/`SW_MINIMIZE` consts (a Tier-4 item). Build 0/0, 299 green.
+  ⚠️ **Runtime-unverified — smoke-test** dock/undock restore + the debug overlay's Restore/Trace.
 
 ---
 
@@ -260,21 +273,17 @@ Then (done — completing the step):
 
 ## Where to go next (remaining work, recommended order)
 
-The big structural wins are done. What's left is one deep Platform split and a tail of smaller cleanups.
-Recommended order and how to approach each:
+All four God classes are addressed and every structural win is done. What's left is a tail of smaller,
+mostly Core-testable cleanups. Recommended order and how to approach each:
 
-> **Tier 2 item 5 (Scene) — partially done.** The `ScenePaint` helper now owns the shared colour math +
-> hit-cell (Ascii/Metro/Spatial), and the two Tier-4 dead-code items are cleared. The remaining piece — a
-> shared `IScenePainter.DrawGlyph` merging the row-cell and spatial-room glyph *bodies* — was **consciously
-> declined** (the two forms diverge on purpose; see Tier 2 item 5). Don't re-attempt it as a "cleanup"; if a
-> future need genuinely shares a glyph, revisit then. **Still awaiting the smoke-test** flagged above.
+> **Two conscious partials — don't re-attempt as "cleanups".** *(a)* Tier 2 item 5 (Scene): `ScenePaint`
+> now owns the shared colour math + hit-cell, but a shared `IScenePainter.DrawGlyph` merging the row-cell and
+> spatial-room glyph *bodies* was declined (the forms diverge on purpose). *(b)* Tier 1 Step 5: the Win32
+> layout controller is split into partials, but extracting `MonitorTopology`/`WindowPlacementApplier` as
+> separate types was declined (shared `RECT`/interop straddles both). Both are behaviour-preserving as-is;
+> revisit only if a real need appears. Both **still await the smoke-tests** flagged above.
 
-1. **Tier 1 Step 5 — `WindowsWindowLayoutController`** (now ~347 after `NativeWindows`). Split into
-   `MonitorTopology` (enum + stable-id map + its structs/DllImports), `WindowPlacementApplier`, and move
-   `RestoreTraced`/`Probe` diagnostics to a debug-only partial/type. Interop, no coverage — **smoke-test**
-   dock/undock restore.
-
-2. **Finish the partial items & the tail:** Tier 2 item 2 (`SpatialSnapshot` splice), Tier 2 item 6
+1. **Finish the partial items & the tail:** Tier 2 item 2 (`SpatialSnapshot` splice), Tier 2 item 6
    (`Mutate` wrapper), then Tier 4 — CLI seams (`IStatusSource`/transport/`TextWriter`), `DesktopAddress`
    record struct (kills `MoveDesktop`'s 6-bool-and-int signature + the ad-hoc tuple), the
    `Teardown()`/`TearDown()` naming trap, `VirtualDesktopController` RCW disposal + `IDisposable`, and IPC
