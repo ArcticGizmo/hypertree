@@ -59,6 +59,23 @@ public class SpatialNavigationTests
     }
 
     [Fact]
+    public void Prefers_an_aligned_room_over_a_closer_diagonal()
+    {
+        // A diagonal room sits closer, but one lines up exactly on the row: the aligned room wins even
+        // though it's further, because a diagonal is only a fallback when the axis is empty.
+        var scene = Scene(R(0, 0, 0, Guid.Empty), R(1, 1, 1, Guid.Empty), R(2, 3, 0, Guid.Empty));
+        Assert.Equal(D(2), SpatialNavigation.NextInDirection(scene, D(0), 1, 0));
+    }
+
+    [Fact]
+    public void Falls_back_to_a_diagonal_when_nothing_is_aligned()
+    {
+        // Nothing sits on the row, so the nearest in-cone diagonal is chosen.
+        var scene = Scene(R(0, 0, 0, Guid.Empty), R(1, 1, 1, Guid.Empty), R(2, 3, 2, Guid.Empty));
+        Assert.Equal(D(1), SpatialNavigation.NextInDirection(scene, D(0), 1, 0));
+    }
+
+    [Fact]
     public void GroupOf_reports_a_rooms_group_for_the_crossing_check()
     {
         var scene = Scene(R(0, 0, 0, Guid.Empty), R(1, 1, 0, G(1)));

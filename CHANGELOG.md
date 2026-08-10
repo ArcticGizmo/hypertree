@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.5.1] - 2026-08-10
+
+### Changed
+
+- `Ctrl+Alt+Arrow` on the spatial map picks a room lined up on the pressed axis before any diagonal — a diagonal is only chosen when nothing sits straight that way.
+
+---
+
 ## [v0.5.0] - 2026-08-10
 
 ### Changed

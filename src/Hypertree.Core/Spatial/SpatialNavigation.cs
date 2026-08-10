@@ -11,8 +11,9 @@ namespace Hypertree.Spatial;
 public static class SpatialNavigation
 {
     /// <summary>The nearest room to <paramref name="from"/> in direction (<paramref name="dx"/>,
-    /// <paramref name="dy"/>) — a unit step where exactly one axis is non-zero — favouring the axis of travel,
-    /// or null when there's no room that way (an edge). Mirrors the interactive map's arrow-select.</summary>
+    /// <paramref name="dy"/>) — a unit step where exactly one axis is non-zero — or null when there's no room
+    /// that way (an edge). Rooms that sit exactly on the pressed axis are always preferred over any diagonal:
+    /// a diagonal only wins when nothing lines up on the axis at all. Mirrors the interactive map's arrow-select.</summary>
     public static DesktopId? NextInDirection(SpatialScene scene, DesktopId from, int dx, int dy)
     {
         SpatialRoom? cur = null;
@@ -20,7 +21,7 @@ public static class SpatialNavigation
         if (cur is null) return null;
 
         SpatialRoom? best = null;
-        int bestScore = int.MaxValue;
+        (int offAxis, int dist) bestScore = (int.MaxValue, int.MaxValue);
         foreach (SpatialRoom r in scene.Rooms)
         {
             if (r.Id == from) continue;
@@ -29,8 +30,11 @@ public static class SpatialNavigation
             if (dy != 0 && Math.Sign(oy) != dy) continue;
             if (dx != 0 && Math.Abs(oy) > Math.Abs(ox)) continue; // keep to the travel axis
             if (dy != 0 && Math.Abs(ox) > Math.Abs(oy)) continue;
-            int d = Math.Abs(ox) + Math.Abs(oy);
-            if (d < bestScore) { bestScore = d; best = r; }
+            int cross = dx != 0 ? Math.Abs(oy) : Math.Abs(ox);
+            // Rank on (is-it-a-diagonal, distance): aligned rooms (cross == 0) beat every diagonal
+            // outright, so a diagonal is only chosen when the axis holds nothing.
+            (int offAxis, int dist) score = (cross == 0 ? 0 : 1, Math.Abs(ox) + Math.Abs(oy));
+            if (score.CompareTo(bestScore) < 0) { bestScore = score; best = r; }
         }
         return best?.Id;
     }
