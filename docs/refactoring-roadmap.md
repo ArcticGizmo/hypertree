@@ -13,18 +13,18 @@ green and the app running identically.
 
 ## 🧭 Handoff — where we are & what's next (read this first)
 
-**Anchor:** branch `refactor`, **38 commits** ahead of `main` (tip `5ca9bef`, 2026-08-10). Working tree
+**Anchor:** branch `refactor`, **40 commits** ahead of `main` (tip `e288059`, 2026-08-10). Working tree
 clean. Test suite: **299 pass** (was 291 at the start; +4 Tier-3 fixes, +4 the diagnostics sink).
 `App.axaml.cs` is down from **2,227 → 557** lines.
 
-**Done:** Tier 1 Steps 1–3 ✅ · Tier 2 items 1, 3, 4 ✅ (items 2 & 6 *partially* — Core half done, see
-below) · Tier 3 **all six** point-bugs / cleanups ✅ (diagnostics sink now done) · Tier 4 `Palette` ✅.
+**Done:** Tier 1 Steps 1–3 ✅ · Tier 2 items 1, 3, 4 ✅ (items 2 & 6 *partially* — Core half done; item 5
+*partially* — colour/hit-cell dedup done, glyph merge consciously declined) · Tier 3 **all six**
+point-bugs / cleanups ✅ · Tier 4 `Palette` ✅.
 
 **Remaining, in recommended order** (full detail in "Where to go next" at the bottom):
-1. **Tier 2 item 5 — Scene `DrawGlyph`** — the deepest Views item; `SpatialPainter` re-codes all 3 themes.
-2. **Tier 1 Step 4 — `SpatialOverlay`** split (drag engine + legend/chrome).
-3. **Tier 1 Step 5 — `WindowsWindowLayoutController`** split (topology / placement / diagnostics).
-4. **Finish Tier 2 items 2 & 6** (the non-Core halves) + the Tier-4 tail (primitive obsession, `Teardown`
+1. **Tier 1 Step 4 — `SpatialOverlay`** split (drag engine + legend/chrome).
+2. **Tier 1 Step 5 — `WindowsWindowLayoutController`** split (topology / placement / diagnostics).
+3. **Finish Tier 2 items 2 & 6** (the non-Core halves) + the Tier-4 tail (primitive obsession, `Teardown`
    naming, COM RCW disposal, dead code, IPC versioning).
 
 ### ⚠️ Pending smoke-test (build-verified only — NOT yet run in a dev build)
@@ -35,6 +35,9 @@ and test-green but **unverified at runtime** (the App/Views layers have no autom
   on-top), restore curtain, stage dims.
 - **`CardContent`** — the five cards (confirm/delete, rename & new-desktop prompt, new branch, new
   template, add/edit custom command): Esc, arrow focus between buttons, Enter / Ctrl+Enter, submit.
+- **`ScenePaint`** — all three map styles (board/metro/ascii) in both the row flash and the spatial map:
+  cell/room colours, resting-timeline dimming, branch hues, and click (select) / double-click (activate)
+  on cells and rooms. (Board is untouched; the shared bits are the metro/ascii/spatial colour + hit-cell.)
 
 ### Working conventions (so a fresh context matches what's been done)
 - **Build check (App/Views/Platform):** a dev instance of Hypertree often holds the output DLLs locked, so
@@ -170,9 +173,18 @@ Then (done — completing the step):
    `ButtonRow` helper); subclasses now supply only their field stack + `FocusInitial`/`TryApply`.
    ~700 lines → 374 + a 136-line base. Custom-command arrows unified to Left/Up + Right/Down.
    Build 0/0, 295 green.
-5. **Scene abstraction bypassed** — `SpatialPainter` doesn't implement `IScenePainter` and re-codes all
-   three themes by hand; colour math in 3 copies, hit-cell in 4. → Give `IScenePainter` a `DrawGlyph`
-   both renderers share.
+5. 🟡 **Scene abstraction bypassed** — `SpatialPainter` doesn't implement `IScenePainter` and re-codes all
+   three themes by hand; colour math in 3 copies, hit-cell in 4. **The diagnosed duplication is DONE:** a
+   new `ScenePaint` helper owns the shared branch palette + `BranchColour`, the opaque `Lerp`, the
+   recede-toward-ground `Toward`/`Dim`, and the transparent hit-cell overlay (`HitCell`); Ascii/Metro/Spatial
+   now delegate (−55 lines). Board stays out on purpose (fixed colours, click baked into the tile past its
+   delete badge). Also cleared the Tier-4 dead code this touched (`SpatialPainter.TileBorder`, stale summary)
+   and reconciled Spatial's truncating blend to Metro's rounding (≤1/255 per channel). **Deliberately did NOT
+   merge the glyph bodies into a shared `DrawGlyph`** (the review's headline): the row cell and spatial room
+   diverge on purpose (width 96 vs 140, stream/delete vs group tint, empty-opacity, ascii inner-width/font,
+   metro station sizing), so one glyph method would change pixels or become param-soup — a conscious
+   deviation, like `NavSync`. Build 0/0, 299 green. ⚠️ **Runtime-unverified — smoke-test** all three styles in
+   both the row flash and the spatial map (colours, resting dim, branch hues, click/double-click).
 6. 🟡 **Persistence mapping + mutation boilerplate.** **Mapper half DONE** in Step 3: `Save` and
    `CaptureSnapshot` now share `ToPersisted()` helpers. **Remaining:** the `Save(); Changed?.Invoke();`
    pair is still copy-pasted at **11 mutation sites** in `NavigationModel` (some mutators deliberately
@@ -241,25 +253,23 @@ Then (done — completing the step):
 The big structural wins are done. What's left is two deep Views/Platform splits and a tail of smaller
 cleanups. Recommended order and how to approach each:
 
-1. **Tier 2 item 5 — Scene `DrawGlyph`** *(deepest Views item; H1)*. `SpatialPainter` re-implements all
-   three themes (board/metro/ascii) instead of participating in `IScenePainter`; colour math is copied 3×,
-   the hit-cell 4×. Give `IScenePainter` a per-cell `DrawGlyph`/`PaintCell` both `SceneRenderer` and the
-   spatial map call, and hoist `Lerp`/`Dim`/`BranchColour` + the hit-`Border` onto a shared
-   `ScenePaint` helper (or an abstract `ScenePainterBase`). Intricate & visual — **needs a smoke-test** of
-   all three map styles in both the row flash and the spatial map. Also clears the Tier-4 dead-code items
-   (`SpatialPainter.TileBorder`, stale XML summary) while you're in there.
+> **Tier 2 item 5 (Scene) — partially done.** The `ScenePaint` helper now owns the shared colour math +
+> hit-cell (Ascii/Metro/Spatial), and the two Tier-4 dead-code items are cleared. The remaining piece — a
+> shared `IScenePainter.DrawGlyph` merging the row-cell and spatial-room glyph *bodies* — was **consciously
+> declined** (the two forms diverge on purpose; see Tier 2 item 5). Don't re-attempt it as a "cleanup"; if a
+> future need genuinely shares a glyph, revisit then. **Still awaiting the smoke-test** flagged above.
 
-2. **Tier 1 Step 4 — `SpatialOverlay`** (833 lines). Extract the pointer-drag gesture engine
+1. **Tier 1 Step 4 — `SpatialOverlay`** (833 lines). Extract the pointer-drag gesture engine
    (`_grab`/`_dragging`/`_pressAt`/… ~:483-566) into a `RoomDragController`; move legend + groups-panel
    construction into a `SpatialOverlayChrome` builder, rendering the 24 legend rows from a
    `(key, desc)[]` table in a loop. **Needs a smoke-test** (map drag, legend toggle, groups panel).
 
-3. **Tier 1 Step 5 — `WindowsWindowLayoutController`** (now ~347 after `NativeWindows`). Split into
+2. **Tier 1 Step 5 — `WindowsWindowLayoutController`** (now ~347 after `NativeWindows`). Split into
    `MonitorTopology` (enum + stable-id map + its structs/DllImports), `WindowPlacementApplier`, and move
    `RestoreTraced`/`Probe` diagnostics to a debug-only partial/type. Interop, no coverage — **smoke-test**
    dock/undock restore.
 
-4. **Finish the partial items & the tail:** Tier 2 item 2 (`SpatialSnapshot` splice), Tier 2 item 6
+3. **Finish the partial items & the tail:** Tier 2 item 2 (`SpatialSnapshot` splice), Tier 2 item 6
    (`Mutate` wrapper), then Tier 4 — CLI seams (`IStatusSource`/transport/`TextWriter`), `DesktopAddress`
    record struct (kills `MoveDesktop`'s 6-bool-and-int signature + the ad-hoc tuple), the
    `Teardown()`/`TearDown()` naming trap, `VirtualDesktopController` RCW disposal + `IDisposable`, and IPC
