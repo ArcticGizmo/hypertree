@@ -1,9 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Shapes;
 using Avalonia.Input;
-using Avalonia.Layout;
-using Avalonia.Media;
 using Hypertree.App.Views.Scene;
 using Hypertree.Desktops;
 using Hypertree.Layout;
@@ -25,13 +22,6 @@ namespace Hypertree.App.Views;
 /// </summary>
 internal sealed class SpatialOverlay : IStageContent
 {
-    private static readonly IBrush Fg = Palette.InkBrush;
-    private static readonly IBrush FgDim = Palette.MutedBrush;
-    private static readonly IBrush Accent = Palette.AccentBrush;
-    private static readonly Color LegendBg = Color.FromArgb(0xC8, 0x14, 0x19, 0x22);
-    private static readonly Color KeyCapBg = Color.FromArgb(0xFF, 0x22, 0x2C, 0x3A);
-    private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
-
     private readonly OverlayStage _stage;
     private readonly MapCamera _camera;
     private readonly Grid _root = new();
@@ -564,216 +554,22 @@ internal sealed class SpatialOverlay : IStageContent
 
         _root.Children.Clear();
         _root.Children.Add(board);
-        _root.Children.Add(_legend ? BuildLegend() : BuildLegendHint());
-        if (_groupsPanel) _root.Children.Add(BuildGroupsPanel(display));
+        _root.Children.Add(_legend ? SpatialOverlayChrome.Legend(_stage.MapStyle) : SpatialOverlayChrome.LegendHint());
+        if (_groupsPanel) _root.Children.Add(SpatialOverlayChrome.GroupsPanel(display, _selectedGroup, _paletteFor, GroupsCallbacks()));
 
         _stage.BringToFront();
     }
 
-    private Control BuildLegend()
-    {
-        var rows = new StackPanel { Spacing = 7 };
-        rows.Children.Add(new TextBlock
+    // The groups-panel's state transitions, handed to the chrome builder so it can wire them onto the rows it
+    // draws while the overlay keeps owning the mutation.
+    private SpatialOverlayChrome.GroupsPanelCallbacks GroupsCallbacks() => new(
+        SelectGroup: id =>
         {
-            Text = "Spatial map", FontSize = 13, FontWeight = FontWeight.SemiBold, Foreground = Fg,
-            Margin = new Avalonia.Thickness(0, 0, 0, 4),
-        });
-        rows.Children.Add(LegendRow("←→↑↓", "select the nearest room"));
-        rows.Children.Add(LegendRow("Enter/Space", "switch to selected"));
-        rows.Children.Add(LegendRow("Ctrl+Alt+←→↑↓", "switch to a desktop"));
-        rows.Children.Add(LegendRow("Ctrl+←→↑↓", "move the room / group"));
-        rows.Children.Add(LegendRow("Ctrl+Shift+←→↑↓", "move the block"));
-        rows.Children.Add(LegendRow("g", "set the room's group"));
-        rows.Children.Add(LegendRow("Shift+g", "groups & colours"));
-        rows.Children.Add(LegendRow("r", "rename room"));
-        rows.Children.Add(LegendRow("Shift+r", "rename group"));
-        rows.Children.Add(LegendRow("n", "new desktop · b new branch"));
-        rows.Children.Add(LegendRow("m", "move windows"));
-        rows.Children.Add(LegendRow("Shift+m", "pull windows"));
-        rows.Children.Add(LegendRow("f", "find · p palette · o apps"));
-        rows.Children.Add(LegendRow("t", "tidy up (reunite groups)"));
-        rows.Children.Add(LegendRow("+ / −", "zoom in / out · 0 reset"));
-        rows.Children.Add(LegendRow("v", _stage.MapStyle switch
-        {
-            MapStyle.Board => "metro view",
-            MapStyle.Metro => "ascii view",
-            _ => "board view",
-        }));
-        rows.Children.Add(LegendRow("Del", "remove room"));
-        rows.Children.Add(LegendRow("Shift+Del", "remove group"));
-        rows.Children.Add(LegendRow("Ctrl+z", "undo the last tidy"));
-        rows.Children.Add(LegendRow("l", "hide this legend"));
-        rows.Children.Add(LegendRow("Esc", "close"));
-        rows.Children.Add(new TextBlock
-        {
-            Text = "click to select · double-click to switch", FontSize = 11, Foreground = FgDim,
-            Margin = new Avalonia.Thickness(0, 5, 0, 0),
-        });
-        rows.Children.Add(new TextBlock
-        {
-            Text = "drag a room · ⇧-drag its block", FontSize = 11, Foreground = FgDim,
-        });
-
-        var legend = new Border
-        {
-            Background = new SolidColorBrush(LegendBg),
-            CornerRadius = new Avalonia.CornerRadius(12), Padding = new Avalonia.Thickness(16, 14),
-            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Avalonia.Thickness(24, 24, 0, 0), Child = rows,
-        };
-        legend.PointerPressed += (_, e) => e.Handled = true; // reading the legend never selects behind it
-        return legend;
-    }
-
-    // A hint shown in place of the full legend: a small pill in the same corner so the `l` toggle stays
-    // discoverable once the legend is hidden. Clicking it never selects the map behind it.
-    private Control BuildLegendHint()
-    {
-        var hint = new Border
-        {
-            Background = new SolidColorBrush(LegendBg),
-            CornerRadius = new Avalonia.CornerRadius(9), Padding = new Avalonia.Thickness(10, 7),
-            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Avalonia.Thickness(24, 24, 0, 0),
-            Child = new StackPanel
-            {
-                Orientation = Orientation.Horizontal, Spacing = 8,
-                Children =
-                {
-                    KeyCap("l"),
-                    new TextBlock { Text = "legend", FontSize = 11, Foreground = FgDim, VerticalAlignment = VerticalAlignment.Center },
-                },
-            },
-        };
-        hint.PointerPressed += (_, e) => e.Handled = true;
-        return hint;
-    }
-
-    // A keycap chip — the accent-on-dark rounded label the legend and its hint share.
-    private static Control KeyCap(string key) => new Border
-    {
-        Background = new SolidColorBrush(KeyCapBg),
-        CornerRadius = new Avalonia.CornerRadius(5), Padding = new Avalonia.Thickness(7, 2),
-        HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center,
-        Child = new TextBlock
-        {
-            Text = key, FontSize = 11, FontWeight = FontWeight.SemiBold, Foreground = Accent, FontFamily = Mono,
-        },
-    };
-
-    private static Control LegendRow(string key, string desc)
-    {
-        Control cap = KeyCap(key);
-        Grid.SetColumn(cap, 0);
-        var label = new TextBlock
-        {
-            Text = desc, FontSize = 12, Foreground = Fg,
-            VerticalAlignment = VerticalAlignment.Center, Margin = new Avalonia.Thickness(10, 0, 0, 0),
-        };
-        Grid.SetColumn(label, 1);
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("140,*") };
-        grid.Children.Add(cap);
-        grid.Children.Add(label);
-        return grid;
-    }
-
-    // ── Groups & colours panel (top-right, ⇧G) ─────────────────────────────────
-
-    private Control BuildGroupsPanel(SpatialScene scene)
-    {
-        var rows = new StackPanel { Spacing = 4, MinWidth = 210 };
-        rows.Children.Add(new TextBlock
-        {
-            Text = "Groups", FontSize = 13, FontWeight = FontWeight.SemiBold, Foreground = Fg,
-            Margin = new Avalonia.Thickness(0, 0, 0, 2),
-        });
-        rows.Children.Add(new TextBlock
-        {
-            Text = "click a swatch to recolour — colours are stable", FontSize = 10.5, Foreground = FgDim,
-            Margin = new Avalonia.Thickness(0, 0, 0, 6), TextWrapping = TextWrapping.Wrap,
-        });
-
-        foreach (SpatialGroup g in scene.Groups)
-        {
-            rows.Children.Add(GroupRow(g, scene.Rooms.Count(r => r.GroupId == g.Id)));
-            if (_paletteFor == g.Id && !g.IsMain) rows.Children.Add(PaletteRow(g.Id));
-        }
-
-        var panel = new Border
-        {
-            Background = new SolidColorBrush(LegendBg),
-            CornerRadius = new Avalonia.CornerRadius(12), Padding = new Avalonia.Thickness(14, 12),
-            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Avalonia.Thickness(0, 24, 24, 0), Child = rows,
-        };
-        panel.PointerPressed += (_, e) => e.Handled = true; // operating the panel never drags/deselects behind it
-        return panel;
-    }
-
-    private Control GroupRow(SpatialGroup g, int count)
-    {
-        Color c = Color.Parse(g.Color);
-        var swatch = new Border
-        {
-            Width = 15, Height = 15, Background = new SolidColorBrush(c),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)), BorderThickness = new Avalonia.Thickness(1),
-            CornerRadius = new Avalonia.CornerRadius(g.IsMain ? 8 : 4), // main reads as the round "default" chip
-            VerticalAlignment = VerticalAlignment.Center,
-            Cursor = g.IsMain ? null : new Cursor(StandardCursorType.Hand),
-        };
-        Guid id = g.Id;
-        if (!g.IsMain)
-            swatch.PointerPressed += (_, e) => { e.Handled = true; _paletteFor = _paletteFor == id ? null : id; Render(); };
-
-        var name = new TextBlock
-        {
-            Text = g.IsMain ? "main" : g.Name, FontFamily = Mono, FontSize = 11.5,
-            Foreground = new SolidColorBrush(g.IsMain ? Color.Parse("#9AA6B8") : c),
-            VerticalAlignment = VerticalAlignment.Center, Margin = new Avalonia.Thickness(9, 0, 0, 0),
-        };
-        var tally = new TextBlock
-        {
-            Text = count.ToString(), FontFamily = Mono, FontSize = 11, Foreground = FgDim,
-            VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right,
-        };
-        Grid.SetColumn(swatch, 0); Grid.SetColumn(name, 1); Grid.SetColumn(tally, 2);
-
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
-        grid.Children.Add(swatch); grid.Children.Add(name); grid.Children.Add(tally);
-
-        var row = new Border
-        {
-            Padding = new Avalonia.Thickness(6, 5), CornerRadius = new Avalonia.CornerRadius(7),
-            Background = _selectedGroup == id ? new SolidColorBrush(Color.FromArgb(0x1F, 0x6E, 0xA8, 0xFF)) : Brushes.Transparent,
-            Cursor = new Cursor(StandardCursorType.Hand), Child = grid,
-        };
-        row.PointerPressed += (_, e) =>
-        {
-            if (e.Handled) return; // the swatch was clicked
-            e.Handled = true;
             _selectedGroup = id;
             if (Scene().Rooms.FirstOrDefault(r => r.GroupId == id) is { } first) _cursor = first.Id;
             Render();
-        };
-        return row;
-    }
+        },
+        TogglePalette: id => { _paletteFor = _paletteFor == id ? null : id; Render(); },
+        Recolour: Recolour);
 
-    private Control PaletteRow(Guid group)
-    {
-        var wrap = new WrapPanel { Margin = new Avalonia.Thickness(24, 2, 0, 6) };
-        foreach (string hex in SpatialPalette.Colors)
-        {
-            string h = hex;
-            var chip = new Border
-            {
-                Width = 17, Height = 17, Margin = new Avalonia.Thickness(0, 0, 6, 0),
-                Background = new SolidColorBrush(Color.Parse(h)), CornerRadius = new Avalonia.CornerRadius(5),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(0x60, 0, 0, 0)), BorderThickness = new Avalonia.Thickness(1),
-                Cursor = new Cursor(StandardCursorType.Hand),
-            };
-            chip.PointerPressed += (_, e) => { e.Handled = true; Recolour(group, h); };
-            wrap.Children.Add(chip);
-        }
-        return wrap;
-    }
 }
