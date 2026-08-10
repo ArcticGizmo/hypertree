@@ -1,7 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
-using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -22,18 +21,10 @@ internal sealed class MetroPainter : IScenePainter
     private static readonly Color MainLine = Color.Parse("#C5D0E0");
     private static readonly Color ChipBase = Color.Parse("#111722");
     private static readonly Color ChipInk = Color.Parse("#0A0D12");
-    private static readonly Color Focus = Color.Parse("#6EA8FF");
-    private static readonly Color Here = Color.Parse("#34D399");
+    private static readonly Color Focus = Palette.Accent;
+    private static readonly Color Here = Palette.Here;
     private static readonly FontFamily Sans = new("Inter,Segoe UI,sans-serif");
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
-
-    private static readonly Color[] LinePalette =
-    {
-        Color.Parse("#F4795B"), Color.Parse("#5BC8F4"), Color.Parse("#7BD88F"), Color.Parse("#C99BF4"),
-        Color.Parse("#F4C95B"), Color.Parse("#F45B9C"), Color.Parse("#63D6C4"), Color.Parse("#9CB2F4"),
-    };
-
-    private static Color BranchColour(int branchIndex) => LinePalette[((branchIndex % LinePalette.Length) + LinePalette.Length) % LinePalette.Length];
 
     private const double BaseStride = 156, BaseLineW = 8, BaseROut = 10, BaseVGap = 140, BaseCellH = 96;
 
@@ -79,7 +70,7 @@ internal sealed class MetroPainter : IScenePainter
         int n = cells.Count;
         if (n == 0) return;
 
-        Color colour = frame.Row.IsMain ? MainLine : BranchColour(frame.Row.BranchIndex);
+        Color colour = frame.Row.IsMain ? MainLine : ScenePaint.BranchColour(frame.Row.BranchIndex);
         double op = frame.Row.Active ? 1.0 : frame.Row.IsMain ? 0.82 : 0.5;
         double y = frame.CentreY;
         double lineW = BaseLineW * s, rOut = BaseROut * s;
@@ -109,22 +100,9 @@ internal sealed class MetroPainter : IScenePainter
             AddStation(canvas, cell, colour, sx, y, rOut, s, op);
             AddChip(canvas, cell, colour, sx, y, rOut, s);
 
-            if (onClick is not null || onActivate is not null)
-            {
-                var hit = new Border
-                {
-                    Width = cells[c].Width, Height = cells[c].Height, Background = Brushes.Transparent,
-                    Cursor = new Cursor(StandardCursorType.Hand),
-                };
-                hit.PointerPressed += (_, e) =>
-                {
-                    if (e.ClickCount >= 2) onActivate?.Invoke(col);
-                    else onClick?.Invoke(col);
-                };
-                Canvas.SetLeft(hit, cells[c].X);
-                Canvas.SetTop(hit, cells[c].Y);
-                canvas.Children.Add(hit);
-            }
+            ScenePaint.HitCell(canvas, cells[c],
+                               onClick is null ? null : () => onClick(col),
+                               onActivate is null ? null : () => onActivate(col));
         }
     }
 
@@ -167,8 +145,17 @@ internal sealed class MetroPainter : IScenePainter
 
         if (st.Selected)
         {
+            // Pin the dot and its focus ring to the exact centre: with layout rounding on (the default),
+            // two circles of different radii are rounded to device pixels independently, which can drift
+            // their centres apart by up to a pixel at fractional zoom — reading as a ring sitting slightly
+            // high of the dot. Opting both out keeps them concentric at every zoom.
+            dot.UseLayoutRounding = false;
             double fr = rOut + 6 * s;
-            var focusRing = new Ellipse { Width = fr * 2, Height = fr * 2, Stroke = new SolidColorBrush(Focus), StrokeThickness = 2 * s };
+            var focusRing = new Ellipse
+            {
+                Width = fr * 2, Height = fr * 2, Stroke = new SolidColorBrush(Focus), StrokeThickness = 2 * s,
+                UseLayoutRounding = false,
+            };
             Canvas.SetLeft(focusRing, x - fr);
             Canvas.SetTop(focusRing, y - fr);
             canvas.Children.Add(focusRing);
@@ -180,8 +167,8 @@ internal sealed class MetroPainter : IScenePainter
         bool empty = st.WindowCount == 0;
         bool marked = st.Selected || st.Here;
 
-        Color fill = st.Selected ? Focus : st.Here ? Here : Lerp(ChipBase, lineColour, 0.13);
-        Color textColour = marked ? ChipInk : Lerp(lineColour, ChipBase, empty ? 0.64 : 0.48);
+        Color fill = st.Selected ? Focus : st.Here ? Here : ScenePaint.Lerp(ChipBase, lineColour, 0.13);
+        Color textColour = marked ? ChipInk : ScenePaint.Lerp(lineColour, ChipBase, empty ? 0.64 : 0.48);
 
         var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 * s, VerticalAlignment = VerticalAlignment.Center };
         content.Children.Add(new TextBlock
@@ -195,7 +182,7 @@ internal sealed class MetroPainter : IScenePainter
             {
                 Text = st.WindowCount.ToString(), FontFamily = Mono, FontSize = 10 * s, FontWeight = FontWeight.SemiBold,
                 Foreground = new SolidColorBrush(marked ? Color.FromArgb(0xB4, ChipInk.R, ChipInk.G, ChipInk.B)
-                                                        : Lerp(lineColour, ChipBase, 0.58)),
+                                                        : ScenePaint.Lerp(lineColour, ChipBase, 0.58)),
                 VerticalAlignment = VerticalAlignment.Center,
             });
 
@@ -215,13 +202,9 @@ internal sealed class MetroPainter : IScenePainter
         canvas.Children.Add(chip);
     }
 
-    private static Color Lerp(Color a, Color b, double t)
-    {
-        byte M(byte from, byte to) => (byte)Math.Round(from + (to - from) * t);
-        return Color.FromArgb(0xFF, M(a.R, b.R), M(a.G, b.G), M(a.B, b.B));
-    }
-
-    private static Color Dim(Color c, double t) => Lerp(Bg, c, t);
+    // A resting route/station recedes toward the metro ground rather than going translucent over the live
+    // desktop behind the overlay. Shares the arithmetic with the other themes via ScenePaint.
+    private static Color Dim(Color c, double t) => ScenePaint.Toward(Bg, c, t);
 
     private static void AddRouteBadge(Canvas canvas, string name, Color colour, double x, double y, double s, double op)
     {

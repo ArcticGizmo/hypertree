@@ -85,7 +85,7 @@ public sealed class VirtualDesktopController : IDesktopController
         var result = new List<WindowInfo>();
         foreach ((nint hwnd, Guid g) in EnumAppWindows())
             if (g == id.Value)
-                result.Add(new WindowInfo(hwnd, TitleOf(hwnd), ProcessOf(hwnd)));
+                result.Add(new WindowInfo(hwnd, NativeWindows.TitleOf(hwnd), NativeWindows.ProcessOf(hwnd)));
         return result;
     }
 
@@ -99,7 +99,7 @@ public sealed class VirtualDesktopController : IDesktopController
         var result = new List<WindowInfo>();
         foreach ((nint hwnd, Guid g) in EnumAppWindows())
             if (g != current)
-                result.Add(new WindowInfo(hwnd, TitleOf(hwnd), ProcessOf(hwnd),
+                result.Add(new WindowInfo(hwnd, NativeWindows.TitleOf(hwnd), NativeWindows.ProcessOf(hwnd),
                     names.TryGetValue(g, out string? name) ? name : ""));
         return result;
     }
@@ -112,7 +112,7 @@ public sealed class VirtualDesktopController : IDesktopController
         uint own = GetCurrentProcessId();
         EnumWindows((hwnd, _) =>
         {
-            if (!IsCountableWindow(hwnd, own)) return true;
+            if (!NativeWindows.IsCountableWindow(hwnd, own)) return true;
             if (_publicVdm.GetWindowDesktopId(hwnd, out Guid g) != 0) return true; // HR != S_OK
             if (g == Guid.Empty) return true; // pinned / all-desktops / unassigned — don't attribute to one
             list.Add((hwnd, g));
@@ -121,60 +121,14 @@ public sealed class VirtualDesktopController : IDesktopController
         return list;
     }
 
-    private static string TitleOf(nint hwnd)
-    {
-        int len = GetWindowTextLength(hwnd);
-        if (len <= 0) return "";
-        var sb = new System.Text.StringBuilder(len + 1);
-        GetWindowText(hwnd, sb, sb.Capacity);
-        return sb.ToString();
-    }
-
-    private static string ProcessOf(nint hwnd)
-    {
-        GetWindowThreadProcessId(hwnd, out uint pid);
-        try { return System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; }
-        catch { return ""; } // process gone / access denied — advisory only
-    }
-
-    // The alt-tab-ish filter: a visible, titled, top-level (un-owned) window that isn't a tool window,
-    // isn't one of our own, and isn't the shell's desktop/taskbar plumbing. Cloaked windows are kept —
-    // a window on another virtual desktop reads as "cloaked", and those are exactly what we're counting.
-    private static bool IsCountableWindow(nint hwnd, uint ownPid)
-    {
-        if (!IsWindowVisible(hwnd)) return false;
-        if (GetAncestor(hwnd, GA_ROOTOWNER) != hwnd) return false;      // owned popup/dialog — skip
-        if (GetWindowTextLength(hwnd) == 0) return false;               // untitled → not a real app window
-        long ex = (long)GetWindowLongPtr(hwnd, GWL_EXSTYLE);
-        if ((ex & WS_EX_TOOLWINDOW) != 0) return false;                 // palettes/toolbars
-        GetWindowThreadProcessId(hwnd, out uint pid);
-        if (pid == ownPid) return false;                               // Hypertree's own map/palette
-        return !IsShellWindow(hwnd);
-    }
-
-    private static bool IsShellWindow(nint hwnd)
-    {
-        var sb = new System.Text.StringBuilder(64);
-        GetClassName(hwnd, sb, sb.Capacity);
-        string cls = sb.ToString();
-        return cls is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd"
-                   or "Windows.UI.Core.CoreWindow" or "ApplicationManager_DesktopShellWindow";
-    }
-
-    private const int GWL_EXSTYLE = -20, GA_ROOTOWNER = 3;
-    private const long WS_EX_TOOLWINDOW = 0x00000080;
+    // The countable-window filter, plus TitleOf / ProcessOf, live in NativeWindows — shared with
+    // WindowsWindowLayoutController so the two can't drift (see NativeWindows). This class keeps only the
+    // imports it uses directly: the enumeration itself, the foreground hand-off, and its own pid.
     private delegate bool EnumWindowsProc(nint hwnd, nint lparam);
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc cb, nint lparam);
-    [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint hwnd);
     [DllImport("user32.dll")] private static extern bool IsIconic(nint hwnd);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll")] private static extern nint GetShellWindow();
-    [DllImport("user32.dll")] private static extern int GetWindowTextLength(nint hwnd);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetWindowTextW")] private static extern int GetWindowText(nint hwnd, System.Text.StringBuilder buf, int max);
-    [DllImport("user32.dll")] private static extern nint GetAncestor(nint hwnd, int flags);
-    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern nint GetWindowLongPtr(nint hwnd, int nIndex);
-    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint hwnd, out uint pid);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetClassNameW")] private static extern int GetClassName(nint hwnd, System.Text.StringBuilder buf, int max);
     [DllImport("kernel32.dll")] private static extern uint GetCurrentProcessId();
 
     // Switch/rename/remove tolerate a desktop that no longer exists (e.g. the user deleted it from
@@ -218,7 +172,7 @@ public sealed class VirtualDesktopController : IDesktopController
         nint found = 0;
         EnumWindows((hwnd, _) =>
         {
-            if (!IsCountableWindow(hwnd, own) || IsIconic(hwnd)) return true;
+            if (!NativeWindows.IsCountableWindow(hwnd, own) || IsIconic(hwnd)) return true;
             if (_publicVdm.GetWindowDesktopId(hwnd, out Guid g) != 0 || g != current) return true;
             found = hwnd;
             return false; // stop at the first (top-most) match
@@ -256,7 +210,8 @@ public sealed class VirtualDesktopController : IDesktopController
             if (landed >= 0 && landed != index)
                 _vdm.MoveDesktop(vd, Math.Clamp(index + (index - landed), 0, n - 1));
         }
-        catch (COMException) { /* shell refused the reorder — the desktop keeps its place */ }
+        // shell refused the reorder — the desktop keeps its place
+        catch (COMException ex) { Diagnostics.Swallowed(ex, "VirtualDesktopController.Reorder"); }
     }
 
     private int OrdinalOf(DesktopId id)

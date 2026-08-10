@@ -16,11 +16,11 @@ namespace Hypertree.App.Views.Scene;
 /// </summary>
 internal sealed class BoardPainter : IScenePainter
 {
-    private static readonly Color TileBg = Color.Parse("#1F2836"), TileBorder = Color.Parse("#2A3444"), TileWin = Color.Parse("#374357");
+    private static readonly Color TileBg = Color.Parse("#1F2836"), TileBorder = Palette.Stroke, TileWin = Color.Parse("#374357");
     private static readonly Color StrBg = Color.Parse("#3A2E18"), StrBorder = Color.Parse("#6A5124"), StrWin = Color.Parse("#C9922F"), StrInk = Color.Parse("#E8A23D");
-    private static readonly Color CapBg = Color.Parse("#161C27"), Ink = Color.Parse("#E8EDF5"), InkSoft = Color.Parse("#9AA6B8"), InkFaint = Color.Parse("#69748A");
-    private static readonly Color Focus = Color.Parse("#6EA8FF");
-    private static readonly Color Here = Color.Parse("#34D399");
+    private static readonly Color CapBg = Color.Parse("#161C27"), Ink = Palette.Ink, InkSoft = Palette.Muted, InkFaint = Color.Parse("#69748A");
+    private static readonly Color Focus = Palette.Accent;
+    private static readonly Color Here = Palette.Here;
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
 
     // Base geometry (unscaled). The tile is the "cell"; the box/label headroom sets the row height.
@@ -130,7 +130,7 @@ internal sealed class BoardPainter : IScenePainter
         canvas.Children.Add(label);
     }
 
-    // ── Tile drawing (ported from BoardView; position-agnostic — the caller places it) ─────────────
+    // ── Tile drawing (the board tile look; position-agnostic — the caller places it) ─────────────
 
     private static Control Tile(string caption, bool isStream, bool focused, bool here, int windowCount, double s,
                                 double tileW, double screenH, double capH, Action? onClick, Action? onDelete = null,

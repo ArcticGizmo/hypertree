@@ -27,7 +27,9 @@ public enum GoToResult
 ///   • <b>Up</b> / <b>Down</b>: move the cursor one row up / down, crossing main in place (no leap).
 ///   • <b>Left/Right</b>: within the current row (main desktops, or the current branch's desktops).
 /// Branches above main stay above; branches below stay below. A newly-added branch appears directly below
-/// main. Ends clamp (no wrap). Holds no Win32/UI, so the whole feel is unit-testable against a fake.
+/// main. Ends clamp (no wrap). It commands the OS only through the injected <see cref="IDesktopController"/>
+/// (navigation calls <c>SwitchTo</c>), and holds no Win32/UI itself — so the whole feel is unit-testable
+/// against a fake controller. Render/status projection lives in <see cref="NavProjection"/>.
 /// </summary>
 public sealed class NavigationModel
 {
@@ -106,6 +108,12 @@ public sealed class NavigationModel
             ? _topRow[Math.Clamp(_topIndex, 0, Math.Max(0, _topRow.Count - 1))]
             : _branches[_currentBranch].Desktops[_branches[_currentBranch].LastUsedIndex];
 
+    // An immutable read-only view of the current layout for the projection builders (see NavProjection).
+    // Cheap to build and discarded per call — the projections run at summon time, not per keystroke.
+    private NavLayout Layout() => new(
+        _topRow, _branches, _onMain, _currentBranch, _topIndex,
+        Math.Clamp(_mainSlot, 0, _branches.Count), RowOrder(), CurrentRow());
+
     /// <summary>Render-ready snapshot: main timeline + branches in their fixed stack order, split around
     /// main at its fixed slot (branches before the slot render above main, the rest below).
     /// <paramref name="cameFrom"/>, when supplied, marks that desktop with the green "here" outline —
@@ -113,27 +121,7 @@ public sealed class NavigationModel
     public NavMap BuildMap(DesktopId? cameFrom = null)
     {
         IReadOnlyDictionary<DesktopId, int> counts = _desktops.WindowCounts();
-        int Windows(DesktopId id) => counts.TryGetValue(id, out int n) ? n : 0;
-        bool CameFrom(DesktopId id) => cameFrom == id;
-
-        var top = new List<NavMapTile>(_topRow.Count);
-        for (int i = 0; i < _topRow.Count; i++)
-            top.Add(new NavMapTile(_topRow[i].Label, _onMain && i == _topIndex,
-                                   IsHere: CameFrom(_topRow[i].Id), WindowCount: Windows(_topRow[i].Id)));
-
-        var branches = new List<NavMapBranch>(_branches.Count);
-        for (int gi = 0; gi < _branches.Count; gi++)
-        {
-            Branch g = _branches[gi];
-            bool current = !_onMain && gi == _currentBranch;
-            var tiles = new List<NavMapTile>(g.Desktops.Count);
-            for (int j = 0; j < g.Desktops.Count; j++)
-                tiles.Add(new NavMapTile(g.Desktops[j].Label, current && j == g.LastUsedIndex,
-                                         IsHere: CameFrom(g.Desktops[j].Id), WindowCount: Windows(g.Desktops[j].Id)));
-            branches.Add(new NavMapBranch(gi, g.Name, tiles, current, g.LastUsedIndex));
-        }
-
-        return new NavMap(top, _topRow.Count == 0 ? 0 : _topIndex, _onMain, branches, Math.Clamp(_mainSlot, 0, _branches.Count));
+        return NavProjection.Map(Layout(), id => counts.TryGetValue(id, out int n) ? n : 0, cameFrom);
     }
 
     /// <summary>
@@ -148,33 +136,7 @@ public sealed class NavigationModel
     public SpatialSource BuildSpatialSource(DesktopId? cameFrom = null)
     {
         IReadOnlyDictionary<DesktopId, int> counts = _desktops.WindowCounts();
-        int Windows(DesktopId id) => counts.TryGetValue(id, out int n) ? n : 0;
-        bool CameFrom(DesktopId id) => cameFrom == id;
-
-        SpatialGroupSource MainGroup() => new(Guid.Empty, "main", IsMain: true,
-            _topRow.Select((d, i) => new SpatialDesktop(
-                d.Id, d.Label, _onMain && i == _topIndex, CameFrom(d.Id), Windows(d.Id))).ToList());
-
-        SpatialGroupSource BranchGroup(int gi)
-        {
-            Branch g = _branches[gi];
-            bool current = !_onMain && gi == _currentBranch;
-            var desks = new List<SpatialDesktop>(g.Desktops.Count);
-            for (int j = 0; j < g.Desktops.Count; j++)
-            {
-                DesktopRef d = g.Desktops[j];
-                desks.Add(new SpatialDesktop(d.Id, d.Label, current && j == g.LastUsedIndex,
-                                             CameFrom(d.Id), Windows(d.Id)));
-            }
-            return new SpatialGroupSource(g.Id, g.Name, IsMain: false, desks);
-        }
-
-        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
-        var groups = new List<SpatialGroupSource>(_branches.Count + 1);
-        for (int i = 0; i < slot; i++) groups.Add(BranchGroup(i));
-        groups.Add(MainGroup());
-        for (int i = slot; i < _branches.Count; i++) groups.Add(BranchGroup(i));
-        return new SpatialSource(groups);
+        return NavProjection.Spatial(Layout(), id => counts.TryGetValue(id, out int n) ? n : 0, cameFrom);
     }
 
     /// <summary>
@@ -187,49 +149,7 @@ public sealed class NavigationModel
     /// but this runs on every navigation, and nothing downstream of the status file wants the counts. So
     /// this reads only what it publishes.
     /// </remarks>
-    public StatusSnapshot BuildStatus()
-    {
-        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
-
-        StatusRow MainRow() => new()
-        {
-            Kind = RowKind.Main,
-            Name = RowKind.Main,
-            Cursor = _topRow.Count == 0 ? 0 : Math.Clamp(_topIndex, 0, _topRow.Count - 1),
-            Desktops = _topRow.Select(d => new StatusDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
-        };
-
-        StatusRow BranchRow(Branch g) => new()
-        {
-            Kind = RowKind.Branch,
-            Id = g.Id,
-            Name = g.Name,
-            Cursor = g.LastUsedIndex,
-            Desktops = g.Desktops.Select(d => new StatusDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
-        };
-
-        var rows = new List<StatusRow>(_branches.Count + 1);
-        for (int i = 0; i < slot; i++) rows.Add(BranchRow(_branches[i]));
-        int mainRow = rows.Count;
-        rows.Add(MainRow());
-        for (int i = slot; i < _branches.Count; i++) rows.Add(BranchRow(_branches[i]));
-
-        // The cursor's row in the same flattened order. On a branch, its index shifts by one once we're
-        // past main's slot, because main occupies a row of its own in this list.
-        int currentRow = _onMain || _branches.Count == 0
-            ? mainRow
-            : (_currentBranch < slot ? _currentBranch : _currentBranch + 1);
-
-        return new StatusSnapshot
-        {
-            Rows = rows,
-            Current = new StatusPosition
-            {
-                Row = currentRow,
-                Desktop = rows.Count > currentRow ? rows[currentRow].Cursor : 0,
-            },
-        };
-    }
+    public StatusSnapshot BuildStatus() => NavProjection.Status(Layout());
 
     // ── Navigation (stable pivot ladder) ───────────────────────────────────────────
 
@@ -242,17 +162,36 @@ public sealed class NavigationModel
         _ => false,
     };
 
-    // The cursor's index in the combined row sequence: branches[0..mainSlot-1] / main / branches[mainSlot..].
-    // Rows run 0.._branches.Count (main occupies index _mainSlot).
+    // ── Row order & cursor⇄row mapping ──────────────────────────────────────────────
+    // The stack drawn top-to-bottom is branches[0..slot-1] / MAIN / branches[slot..]. Every projection (map,
+    // spatial, status) and every re-slot walks this one order, and the cursor's row is derived from it here —
+    // so the "splice main in at its slot" invariant and its off-by-one live in exactly one place.
+
+    internal const int MainRowMarker = RowSplice.MainMarker; // shared with NavProjection; the one definition lives in RowSplice
+
+    // Branch indices in draw order with main (MainRowMarker) spliced in at its clamped slot.
+    private IReadOnlyList<int> RowOrder() => RowSplice.Order(_branches.Count, _mainSlot);
+
+    // The cursor's index in that combined sequence. A branch below main is pushed down one row because main
+    // occupies a row of its own.
     private int CurrentRow()
-        => _onMain ? _mainSlot : (_currentBranch < _mainSlot ? _currentBranch : _currentBranch + 1);
+    {
+        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
+        return _onMain || _branches.Count == 0 ? slot : (_currentBranch < slot ? _currentBranch : _currentBranch + 1);
+    }
+
+    // The inverse: point the cursor at a combined-row index (caller clamps to 0.._branches.Count).
+    private void CursorToRow(int row)
+    {
+        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
+        if (row == slot) _onMain = true;
+        else { _onMain = false; _currentBranch = row < slot ? row : row - 1; }
+    }
 
     // Move the cursor to a row in the combined sequence (clamped), then map it back to main/branch.
     private bool SetRow(int row)
     {
-        row = Math.Clamp(row, 0, _branches.Count);
-        if (row == _mainSlot) _onMain = true;
-        else { _onMain = false; _currentBranch = row < _mainSlot ? row : row - 1; }
+        CursorToRow(Math.Clamp(row, 0, _branches.Count));
         return Commit();
     }
 
@@ -343,8 +282,7 @@ public sealed class NavigationModel
         if (id == _target) return false;
         _target = id;
         _desktops.SwitchTo(id);
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
         return true;
     }
 
@@ -371,8 +309,7 @@ public sealed class NavigationModel
         if (!_onMain && _currentBranch >= at) _currentBranch++; // existing selection shifted down one
         ClampState();
         SyncTopRow();
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
     }
 
     /// <summary>Add a branch directly below a <b>selection anchor</b> rather than below main. A branch is a
@@ -396,8 +333,7 @@ public sealed class NavigationModel
         if (!_onMain && _currentBranch >= at) _currentBranch++; // existing selection shifted down one
         ClampState();
         SyncTopRow();
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
     }
 
     /// <summary>
@@ -415,8 +351,7 @@ public sealed class NavigationModel
         Branch g = _branches[branchIndex];
         g.InsertDesktop(g.Count, desktop);
         SyncTopRow();
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
         return g.Count - 1;
     }
 
@@ -434,12 +369,8 @@ public sealed class NavigationModel
     {
         if (index < 0 || index >= _branches.Count) return null;
 
-        // The row sequence as a list of branch indices, with -1 standing in for main.
-        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
-        var seq = new List<int>(_branches.Count + 1);
-        for (int i = 0; i < slot; i++) seq.Add(i);
-        seq.Add(-1);
-        for (int i = slot; i < _branches.Count; i++) seq.Add(i);
+        // The row sequence as a list of branch indices, with main (MainRowMarker) standing in for its slot.
+        var seq = RowOrder().ToList();
 
         int at = seq.IndexOf(index);
         row = Math.Clamp(row, 0, seq.Count - 1);
@@ -451,15 +382,14 @@ public sealed class NavigationModel
         // branch objects rather than on indices that have just shifted.
         Branch? cursorBranch = _onMain ? null : _branches[_currentBranch];
         Branch theBranch = _branches[index];
-        var reordered = seq.Where(i => i >= 0).Select(i => _branches[i]).ToList();
-        _mainSlot = seq.IndexOf(-1);
+        var reordered = seq.Where(i => i != MainRowMarker).Select(i => _branches[i]).ToList();
+        _mainSlot = seq.IndexOf(MainRowMarker);
         _branches.Clear();
         _branches.AddRange(reordered);
         if (cursorBranch is not null) _currentBranch = _branches.IndexOf(cursorBranch);
         ClampState();
 
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
         return _branches.IndexOf(theBranch);
     }
 
@@ -479,8 +409,7 @@ public sealed class NavigationModel
 
         _mainSlot = row;
         ClampState();
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
         return row;
     }
 
@@ -493,9 +422,11 @@ public sealed class NavigationModel
     /// since the main timeline <em>is</em> that order. Returns the desktop's new slot, or null if the move
     /// was rejected or resolved to a no-op.
     /// </summary>
-    public (bool onMain, int branchIndex, int desktopIndex)? MoveDesktop(
-        bool fromMain, int fromBranch, int fromDesktop, bool toMain, int toBranch, int toIndex)
+    public DesktopAddress? MoveDesktop(DesktopAddress fromAddr, DesktopAddress toAddr)
     {
+        (bool fromMain, int fromBranch, int fromDesktop) = (fromAddr.OnMain, fromAddr.BranchIndex, fromAddr.DesktopIndex);
+        (bool toMain, int toBranch, int toIndex) = (toAddr.OnMain, toAddr.BranchIndex, toAddr.DesktopIndex);
+
         DesktopRef? source = fromMain
             ? (fromDesktop >= 0 && fromDesktop < _topRow.Count ? _topRow[fromDesktop] : null)
             : (fromBranch >= 0 && fromBranch < _branches.Count
@@ -549,18 +480,18 @@ public sealed class NavigationModel
     /// <see cref="MoveDesktop"/> that resolves the group id to a slot. Returns the desktop's new position,
     /// or null when the desktop or group can't be resolved, or it's already in that group (a no-op).
     /// </summary>
-    public (bool onMain, int branchIndex, int desktopIndex)? MoveDesktopToGroup(DesktopId id, Guid groupId)
+    public DesktopAddress? MoveDesktopToGroup(DesktopId id, Guid groupId)
     {
         if (Locate(id) is not { } at) return null;
         if (groupId == Guid.Empty)
         {
-            if (at.onMain) return null;                                   // already ungrouped
-            return MoveDesktop(false, at.branchIndex, at.desktopIndex, true, -1, _topRow.Count);
+            if (at.OnMain) return null;                                   // already ungrouped
+            return MoveDesktop(at, new DesktopAddress(true, -1, _topRow.Count));
         }
         int to = IndexOfBranch(groupId);
         if (to < 0) return null;
-        if (!at.onMain && at.branchIndex == to) return null;             // already in that group
-        return MoveDesktop(at.onMain, at.branchIndex, at.desktopIndex, false, to, _branches[to].Count);
+        if (!at.OnMain && at.BranchIndex == to) return null;             // already in that group
+        return MoveDesktop(at, new DesktopAddress(false, to, _branches[to].Count));
     }
 
     /// <summary>
@@ -573,15 +504,15 @@ public sealed class NavigationModel
     public Branch? MoveDesktopToNewBranch(DesktopId id, string name)
     {
         if (Locate(id) is not { } at) return null;
-        DesktopRef moved = at.onMain
-            ? _topRow[at.desktopIndex]
-            : _branches[at.branchIndex].Desktops[at.desktopIndex];
+        DesktopRef moved = at.OnMain
+            ? _topRow[at.DesktopIndex]
+            : _branches[at.BranchIndex].Desktops[at.DesktopIndex];
 
-        if (!at.onMain)
+        if (!at.OnMain)
         {
-            Branch from = _branches[at.branchIndex];
-            from.RemoveDesktopAt(at.desktopIndex);
-            if (from.Count == 0) { _branches.RemoveAt(at.branchIndex); AdjustForRemoval(at.branchIndex); }
+            Branch from = _branches[at.BranchIndex];
+            from.RemoveDesktopAt(at.DesktopIndex);
+            if (from.Count == 0) { _branches.RemoveAt(at.BranchIndex); AdjustForRemoval(at.BranchIndex); }
         }
 
         var branch = new Branch(name, new[] { moved });
@@ -591,13 +522,13 @@ public sealed class NavigationModel
 
     /// <summary>Where a desktop sits in the stack right now — main (branch index -1) or a branch — or null
     /// if we don't track it. Used to follow a desktop after a structural change moved it.</summary>
-    public (bool onMain, int branchIndex, int desktopIndex)? Locate(DesktopId id)
+    public DesktopAddress? Locate(DesktopId id)
     {
         for (int i = 0; i < _topRow.Count; i++)
-            if (_topRow[i].Id == id) return (true, -1, i);
+            if (_topRow[i].Id == id) return new DesktopAddress(true, -1, i);
         for (int gi = 0; gi < _branches.Count; gi++)
             for (int j = 0; j < _branches[gi].Desktops.Count; j++)
-                if (_branches[gi].Desktops[j].Id == id) return (false, gi, j);
+                if (_branches[gi].Desktops[j].Id == id) return new DesktopAddress(false, gi, j);
         return null;
     }
 
@@ -650,8 +581,7 @@ public sealed class NavigationModel
         AdjustForRemoval(index);
         SyncTopRow();
         _target = CurrentDesktop().Id; // re-anchor: removing the branch you were in lands you on main
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
         return removed;
     }
 
@@ -671,8 +601,7 @@ public sealed class NavigationModel
             if (branchIndex < 0 || branchIndex >= _branches.Count) return;
             _branches[branchIndex].SetLabel(desktopIndex, label);
         }
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
     }
 
     // ── Single-desktop deletion (× badge / delete button) ─────────────────────────
@@ -700,8 +629,7 @@ public sealed class NavigationModel
     {
         if (index < 0 || index >= _branches.Count) return;
         _branches[index].SetName(name);
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
     }
 
     /// <summary>
@@ -779,23 +707,22 @@ public sealed class NavigationModel
         DesktopId cur = _desktops.Current;
         if (Locate(cur) is not { } at) { Resync(); return true; }
 
-        bool alreadyThere = at.onMain
-            ? _onMain && _topIndex == at.desktopIndex
-            : !_onMain && _currentBranch == at.branchIndex
-                       && _branches[at.branchIndex].LastUsedIndex == at.desktopIndex;
+        bool alreadyThere = at.OnMain
+            ? _onMain && _topIndex == at.DesktopIndex
+            : !_onMain && _currentBranch == at.BranchIndex
+                       && _branches[at.BranchIndex].LastUsedIndex == at.DesktopIndex;
         _target = cur; // either way, this is the desktop the next Commit measures a move from
         if (alreadyThere) return false;
 
-        if (at.onMain) { _onMain = true; _topIndex = at.desktopIndex; }
+        if (at.OnMain) { _onMain = true; _topIndex = at.DesktopIndex; }
         else
         {
             _onMain = false;
-            _currentBranch = at.branchIndex;
-            _branches[at.branchIndex].LastUsedIndex = at.desktopIndex;
+            _currentBranch = at.BranchIndex;
+            _branches[at.BranchIndex].LastUsedIndex = at.DesktopIndex;
         }
         ClampState();
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
         return true;
     }
 
@@ -804,24 +731,18 @@ public sealed class NavigationModel
     public void Resync()
     {
         SyncTopRow();
-        DesktopId cur = _desktops.Current;
 
-        int ti = _topRow.FindIndex(d => d.Id == cur);
-        if (ti >= 0) { _onMain = true; _topIndex = ti; }
-        else
+        // Re-anchor onto whatever desktop the OS is showing, reusing the same scan the map/history use
+        // (mirrors AnchorToCurrent). A desktop we don't track leaves the cursor put, then ClampState fixes up.
+        if (Locate(_desktops.Current) is { } at)
         {
-            for (int gi = 0; gi < _branches.Count; gi++)
-            {
-                int di = -1;
-                for (int j = 0; j < _branches[gi].Desktops.Count; j++) if (_branches[gi].Desktops[j].Id == cur) di = j;
-                if (di >= 0) { _onMain = false; _currentBranch = gi; _branches[gi].LastUsedIndex = di; break; }
-            }
+            if (at.OnMain) { _onMain = true; _topIndex = at.DesktopIndex; }
+            else { _onMain = false; _currentBranch = at.BranchIndex; _branches[at.BranchIndex].LastUsedIndex = at.DesktopIndex; }
         }
         ClampState();
 
         _target = CurrentDesktop().Id;
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
     }
 
     // ── Snapshots (named layout capture / restore) ───────────────────────────────
@@ -835,14 +756,8 @@ public sealed class NavigationModel
     {
         Name = name,
         MainSlot = _mainSlot,
-        MainDesktops = _topRow.Select(d => new PersistedDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
-        Branches = _branches.Select(g => new PersistedBranch
-        {
-            Id = g.Id,
-            Name = g.Name,
-            LastUsedIndex = g.LastUsedIndex,
-            Desktops = g.Desktops.Select(d => new PersistedDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
-        }).ToList(),
+        MainDesktops = _topRow.Select(ToPersisted).ToList(),
+        Branches = _branches.Select(ToPersisted).ToList(),
     };
 
     /// <summary>
@@ -860,6 +775,18 @@ public sealed class NavigationModel
     }
 
     // ── Persistence ────────────────────────────────────────────────────────────
+
+    // Project the in-memory model onto its persisted shapes. Shared by Save (the live state file) and
+    // CaptureSnapshot (a named layout) so the two never drift — add a field to a branch/desktop and both
+    // paths pick it up from here.
+    private static PersistedDesktop ToPersisted(DesktopRef d) => new() { Id = d.Id.Value, Label = d.Label };
+    private static PersistedBranch ToPersisted(Branch g) => new()
+    {
+        Id = g.Id,
+        Name = g.Name,
+        LastUsedIndex = g.LastUsedIndex,
+        Desktops = g.Desktops.Select(ToPersisted).ToList(),
+    };
 
     private void RestoreBranches()
     {
@@ -893,13 +820,17 @@ public sealed class NavigationModel
         {
             ActiveBranch = _currentBranch,
             MainSlot = _mainSlot,
-            Branches = _branches.Select(g => new PersistedBranch
-            {
-                Id = g.Id,
-                Name = g.Name,
-                LastUsedIndex = g.LastUsedIndex,
-                Desktops = g.Desktops.Select(d => new PersistedDesktop { Id = d.Id.Value, Label = d.Label }).ToList(),
-            }).ToList(),
+            Branches = _branches.Select(ToPersisted).ToList(),
         });
+    }
+
+    // The tail every committed mutation shares: persist the new state, then notify observers, in that order.
+    // A no-op mutator returns before reaching this (so it neither saves nor fires Changed); the reconciling
+    // mutators (SyncTopRow, DetachBranchDesktop) deliberately skip it too — they run inside another operation
+    // that saves, or leave persistence to the caller's follow-up Resync.
+    private void SaveAndNotify()
+    {
+        Save();
+        Changed?.Invoke();
     }
 }

@@ -34,8 +34,9 @@ public sealed class ShellAppLauncher : IAppLauncher
             Process.Start(psi);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Hypertree.Diagnostics.Swallowed(ex, "ShellAppLauncher.Launch");
             return false; // nothing to fault the caller with — the launch just didn't happen
         }
     }

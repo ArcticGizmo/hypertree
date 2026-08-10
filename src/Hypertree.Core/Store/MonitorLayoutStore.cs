@@ -47,13 +47,7 @@ public sealed class FileMonitorLayoutStore : IMonitorLayoutStore
 
     public string Path { get; }
 
-    public FileMonitorLayoutStore()
-    {
-        string dir = System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "hypertree");
-        Directory.CreateDirectory(dir);
-        Path = System.IO.Path.Combine(dir, "monitor-layouts.json");
-    }
+    public FileMonitorLayoutStore() => Path = StateDirectory.Combine("monitor-layouts.json");
 
     private MonitorLayoutFile Load()
     {
@@ -62,16 +56,18 @@ public sealed class FileMonitorLayoutStore : IMonitorLayoutStore
             if (!File.Exists(Path)) return new MonitorLayoutFile();
             return JsonSerializer.Deserialize<MonitorLayoutFile>(File.ReadAllText(Path)) ?? new MonitorLayoutFile();
         }
-        catch
+        catch (Exception ex)
         {
+            Diagnostics.Swallowed(ex, "FileMonitorLayoutStore.Load");
             return new MonitorLayoutFile();
         }
     }
 
     private void Save(MonitorLayoutFile file)
     {
-        try { File.WriteAllText(Path, JsonSerializer.Serialize(file, Options)); }
-        catch { /* best-effort; losing a write is better than crashing the tray */ }
+        try { StateDirectory.WriteAtomic(Path, JsonSerializer.Serialize(file, Options)); }
+        // best-effort; losing a write is better than crashing the tray
+        catch (Exception ex) { Diagnostics.Swallowed(ex, "FileMonitorLayoutStore.Save"); }
     }
 
     public MonitorLayoutSnapshot? GetAuto(string setKey)

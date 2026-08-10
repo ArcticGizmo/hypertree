@@ -57,13 +57,7 @@ public sealed class FileSnapshotStore : ISnapshotStore
 
     public string Path { get; }
 
-    public FileSnapshotStore()
-    {
-        string dir = System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "hypertree");
-        Directory.CreateDirectory(dir);
-        Path = System.IO.Path.Combine(dir, "snapshots.json");
-    }
+    public FileSnapshotStore() => Path = StateDirectory.Combine("snapshots.json");
 
     public IReadOnlyList<Snapshot> Load()
     {
@@ -72,15 +66,17 @@ public sealed class FileSnapshotStore : ISnapshotStore
             if (!File.Exists(Path)) return new List<Snapshot>();
             return JsonSerializer.Deserialize<List<Snapshot>>(File.ReadAllText(Path)) ?? new List<Snapshot>();
         }
-        catch
+        catch (Exception ex)
         {
+            Diagnostics.Swallowed(ex, "FileSnapshotStore.Load");
             return new List<Snapshot>();
         }
     }
 
     public void Save(IReadOnlyList<Snapshot> snapshots)
     {
-        try { File.WriteAllText(Path, JsonSerializer.Serialize(snapshots, Options)); }
-        catch { /* best-effort; losing a write is better than crashing the tray */ }
+        try { StateDirectory.WriteAtomic(Path, JsonSerializer.Serialize(snapshots, Options)); }
+        // best-effort; losing a write is better than crashing the tray
+        catch (Exception ex) { Diagnostics.Swallowed(ex, "FileSnapshotStore.Save"); }
     }
 }

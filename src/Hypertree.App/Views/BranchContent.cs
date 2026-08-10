@@ -1,7 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
-using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 
@@ -14,15 +13,11 @@ internal sealed record BranchSpec(string Name, IReadOnlyList<string> Labels);
 /// A prompt for defining a branch — its name and a comma-separated list of desktop labels — hosted as a
 /// <b>card</b> on the shared <see cref="OverlayStage"/> (the stage-content successor of the old
 /// <c>BranchDialog</c> window: no separate window, no flash, the live map reading behind it). Raises the
-/// parsed <see cref="BranchSpec"/> via <c>onConfirm</c>, then returns to where the chain started; Esc /
-/// Cancel steps back one level.
+/// parsed <see cref="BranchSpec"/> via <c>onConfirm</c>, then returns to where the chain started. Shared
+/// chrome, Esc, and button-arrow routing live in <see cref="CardContent"/>.
 /// </summary>
-internal sealed class BranchContent : IStageContent
+internal sealed class BranchContent : CardContent
 {
-    private static readonly IBrush CardBg = new SolidColorBrush(Color.Parse("#12161F"));
-    private static readonly IBrush CardStroke = new SolidColorBrush(Color.Parse("#2A3444"));
-    private static readonly IBrush Muted = new SolidColorBrush(Color.Parse("#999"));
-
     /// <summary>What an empty Desktops box provisions: one desktop, so a branch is only ever a name away.</summary>
     private static readonly string[] DefaultLabels = { "default" };
 
@@ -30,11 +25,6 @@ internal sealed class BranchContent : IStageContent
     private readonly Action<Action<IReadOnlyList<string>>>? _onLoadTemplate;
     private readonly TextBox _name;
     private readonly TextBox _labels;
-    private readonly PromptButton _ok;
-    private readonly PromptButton _cancel;
-    private readonly Control _root;
-    private OverlayStage? _stage;
-    private bool _submitted;
 
     /// <param name="prefillLabels">When supplied, seeds the desktop-labels box with these — still fully
     /// editable. Null leaves it blank.</param>
@@ -44,6 +34,7 @@ internal sealed class BranchContent : IStageContent
     /// editable) labels box. Null hides the button — the caller has no templates to offer.</param>
     public BranchContent(Action<BranchSpec> onConfirm, IReadOnlyList<string>? prefillLabels = null,
                          Action<Action<IReadOnlyList<string>>>? onLoadTemplate = null)
+        : base("Create")
     {
         _onConfirm = onConfirm;
         _onLoadTemplate = onLoadTemplate;
@@ -56,15 +47,10 @@ internal sealed class BranchContent : IStageContent
             PlaceholderText = "desktop labels, comma-separated (e.g. SPA, API)",
             Text = prefillLabels is null ? "" : string.Join(", ", prefillLabels),
         };
-        _name.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Submit(); e.Handled = true; } };
-        _labels.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Submit(); e.Handled = true; } };
+        _name.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Commit(); e.Handled = true; } };
+        _labels.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Commit(); e.Handled = true; } };
 
-        _ok = new PromptButton("Create");
-        _ok.Invoked += Submit;
-        _cancel = new PromptButton("Cancel");
-        _cancel.Invoked += Cancel;
-
-        var fields = new StackPanel
+        var body = new StackPanel
         {
             Spacing = 8,
             Children =
@@ -83,75 +69,29 @@ internal sealed class BranchContent : IStageContent
         {
             var load = new PromptButton("Load from template  ▾") { HorizontalAlignment = HorizontalAlignment.Left };
             load.Invoked += LoadTemplate;
-            fields.Children.Add(load);
+            body.Children.Add(load);
         }
 
-        fields.Children.Add(new TextBlock { Text = "Desktops (optional)", FontSize = 12 });
-        fields.Children.Add(_labels);
-        fields.Children.Add(new StackPanel
-        {
-            Orientation = Orientation.Horizontal, Spacing = 8,
-            HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0),
-            Children = { _cancel, _ok }, // Cancel on the left, so ←/→ maps left→Cancel, right→confirm
-        });
+        body.Children.Add(new TextBlock { Text = "Desktops (optional)", FontSize = 12 });
+        body.Children.Add(_labels);
+        body.Children.Add(ButtonRow());
 
-        var card = new Border
-        {
-            Background = CardBg, BorderBrush = CardStroke, BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12), Width = 380, Padding = new Thickness(16),
-            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-            Child = fields,
-        };
-        _root = new Grid { Children = { card } };
-
-        // Tunnel Esc so it wins before the fields; bubble arrows shuttle button focus once a button is focused.
-        _root.AddHandler(InputElement.KeyDownEvent, OnTunnelKey, RoutingStrategies.Tunnel);
-        _root.AddHandler(InputElement.KeyDownEvent, OnBubbleKey, RoutingStrategies.Bubble);
+        Build(body, width: 380);
     }
 
-    // ── IStageContent ────────────────────────────────────────────────────────────
+    protected override void FocusInitial() => _name.Focus();
 
-    public Control View => _root;
-    public StageLayer Layer => StageLayer.Card;
-    public bool DismissOnDeactivate => false; // never drop a half-typed branch on focus loss
-    public bool DismissOnClickAway => false;
-
-    public void OnPresented(OverlayStage stage) { _stage = stage; _submitted = false; _name.Focus(); }
-    public void OnRemoved() { }
-    public void OnKey(KeyEventArgs e) { } // handled by the _root handlers
-
-    // ── Behaviour ──────────────────────────────────────────────────────────────────
-
-    private void OnTunnelKey(object? sender, KeyEventArgs e)
+    protected override bool TryApply()
     {
-        if (e.Key == Key.Escape) { Cancel(); e.Handled = true; }
-    }
-
-    private void OnBubbleKey(object? sender, KeyEventArgs e)
-    {
-        if (e.Handled || (!_ok.IsFocused && !_cancel.IsFocused)) return;
-        switch (e.Key)
-        {
-            case Key.Left or Key.Up: _cancel.Focus(); e.Handled = true; break;
-            case Key.Right or Key.Down: _ok.Focus(); e.Handled = true; break;
-        }
-    }
-
-    private void Submit()
-    {
-        if (_submitted) return;
         string n = _name.Text?.Trim() ?? "";
-        if (n.Length == 0) return; // the name is the one thing we can't invent
+        if (n.Length == 0) return false; // the name is the one thing we can't invent
         var parsed = (_labels.Text ?? "")
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         // Blank (or all-separators) Desktops box → a single "default" desktop, so naming a branch is
         // enough to stand one up; the labels are for when you already know how you'll split the work.
-        _submitted = true;
         _onConfirm(new BranchSpec(n, parsed.Length > 0 ? parsed : DefaultLabels));
-        if (_stage?.Current == this) _stage.CompleteToBase();
+        return true;
     }
-
-    private void Cancel() => _stage?.Back();
 
     // Ask the host to pick a template, dropping the chosen desktop labels into the (still editable) box.
     // The picker is pushed over this card, so Esc / a pick returns here rather than restarting the flow.

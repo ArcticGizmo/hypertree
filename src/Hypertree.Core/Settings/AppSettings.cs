@@ -11,8 +11,12 @@ namespace Hypertree.Settings;
 ///
 /// The navigation flash is no longer configurable — its hold-to-keep behaviour and timings are fixed
 /// constants in <c>HudWindow</c>.
+///
+/// A <c>record</c> so a partial edit can be expressed as <c>original with { ChangedField = … }</c> —
+/// carrying every other field (including ones a given surface doesn't edit) by construction, instead of
+/// hand-copying pass-through fields and silently resetting any that were forgotten.
 /// </summary>
-public sealed class AppSettings
+public sealed record AppSettings
 {
     /// <summary>Where the persistent desktop-name pill sits (or <see cref="LabelPlacement.Off"/> to hide
     /// it). The pill names the desktop you're on — prefixed with the branch name, in the branch's colour,
@@ -198,11 +202,7 @@ public sealed class FileSettingsStore : ISettingsStore
 
     public string Path { get; }
 
-    public FileSettingsStore()
-        : this(System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "hypertree"))
-    {
-    }
+    public FileSettingsStore() : this(Hypertree.Store.StateDirectory.Path) { }
 
     /// <summary>Testing seam: keep <c>settings.json</c> in an explicit directory instead of the roaming
     /// profile, so a round-trip can be exercised without touching a real install's settings.</summary>
@@ -225,8 +225,9 @@ public sealed class FileSettingsStore : ISettingsStore
             MigrateLegacyTaskbarLabel(json, settings);
             return settings;
         }
-        catch
+        catch (Exception ex)
         {
+            Diagnostics.Swallowed(ex, "FileSettingsStore.Load");
             return new AppSettings();
         }
     }
@@ -249,7 +250,8 @@ public sealed class FileSettingsStore : ISettingsStore
 
     public void Save(AppSettings settings)
     {
-        try { File.WriteAllText(Path, JsonSerializer.Serialize(settings, Options)); }
-        catch { /* best-effort; losing a write is better than crashing the tray */ }
+        try { Hypertree.Store.StateDirectory.WriteAtomic(Path, JsonSerializer.Serialize(settings, Options)); }
+        // best-effort; losing a write is better than crashing the tray
+        catch (Exception ex) { Diagnostics.Swallowed(ex, "FileSettingsStore.Save"); }
     }
 }

@@ -82,9 +82,10 @@ public sealed class ShellAppCatalog : IAppCatalog
                 found.Add((name, isMoniker ? $"shell:AppsFolder\\{path}" : path));
             }
         }
-        catch
+        catch (Exception ex)
         {
             // COM unavailable / a shell that won't enumerate — fall back to just the shortcut apps.
+            Diagnostics.Swallowed(ex, "ShellAppCatalog.AppsFolder");
         }
         finally
         {

@@ -1,7 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
-using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Hypertree.Desktops;
@@ -18,14 +17,17 @@ namespace Hypertree.App.Views.Scene;
 /// <see cref="SpatialLayout"/> owns world placement (and the hull outlines) and the shared
 /// <see cref="MapCamera"/> owns panning, so the spatial model frames and moves exactly like the rows.
 ///
-/// M1 is read-only (captures, previews); selection/drag/tidy interaction lands in later milestones.
+/// The room glyph follows the app's <see cref="MapStyle"/> so List and Spatial read as one app; it shares
+/// the branch palette, blend and hit-plumbing with the row themes via <see cref="ScenePaint"/> but keeps its
+/// own glyph bodies, since a room diverges deliberately from a row cell (wider tiles, group tint, no stream/
+/// delete affordances). Interactive: click selects, double-click activates, and rooms drag by their host.
 /// </summary>
 internal static class SpatialPainter
 {
-    private static readonly Color TileBg = Color.Parse("#1F2836"), TileBorder = Color.Parse("#2A3444");
+    private static readonly Color TileBg = Color.Parse("#1F2836");
     private static readonly Color CapBg = Color.Parse("#161C27");
-    private static readonly Color Ink = Color.Parse("#E8EDF5"), InkSoft = Color.Parse("#9AA6B8");
-    private static readonly Color Focus = Color.Parse("#6EA8FF"), Here = Color.Parse("#34D399");
+    private static readonly Color Ink = Palette.Ink, InkSoft = Palette.Muted;
+    private static readonly Color Focus = Palette.Accent, Here = Palette.Here;
     private static readonly Color WinBase = Color.Parse("#374357");
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
     // ASCII / Metro room styling, matching AsciiPainter and MetroPainter so a room reads the same in either model.
@@ -43,6 +45,11 @@ internal static class SpatialPainter
     private const double BaseTileW = 140, BaseScrH = 50, BaseCapH = 22;
     private const double BaseStrideX = 202, BaseStrideY = 140, BaseHullPad = 16;
     private static double TileH => BaseScrH + BaseCapH; // 72
+
+    // Per-room brightness, three tiers: the focused room (blue selection/cursor or green "here") reads at
+    // full strength; its groupmates in the same live group sit a notch down so the focus stands out within
+    // the group; every room in a group you're not in is dimmer still, so the map isn't colour-washed.
+    private const double RoomFocusedOpacity = 1.0, RoomGroupmateOpacity = 0.75, RoomRestOpacity = 0.5;
 
     /// <summary>The spatial metrics — a near-square grid, unlike the tall row pitch, since 2-D placement
     /// wants comparable breathing room on both axes.</summary>
@@ -101,17 +108,21 @@ internal static class SpatialPainter
             }
             if (overlapping.Contains(id)) AddOverlapBadge(host, local, s);
 
-            // A desktop dims unless its group is "live" (the selection, "here", hover, or a whole-group pick
-            // sits in it). This is the de-emphasis 0-window rooms used to carry, now repurposed to mean "not
-            // the group you're in" — so a room reads the same whether or not it holds windows.
-            host.Opacity = activeGroups.Contains(placed.Room.GroupId) ? 1.0 : 0.5;
+            // Brightness by focus, not just by group: the focused room (blue selection/cursor or green
+            // "here") reads at full strength; its groupmates in the same live group sit a notch down so the
+            // focus stands out within the group rather than the whole group blazing at once; every room in a
+            // group you're not in is dimmer still. This is the de-emphasis 0-window rooms used to carry, now
+            // repurposed to mean "not the room/group you're on" — so a room reads the same whether or not it
+            // holds windows.
+            bool focused = placed.Room.Selected || placed.Room.Here;
+            host.Opacity = focused ? RoomFocusedOpacity
+                         : activeGroups.Contains(placed.Room.GroupId) ? RoomGroupmateOpacity
+                         : RoomRestOpacity;
 
-            if (onClick is not null || onActivate is not null)
-            {
-                var hit = new Border { Width = cell.Width, Height = cell.Height, Background = Brushes.Transparent, Cursor = new Cursor(StandardCursorType.Hand) };
-                hit.PointerPressed += (_, e) => { if (e.ClickCount >= 2) onActivate?.Invoke(id); else onClick?.Invoke(id); };
-                host.Children.Add(hit); // topmost within the host, so it catches the press for every style
-            }
+            // Topmost within the host, so it catches the press for every style.
+            ScenePaint.HitCell(host, local,
+                               onClick is null ? null : () => onClick(id),
+                               onActivate is null ? null : () => onActivate(id));
 
             Canvas.SetLeft(host, cell.X);
             Canvas.SetTop(host, cell.Y);
@@ -328,7 +339,7 @@ internal static class SpatialPainter
         var winCanvas = new Canvas { Width = tileW, Height = screenH };
         if (!empty)
         {
-            Color win = Blend(groupColor, WinBase, 0.45);
+            Color win = ScenePaint.Lerp(groupColor, WinBase, 0.45);
             AddWin(winCanvas, 9 * s, 9 * s, 44 * s, 14 * s, win, 1.0);
             AddWin(winCanvas, 9 * s, 27 * s, 30 * s, 13 * s, win, 1.0);
             AddWin(winCanvas, tileW - 9 * s - 22 * s, 14 * s, 22 * s, 26 * s, win, 0.7);
@@ -402,9 +413,6 @@ internal static class SpatialPainter
         c.Children.Add(r);
     }
 
-    private static Color Blend(Color a, Color b, double t) => Color.FromRgb(
-        (byte)(a.R * (1 - t) + b.R * t), (byte)(a.G * (1 - t) + b.G * t), (byte)(a.B * (1 - t) + b.B * t));
-
     // ── ASCII room: a monospace box-drawing card, tinted to the group colour (mirrors AsciiPainter) ──
 
     private static void DrawAsciiRoom(Canvas canvas, SpatialRoom room, Color groupColor, Rect cell, double s)
@@ -472,15 +480,23 @@ internal static class SpatialPainter
 
         if (room.Selected)
         {
+            // Keep the focus ring concentric with the dot regardless of zoom: layout rounding rounds two
+            // different-radius circles to device pixels independently, drifting their centres apart by up to
+            // a pixel (the ring reads as sitting slightly high). Opt both out so they share the exact centre.
+            dot.UseLayoutRounding = false;
             double fr = rOut + 6 * s;
-            var focus = new Ellipse { Width = fr * 2, Height = fr * 2, Stroke = new SolidColorBrush(Focus), StrokeThickness = 2 * s };
+            var focus = new Ellipse
+            {
+                Width = fr * 2, Height = fr * 2, Stroke = new SolidColorBrush(Focus), StrokeThickness = 2 * s,
+                UseLayoutRounding = false,
+            };
             Canvas.SetLeft(focus, cx - fr); Canvas.SetTop(focus, cy - fr);
             canvas.Children.Add(focus);
         }
 
         // The label chip below the station.
-        Color fill = room.Selected ? Focus : room.Here ? Here : Blend(ChipBase, groupColor, 0.13);
-        Color ink = marked ? ChipInk : Blend(groupColor, ChipBase, 0.48);
+        Color fill = room.Selected ? Focus : room.Here ? Here : ScenePaint.Lerp(ChipBase, groupColor, 0.13);
+        Color ink = marked ? ChipInk : ScenePaint.Lerp(groupColor, ChipBase, 0.48);
         var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 * s };
         content.Children.Add(new TextBlock
         {
@@ -492,7 +508,7 @@ internal static class SpatialPainter
             content.Children.Add(new TextBlock
             {
                 Text = room.WindowCount.ToString(), FontFamily = Mono, FontSize = 10 * s, FontWeight = FontWeight.SemiBold,
-                Foreground = new SolidColorBrush(marked ? Color.FromArgb(0xB4, ChipInk.R, ChipInk.G, ChipInk.B) : Blend(groupColor, ChipBase, 0.58)),
+                Foreground = new SolidColorBrush(marked ? Color.FromArgb(0xB4, ChipInk.R, ChipInk.G, ChipInk.B) : ScenePaint.Lerp(groupColor, ChipBase, 0.58)),
                 VerticalAlignment = VerticalAlignment.Center,
             });
         var chip = new Border
@@ -500,7 +516,7 @@ internal static class SpatialPainter
             Background = new SolidColorBrush(fill), CornerRadius = new CornerRadius(9 * s),
             Padding = new Thickness(9 * s, 3 * s), Child = content,
         };
-        if (!marked) { chip.BorderBrush = new SolidColorBrush(Blend(MetroBg, groupColor, 0.44)); chip.BorderThickness = new Thickness(Math.Max(1, s)); }
+        if (!marked) { chip.BorderBrush = new SolidColorBrush(ScenePaint.Lerp(MetroBg, groupColor, 0.44)); chip.BorderThickness = new Thickness(Math.Max(1, s)); }
         chip.Measure(Size.Infinity);
         Canvas.SetLeft(chip, cx - chip.DesiredSize.Width / 2);
         Canvas.SetTop(chip, cy + rOut + 10 * s);

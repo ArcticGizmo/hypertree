@@ -24,9 +24,6 @@ namespace Hypertree.App.Views;
 /// </remarks>
 internal sealed class RestoreCurtain : Window
 {
-    private const int GWL_EXSTYLE = -20;
-    private const long WS_EX_NOACTIVATE = 0x8000000, WS_EX_TOOLWINDOW = 0x80, WS_EX_LAYERED = 0x80000;
-
     private readonly Border _fill;
 
     private RestoreCurtain(PixelRect boundsPx, double dips, string message)
@@ -116,15 +113,5 @@ internal sealed class RestoreCurtain : Window
         timer.Start();
     }
 
-    private void MakeNoActivate(nint hwnd)
-    {
-        if (hwnd == 0) return;
-        long ex = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
-        SetWindowLongPtr(hwnd, GWL_EXSTYLE, ex | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_LAYERED);
-    }
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-    private static extern long GetWindowLongPtr(nint hWnd, int nIndex);
-    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-    private static extern long SetWindowLongPtr(nint hWnd, int nIndex, long dwNewLong);
+    private void MakeNoActivate(nint hwnd) => WindowFx.SetNoActivate(hwnd);
 }

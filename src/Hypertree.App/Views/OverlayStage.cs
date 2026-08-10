@@ -330,22 +330,13 @@ internal sealed class OverlayStage
         if (h != 0) { try { _desktops.PinWindow(h); } catch { /* best-effort */ } }
     }
 
-    private static readonly nint HWND_TOPMOST = new(-1);
-    private const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOACTIVATE = 0x0010;
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
-
     private void BringToTop()
     {
         foreach (Window d in _dims) Lift(d);
         if (_host is not null) Lift(_host); // host last, above the dims
     }
 
-    private static void Lift(Window w)
-    {
-        nint h = w.TryGetPlatformHandle()?.Handle ?? 0;
-        if (h != 0) SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    }
+    private static void Lift(Window w) => WindowFx.LiftTopmost(w.TryGetPlatformHandle()?.Handle ?? 0);
 
     private Window MakeDim(Screen s)
     {

@@ -34,12 +34,12 @@ internal sealed record DebugDesktopRow(string DesktopLabel, IReadOnlyList<DebugM
 /// </summary>
 internal sealed class MonitorDebugWindow : Window
 {
-    private static readonly IBrush Ink = new SolidColorBrush(Color.Parse("#E8EDF5"));
-    private static readonly IBrush Muted = new SolidColorBrush(Color.Parse("#9AA6B8"));
+    private static readonly IBrush Ink = Palette.InkBrush;
+    private static readonly IBrush Muted = Palette.MutedBrush;
     private static readonly IBrush Drift = new SolidColorBrush(Color.Parse("#E8A13C")); // amber = wrong monitor
     private static readonly IBrush Ok = new SolidColorBrush(Color.Parse("#6FBF7F"));    // green = where it belongs
     private static readonly IBrush BoxBg = new SolidColorBrush(Color.Parse("#181D28"));
-    private static readonly IBrush BoxStroke = new SolidColorBrush(Color.Parse("#2A3444"));
+    private static readonly IBrush BoxStroke = Palette.StrokeBrush;
     private static readonly IBrush RowBg = new SolidColorBrush(Color.Parse("#0E121A"));
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
 

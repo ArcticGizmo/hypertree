@@ -1,4 +1,5 @@
 using Hypertree.Desktops;
+using Hypertree.Scopes;
 using Hypertree.Store;
 
 namespace Hypertree.Spatial;
@@ -45,11 +46,9 @@ public static class SpatialSnapshot
         SpatialGroupSource Branch(PersistedBranch pg) => new(pg.Id, pg.Name, IsMain: false,
             pg.Desktops.Select(Desk).ToList());
 
-        int slot = Math.Clamp(snap.MainSlot, 0, snap.Branches.Count);
         var groups = new List<SpatialGroupSource>(snap.Branches.Count + 1);
-        for (int i = 0; i < slot; i++) groups.Add(Branch(snap.Branches[i]));
-        groups.Add(Main());
-        for (int i = slot; i < snap.Branches.Count; i++) groups.Add(Branch(snap.Branches[i]));
+        foreach (int i in RowSplice.Order(snap.Branches.Count, snap.MainSlot))
+            groups.Add(i == RowSplice.MainMarker ? Main() : Branch(snap.Branches[i]));
         return new SpatialSource(groups);
 
         static SpatialDesktop Desk(PersistedDesktop d) =>

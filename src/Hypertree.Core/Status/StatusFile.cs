@@ -37,31 +37,17 @@ public static class StatusFile
     /// the portable case, where someone wants state kept beside the executable rather than in a roaming
     /// profile.
     /// </remarks>
-    public const string DirectoryVariable = "HYPERTREE_STATE_DIR";
-
-    private static string? _directoryOverride;
+    public const string DirectoryVariable = Store.StateDirectory.OverrideVariable;
 
     /// <summary>
-    /// Redirect the status file within this process, or back to the default with null. Tests only; a
-    /// separate process is redirected with <see cref="DirectoryVariable"/> instead.
+    /// Redirect the state directory within this process, or back to the default with null. Tests only; a
+    /// separate process is redirected with <see cref="DirectoryVariable"/> instead. Delegates to the shared
+    /// <see cref="Store.StateDirectory"/>, so a test redirect moves every state file, not just this one.
     /// </summary>
-    internal static void OverrideDirectory(string? dir) => _directoryOverride = dir;
+    internal static void OverrideDirectory(string? dir) => Store.StateDirectory.Override(dir);
 
-    /// <summary>The directory Hypertree keeps its state in. Created on demand.</summary>
-    public static string Directory
-    {
-        get
-        {
-            string dir = _directoryOverride
-                         ?? NonEmpty(Environment.GetEnvironmentVariable(DirectoryVariable))
-                         ?? Path.Combine(
-                             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "hypertree");
-            System.IO.Directory.CreateDirectory(dir);
-            return dir;
-        }
-    }
-
-    private static string? NonEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+    /// <summary>The directory Hypertree keeps its state in (shared resolver). Created on demand.</summary>
+    public static string Directory => Store.StateDirectory.Path;
 
     public static string FileName => "status.json";
 
@@ -74,14 +60,9 @@ public static class StatusFile
     /// </summary>
     public static void Write(StatusSnapshot snapshot)
     {
-        try
-        {
-            string path = FilePath;
-            string tmp = path + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(snapshot, TypeInfo));
-            File.Move(tmp, path, overwrite: true);
-        }
-        catch { /* best-effort — a status write is never worth failing the tray over */ }
+        try { Store.StateDirectory.WriteAtomic(FilePath, JsonSerializer.Serialize(snapshot, TypeInfo)); }
+        // best-effort — a status write is never worth failing the tray over
+        catch (Exception ex) { Hypertree.Diagnostics.Swallowed(ex, "StatusFile.Write"); }
     }
 
     /// <summary>Remove the file on a clean exit, so nothing reports a tray that has gone.</summary>
@@ -113,7 +94,8 @@ public static class StatusFile
                 return IsAlive(snapshot.Pid) ? snapshot : null;
             }
             catch (IOException) { Thread.Sleep(15); } // mid-replace — try again
-            catch { return null; }                    // malformed / unreadable — treat as no status
+            // malformed / unreadable — treat as no status
+            catch (Exception ex) { Hypertree.Diagnostics.Swallowed(ex, "StatusFile.Read"); return null; }
         }
         return null;
     }
