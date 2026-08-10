@@ -120,10 +120,6 @@ internal sealed class SpatialOverlay : IStageContent
             snapBack: () => { if (IsOpen) Render(); });
 
         _root.PointerPressed += (_, e) => _drag.Press(e);
-        // Track hover on enter as well as move: when the map is raised under an already-resting cursor the
-        // first event Avalonia delivers is the enter, so hovering the group it's over lights up straight away
-        // rather than only after the pointer first jiggles.
-        _root.PointerEntered += (_, e) => { if (!_drag.Grabbing) UpdateHover(e.GetPosition(_root)); };
         _root.PointerMoved += (_, e) => { if (_drag.Grabbing) _drag.Move(e); else UpdateHover(e.GetPosition(_root)); };
         _root.PointerReleased += (_, e) => _drag.Release(e);
         _root.PointerCaptureLost += (_, _) => _drag.Cancel();
@@ -516,11 +512,16 @@ internal sealed class SpatialOverlay : IStageContent
         SetHoverGroup(group);
     }
 
+    // Track the hovered group but do NOT re-render on it. Re-rendering rebuilds the whole board — including
+    // the per-room hosts and their transparent hit rects — so doing it on every hover change tore those
+    // targets down out from under the pointer as the mouse moved across groups: the cursor flickered between
+    // hand and arrow and clicks landed on a control that had just been replaced. The hover state is kept
+    // current and applied on the next render that happens for a real reason (a selection, a move); the live
+    // hull-brightening is parked until it can be redone as a separate layer that leaves the room hosts intact.
     private void SetHoverGroup(Guid? group)
     {
         if (group == _hoverGroup || !IsOpen) return;
         _hoverGroup = group;
-        Render();
     }
 
     // ── Render ───────────────────────────────────────────────────────────────────
