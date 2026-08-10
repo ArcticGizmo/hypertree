@@ -55,12 +55,13 @@ internal static class Program
                 return ExitCode.BadUsage;
             }
 
+        var commands = new Commands(new StatusFileSource(), new ControlClientTransport(), new ConsoleOutput());
         return args.Command switch
         {
-            "status" => Commands.Status(args),
-            "list" or "ls" => Commands.List(args),
-            "goto" or "go" => Commands.Goto(args),
-            "watch" => Commands.Watch(args),
+            "status" => commands.Status(args),
+            "list" or "ls" => commands.List(args),
+            "goto" or "go" => commands.Goto(args),
+            "watch" => commands.Watch(args),
             "help" => Ok(Help.Print),
             _ => Unknown(args.Command),
         };

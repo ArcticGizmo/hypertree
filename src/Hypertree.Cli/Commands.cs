@@ -6,10 +6,23 @@ namespace Hypertree.Cli;
 
 /// <summary>
 /// The commands <c>htree</c> offers. Each returns the process exit code, so the shell always learns what
-/// happened even when output is suppressed or piped away.
+/// happened even when output is suppressed or piped away. The status source, control transport and output
+/// are injected (<see cref="IStatusSource"/> / <see cref="IControlTransport"/> / <see cref="ICliOutput"/>)
+/// so the formatting and exit-code logic is unit-testable without spawning a process.
 /// </summary>
-internal static class Commands
+internal sealed class Commands
 {
+    private readonly IStatusSource _status;
+    private readonly IControlTransport _control;
+    private readonly ICliOutput _out;
+
+    public Commands(IStatusSource status, IControlTransport control, ICliOutput output)
+    {
+        _status = status;
+        _control = control;
+        _out = output;
+    }
+
     // ── status ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -19,14 +32,14 @@ internal static class Commands
     /// Silence plus a non-zero exit when no tray is running is the deliberate behaviour: a prompt that
     /// embeds this should show nothing at all when Hypertree isn't up, not an error or a placeholder.
     /// </remarks>
-    public static int Status(Args args)
+    public int Status(Args args)
     {
-        StatusSnapshot? status = StatusFile.Read();
+        StatusSnapshot? status = _status.Read();
         if (status is null) return ExitCode.NoTray; // quiet on purpose — see remarks
 
         if (args.Json)
         {
-            Output.Line(Json(status));
+            _out.Line(Json(status));
             return ExitCode.Ok;
         }
 
@@ -37,10 +50,10 @@ internal static class Commands
         string branch = row.Name;
         string label = desktop?.Label ?? "";
 
-        if (args.Has("--branch")) { Output.Line(branch); return ExitCode.Ok; }
-        if (args.Has("--desktop")) { Output.Line(label); return ExitCode.Ok; }
+        if (args.Has("--branch")) { _out.Line(branch); return ExitCode.Ok; }
+        if (args.Has("--desktop")) { _out.Line(label); return ExitCode.Ok; }
 
-        Output.Line(label.Length == 0 ? branch : $"{Output.Paint(branch, Output.Cyan)}/{label}");
+        _out.Line(label.Length == 0 ? branch : $"{_out.Paint(branch, Output.Cyan)}/{label}");
         return ExitCode.Ok;
     }
 
@@ -55,18 +68,18 @@ internal static class Commands
     /// the two commands legible together, rather than making the reader hold the resume rule in their head.
     /// <c>--all</c> expands the desktops for when the whole layout is the question.
     /// </remarks>
-    public static int List(Args args)
+    public int List(Args args)
     {
-        StatusSnapshot? status = StatusFile.Read();
+        StatusSnapshot? status = _status.Read();
         if (status is null)
         {
-            Output.Error("No Hypertree tray is running.");
+            _out.Error("No Hypertree tray is running.");
             return ExitCode.NoTray;
         }
 
         if (args.Json)
         {
-            Output.Line(Json(status));
+            _out.Line(Json(status));
             return ExitCode.Ok;
         }
 
@@ -77,20 +90,20 @@ internal static class Commands
         {
             StatusRow row = status.Rows[i];
             bool here = i == status.Current.Row;
-            string marker = here ? Output.Paint("*", Output.Cyan) : " ";
-            string name = here ? Output.Paint(row.Name.PadRight(width), Output.Bold) : row.Name.PadRight(width);
+            string marker = here ? _out.Paint("*", Output.Cyan) : " ";
+            string name = here ? _out.Paint(row.Name.PadRight(width), Output.Bold) : row.Name.PadRight(width);
             string resume = row.Cursor >= 0 && row.Cursor < row.Desktops.Count ? row.Desktops[row.Cursor].Label : "";
-            string count = Output.Paint($"{row.Desktops.Count} desktop{(row.Desktops.Count == 1 ? "" : "s")}", Output.Dim);
+            string count = _out.Paint($"{row.Desktops.Count} desktop{(row.Desktops.Count == 1 ? "" : "s")}", Output.Dim);
 
-            Output.Line($"{marker} {name}  {resume,-24} {count}");
+            _out.Line($"{marker} {name}  {resume,-24} {count}");
 
             if (!all) continue;
             for (int d = 0; d < row.Desktops.Count; d++)
             {
                 bool onThis = here && d == status.Current.Desktop;
-                string bullet = onThis ? Output.Paint("→", Output.Cyan) : " ";
+                string bullet = onThis ? _out.Paint("→", Output.Cyan) : " ";
                 // 1-based, because this is the number `htree goto row/N` takes.
-                Output.Line($"    {bullet} {d + 1}. {row.Desktops[d].Label}");
+                _out.Line($"    {bullet} {d + 1}. {row.Desktops[d].Label}");
             }
         }
 
@@ -100,21 +113,21 @@ internal static class Commands
     // ── goto ─────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>Jump to a row, or to a specific desktop on it.</summary>
-    public static int Goto(Args args)
+    public int Goto(Args args)
     {
         string? target = args.Positional.ElementAtOrDefault(1);
         string? idFlag = args.Value("--id");
 
         if (target is null && idFlag is null)
         {
-            Output.Error("goto needs a target. Try: htree goto <branch>|main|<branch>/<desktop>");
+            _out.Error("goto needs a target. Try: htree goto <branch>|main|<branch>/<desktop>");
             return ExitCode.BadUsage;
         }
 
-        StatusSnapshot? status = StatusFile.Read();
+        StatusSnapshot? status = _status.Read();
         if (status is null)
         {
-            Output.Error("No Hypertree tray is running.");
+            _out.Error("No Hypertree tray is running.");
             return ExitCode.NoTray;
         }
 
@@ -123,7 +136,7 @@ internal static class Commands
         {
             if (!Guid.TryParse(idFlag, out Guid id))
             {
-                Output.Error($"--id expects a branch id, got '{idFlag}'.");
+                _out.Error($"--id expects a branch id, got '{idFlag}'.");
                 return ExitCode.BadUsage;
             }
             // A desktop can still be named alongside an explicit id.
@@ -136,11 +149,11 @@ internal static class Commands
 
         if (!resolved.Ok)
         {
-            Output.Error(resolved.Error!);
+            _out.Error(resolved.Error!);
             return ExitCode.UnknownTarget;
         }
 
-        ControlResponse response = ControlClient.Send(new ControlRequest
+        ControlResponse response = _control.Send(new ControlRequest
         {
             Command = ControlRequest.CommandGoto,
             Goto = new GotoRequest { BranchId = resolved.BranchId, Desktop = resolved.Desktop },
@@ -148,13 +161,13 @@ internal static class Commands
 
         if (!response.Ok)
         {
-            Output.Error(response.Error ?? "The jump failed.");
+            _out.Error(response.Error ?? "The jump failed.");
             return response.Code;
         }
 
         // Quiet by default on success — a jump you can see happen doesn't need narrating, and silence
         // keeps it usable inside other commands. --verbose says where it went.
-        if (args.Has("--verbose") || args.Has("-v")) Output.Line(response.Landed ?? "");
+        if (args.Has("--verbose") || args.Has("-v")) _out.Line(response.Landed ?? "");
         return ExitCode.Ok;
     }
 
@@ -168,7 +181,7 @@ internal static class Commands
     /// happening — and because the tray keeps that file true even for switches Hypertree didn't make, this
     /// reports Win+Ctrl+Arrow and Task View too, not just Hypertree's own navigation.
     /// </remarks>
-    public static int Watch(Args args)
+    public int Watch(Args args)
     {
         using var watcher = new FileSystemWatcher(StatusFile.Directory, StatusFile.FileName)
         {
@@ -202,9 +215,9 @@ internal static class Commands
         return ExitCode.Ok;
     }
 
-    private static void Emit(Args args, ref string last)
+    private void Emit(Args args, ref string last)
     {
-        StatusSnapshot? status = StatusFile.Read();
+        StatusSnapshot? status = _status.Read();
         string line = status is null
             ? "" // no tray
             : args.Json
@@ -213,8 +226,8 @@ internal static class Commands
 
         if (line == last) return;
         last = line;
-        if (status is null) Output.Error("Hypertree stopped.");
-        else Output.Line(line);
+        if (status is null) _out.Error("Hypertree stopped.");
+        else _out.Line(line);
         Console.Out.Flush(); // a consumer piping this wants each line as it happens, not at buffer-fill
     }
 
