@@ -11,6 +11,51 @@ green and the app running identically.
 
 ---
 
+## 🧭 Handoff — where we are & what's next (read this first)
+
+**Anchor:** branch `refactor`, **36 commits** ahead of `main` (tip `c917b4a`, 2026-08-10). Working tree
+clean. Test suite: **295 pass** (was 291 at the start; +4 added by Tier-3 fixes). `App.axaml.cs` is down
+from **2,227 → 557** lines.
+
+**Done:** Tier 1 Steps 1–3 ✅ · Tier 2 items 1, 3, 4 ✅ (items 2 & 6 *partially* — Core half done, see
+below) · Tier 3 five of six point-bugs ✅ · Tier 4 `Palette` ✅.
+
+**Remaining, in recommended order** (full detail in "Where to go next" at the bottom):
+1. **Tier 3 diagnostics sink** — smallest, unblocks visibility for everything else. Not yet started.
+2. **Tier 2 item 5 — Scene `DrawGlyph`** — the deepest Views item; `SpatialPainter` re-codes all 3 themes.
+3. **Tier 1 Step 4 — `SpatialOverlay`** split (drag engine + legend/chrome).
+4. **Tier 1 Step 5 — `WindowsWindowLayoutController`** split (topology / placement / diagnostics).
+5. **Finish Tier 2 items 2 & 6** (the non-Core halves) + the Tier-4 tail (primitive obsession, `Teardown`
+   naming, COM RCW disposal, dead code, IPC versioning).
+
+### ⚠️ Pending smoke-test (build-verified only — NOT yet run in a dev build)
+The user last confirmed a smoke-test through the `SettingsWindow` fix. Everything since is compile-clean
+and test-green but **unverified at runtime** (the App/Views layers have no automated coverage):
+- **`Palette`** — visual only; every overlay / card / settings surface should look identical.
+- **`WindowFx`** — the overlays: flash (click-through + topmost), taskbar label, switcher (clickable +
+  on-top), restore curtain, stage dims.
+- **`CardContent`** — the five cards (confirm/delete, rename & new-desktop prompt, new branch, new
+  template, add/edit custom command): Esc, arrow focus between buttons, Enter / Ctrl+Enter, submit.
+
+### Working conventions (so a fresh context matches what's been done)
+- **Build check (App/Views/Platform):** a dev instance of Hypertree often holds the output DLLs locked, so
+  build to a scratch dir instead of the repo `bin`:
+  `dotnet build src/Hypertree.App/Hypertree.App.csproj -c Debug --output <scratch>/appbin`.
+  Treat "only `MSB302x` copy-lock errors, no `CS` errors" as a clean compile; a redirected `--output`
+  build gives a true `0 Warning(s) 0 Error(s)`.
+- **Tests (Core + CLI):** `dotnet test tests/Hypertree.Tests/Hypertree.Tests.csproj -c Debug`. Note the
+  test project does **not** reference `Hypertree.App`, so App/Views/Platform changes are build-verified
+  only and must be smoke-tested.
+- **Commits:** one focused commit per extraction + a follow-up commit updating this roadmap; end messages
+  with the `Co-Authored-By: Claude Opus 4.8` trailer. Flag any runtime-unverified change for smoke-test in
+  the commit body.
+- **Conscious deviations from the review (do NOT "fix" these):** `NavSync` and `SpatialOverlayPresenter`
+  were deliberately *not* extracted — both would relocate coupling / break encapsulation rather than
+  reduce it (see Step 2 and Step 3 notes). The pre-existing shared `"update-check"` notice key between
+  launcher-failure and update notifications was preserved, not changed.
+
+---
+
 ## Tier 1 — The four God classes (biggest maintainability drag)
 
 | File | Lines | Responsibilities crammed in |
@@ -111,9 +156,11 @@ Then (done — completing the step):
    it. Extracted to `internal static class NativeWindows`; each controller keeps only the imports it uses
    directly. Build 0/0, 295 tests green. ⚠️ Interop, no unit coverage — wants a light smoke-test (map
    window counts, move/pull pickers).
-2. **The core row-order splice** (`branches[0..slot] / MAIN / branches[slot..]`) hand-rebuilt **6×**
-   across `NavigationModel` + `SpatialSnapshot`; the branch-index↔row mapping has **3 copies with
-   divergent clamping**. → One `RowsInDrawOrder()` enumerator + one `RowOfCursor()`/`CursorForRow()` pair.
+2. 🟡 **The core row-order splice** (`branches[0..slot] / MAIN / branches[slot..]`). **Core half DONE**
+   in Step 3: `NavigationModel`'s 3 copies + the divergent-clamping cursor↔row bijection collapsed to
+   `RowOrder()` + `CurrentRow()`/`CursorToRow()`. **Remaining:** `SpatialSnapshot.SourceFrom` (Spatial/
+   SpatialSnapshot.cs ~:50-52) still hand-rebuilds the same splice — fold it onto the same helper (it's a
+   `static` method over a `Snapshot`, so either expose the enumerator or share a small free function).
 3. ✅ **Topmost / click-through / tool-window P/Invoke** copied across 5 window classes (`HudWindow`,
    `OverlayStage`, `SwitcherWindow`, `TaskbarLabel`, `RestoreCurtain`). Consolidated into `WindowFx` as
    `SetClickThrough`/`SetNoActivate`/`SetToolWindow`/`LiftTopmost`; each class's wrapper now delegates
@@ -127,9 +174,12 @@ Then (done — completing the step):
 5. **Scene abstraction bypassed** — `SpatialPainter` doesn't implement `IScenePainter` and re-codes all
    three themes by hand; colour math in 3 copies, hit-cell in 4. → Give `IScenePainter` a `DrawGlyph`
    both renderers share.
-6. **Persistence mapping** (`Branch`↔`PersistedBranch`↔`PersistedDesktop`) hand-written 3×; the
-   `Save(); Changed?.Invoke();` pair copy-pasted at ~12 mutation sites (some omit it, undocumented).
-   → `Branch.ToPersisted()`/`FromPersisted()` + a private `Mutate(change)` wrapper.
+6. 🟡 **Persistence mapping + mutation boilerplate.** **Mapper half DONE** in Step 3: `Save` and
+   `CaptureSnapshot` now share `ToPersisted()` helpers. **Remaining:** the `Save(); Changed?.Invoke();`
+   pair is still copy-pasted at **11 mutation sites** in `NavigationModel` (some mutators deliberately
+   omit it — undocumented which). → A private `Mutate(Action change)` wrapper that runs the change then
+   saves+notifies once; the deferring mutators opt out explicitly. (Behaviour-preserving but touches every
+   mutator — do it as one careful, test-covered commit.)
 
 ---
 
@@ -176,14 +226,41 @@ Then (done — completing the step):
 
 ---
 
-## Suggested sequence
+## Where to go next (remaining work, recommended order)
 
-1. `NativeWindows` extraction + shared `JsonFileStore` — smallest diffs, each kills a latent bug,
-   covered by existing Core tests.
-2. Break `App` into partials by banner region (Tier 1 Step 1), then extract
-   `MonitorLayoutController`/`UpdateController` — unlocks testing the App layer at all.
-3. `CardContent` base + `Theme` static — high-visibility Views cleanup, low risk.
-4. Fold Tier 3 point-bugs in opportunistically as each file is touched.
+The big structural wins are done. What's left is one bug-visibility item, two deep Views/Platform splits,
+and a tail of smaller cleanups. Recommended order and how to approach each:
+
+1. **Tier 3 — diagnostics sink** *(start here; smallest, unblocks everything else's field-debuggability)*.
+   ~20 blank `catch { }` in the interop/IPC layer swallow the exact exceptions worth seeing. Add a tiny
+   `Diagnostics.Swallowed(ex, context)` (write to `%APPDATA%\hypertree\` or stderr) and route the blank
+   catches through it; narrow `catch (Exception)` to the expected types (`COMException`, `IOException`,
+   `Win32Exception`, `UnauthorizedAccessException`) so real bugs still surface. Low risk, high payoff,
+   partly test-coverable (the sink itself).
+
+2. **Tier 2 item 5 — Scene `DrawGlyph`** *(deepest Views item; H1)*. `SpatialPainter` re-implements all
+   three themes (board/metro/ascii) instead of participating in `IScenePainter`; colour math is copied 3×,
+   the hit-cell 4×. Give `IScenePainter` a per-cell `DrawGlyph`/`PaintCell` both `SceneRenderer` and the
+   spatial map call, and hoist `Lerp`/`Dim`/`BranchColour` + the hit-`Border` onto a shared
+   `ScenePaint` helper (or an abstract `ScenePainterBase`). Intricate & visual — **needs a smoke-test** of
+   all three map styles in both the row flash and the spatial map. Also clears the Tier-4 dead-code items
+   (`SpatialPainter.TileBorder`, stale XML summary) while you're in there.
+
+3. **Tier 1 Step 4 — `SpatialOverlay`** (833 lines). Extract the pointer-drag gesture engine
+   (`_grab`/`_dragging`/`_pressAt`/… ~:483-566) into a `RoomDragController`; move legend + groups-panel
+   construction into a `SpatialOverlayChrome` builder, rendering the 24 legend rows from a
+   `(key, desc)[]` table in a loop. **Needs a smoke-test** (map drag, legend toggle, groups panel).
+
+4. **Tier 1 Step 5 — `WindowsWindowLayoutController`** (now ~347 after `NativeWindows`). Split into
+   `MonitorTopology` (enum + stable-id map + its structs/DllImports), `WindowPlacementApplier`, and move
+   `RestoreTraced`/`Probe` diagnostics to a debug-only partial/type. Interop, no coverage — **smoke-test**
+   dock/undock restore.
+
+5. **Finish the partial items & the tail:** Tier 2 item 2 (`SpatialSnapshot` splice), Tier 2 item 6
+   (`Mutate` wrapper), then Tier 4 — CLI seams (`IStatusSource`/transport/`TextWriter`), `DesktopAddress`
+   record struct (kills `MoveDesktop`'s 6-bool-and-int signature + the ad-hoc tuple), the
+   `Teardown()`/`TearDown()` naming trap, `VirtualDesktopController` RCW disposal + `IDisposable`, and IPC
+   version negotiation.
 
 **Leave alone** (genuinely well-factored): `SpatialHull`, `SpatialTidy`, `SpatialNavigation`,
 `MapCamera`, `NavHistory`, `Branch`, and the `ComInterop`/`DISPLAYCONFIG` marshalling.
