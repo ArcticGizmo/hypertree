@@ -13,18 +13,19 @@ green and the app running identically.
 
 ## 🧭 Handoff — where we are & what's next (read this first)
 
-**Anchor:** branch `refactor`, **45 commits** ahead of `main` (tip `bb81d0d`, 2026-08-10). Working tree
-clean. Test suite: **299 pass** (was 291 at the start; +4 Tier-3 fixes, +4 the diagnostics sink).
+**Anchor:** branch `refactor`, **48 commits** ahead of `main` (tip `e1192da`, 2026-08-10). Working tree
+clean. Test suite: **304 pass** (was 291 at the start; +4 Tier-3 fixes, +4 diagnostics sink, +5 RowSplice).
 `App.axaml.cs` is down from **2,227 → 557** lines; `SpatialOverlay` from **833 → 575**;
 `WindowsWindowLayoutController` from **347 → 149** (+ 3 partials).
 
-**Done:** Tier 1 Steps 1–5 ✅ (all four God classes addressed) · Tier 2 items 1, 3, 4 ✅ (items 2 & 6
-*partially* — Core half done; item 5 *partially* — colour/hit-cell dedup done, glyph merge consciously
-declined) · Tier 3 **all six** point-bugs / cleanups ✅ · Tier 4 `Palette` ✅.
+**Done:** Tier 1 Steps 1–5 ✅ (all four God classes addressed) · Tier 2 items 1, 2, 3, 4, 6 ✅ (item 5
+*partially* — colour/hit-cell dedup done, glyph merge consciously declined) · Tier 3 **all six**
+point-bugs / cleanups ✅ · Tier 4 `Palette` ✅.
 
 **Remaining, in recommended order** (full detail in "Where to go next" at the bottom):
-1. **Finish Tier 2 items 2 & 6** (the non-Core halves) + the Tier-4 tail (primitive obsession, `Teardown`
-   naming, COM RCW disposal, dead code, IPC versioning).
+1. **The Tier-4 tail** — CLI seams, `DesktopAddress` record struct (primitive obsession), the
+   `Teardown()`/`TearDown()` naming trap, `VirtualDesktopController` RCW disposal + `IDisposable`, remaining
+   dead code, IPC version negotiation.
 
 ### ⚠️ Pending smoke-test (build-verified only — NOT yet run in a dev build)
 The user last confirmed a smoke-test through the `SettingsWindow` fix. Everything since is compile-clean
@@ -181,11 +182,12 @@ Split along its banner regions into partials (the App Step 1 playbook), not sepa
    it. Extracted to `internal static class NativeWindows`; each controller keeps only the imports it uses
    directly. Build 0/0, 295 tests green. ⚠️ Interop, no unit coverage — wants a light smoke-test (map
    window counts, move/pull pickers).
-2. 🟡 **The core row-order splice** (`branches[0..slot] / MAIN / branches[slot..]`). **Core half DONE**
-   in Step 3: `NavigationModel`'s 3 copies + the divergent-clamping cursor↔row bijection collapsed to
-   `RowOrder()` + `CurrentRow()`/`CursorToRow()`. **Remaining:** `SpatialSnapshot.SourceFrom` (Spatial/
-   SpatialSnapshot.cs ~:50-52) still hand-rebuilds the same splice — fold it onto the same helper (it's a
-   `static` method over a `Snapshot`, so either expose the enumerator or share a small free function).
+2. ✅ **The core row-order splice** (`branches[0..slot] / MAIN / branches[slot..]`). Step 3 collapsed
+   `NavigationModel`'s 3 copies + the divergent-clamping cursor↔row bijection; now the last copy —
+   `SpatialSnapshot.SourceFrom` — is folded onto the same helper too. Extracted `RowSplice.Order(count,
+   mainSlot)` (a pure static yielding branch indices with a `MainMarker` spliced at the clamped slot);
+   `NavigationModel.RowOrder()` delegates (`MainRowMarker` forwards to it) and `SourceFrom` maps its indices.
+   Test-covered (`RowSpliceTests`, +5). Core — fully verified, 304 green.
 3. ✅ **Topmost / click-through / tool-window P/Invoke** copied across 5 window classes (`HudWindow`,
    `OverlayStage`, `SwitcherWindow`, `TaskbarLabel`, `RestoreCurtain`). Consolidated into `WindowFx` as
    `SetClickThrough`/`SetNoActivate`/`SetToolWindow`/`LiftTopmost`; each class's wrapper now delegates
@@ -208,12 +210,13 @@ Split along its banner regions into partials (the App Step 1 playbook), not sepa
    metro station sizing), so one glyph method would change pixels or become param-soup — a conscious
    deviation, like `NavSync`. Build 0/0, 299 green. ⚠️ **Runtime-unverified — smoke-test** all three styles in
    both the row flash and the spatial map (colours, resting dim, branch hues, click/double-click).
-6. 🟡 **Persistence mapping + mutation boilerplate.** **Mapper half DONE** in Step 3: `Save` and
-   `CaptureSnapshot` now share `ToPersisted()` helpers. **Remaining:** the `Save(); Changed?.Invoke();`
-   pair is still copy-pasted at **11 mutation sites** in `NavigationModel` (some mutators deliberately
-   omit it — undocumented which). → A private `Mutate(Action change)` wrapper that runs the change then
-   saves+notifies once; the deferring mutators opt out explicitly. (Behaviour-preserving but touches every
-   mutator — do it as one careful, test-covered commit.)
+6. ✅ **Persistence mapping + mutation boilerplate.** Step 3 gave `Save`/`CaptureSnapshot` a shared
+   `ToPersisted()`; now the `Save(); Changed?.Invoke();` pair copy-pasted at **11 mutation sites** in
+   `NavigationModel` is collapsed into one private `SaveAndNotify()`. Realized as a tail helper, not the
+   review's `Mutate(Action)` body-wrapper: every mutator guards with an early return (a no-op must not
+   save/notify) and several return values, so a body-wrapper would only fit the two unguarded ones. The
+   opt-outs (no-op returns, the reconciling mutators, the ctor backfill) are documented at the helper.
+   Behaviour-preserving; Core, 304 green.
 
 ---
 
@@ -283,9 +286,8 @@ mostly Core-testable cleanups. Recommended order and how to approach each:
 > separate types was declined (shared `RECT`/interop straddles both). Both are behaviour-preserving as-is;
 > revisit only if a real need appears. Both **still await the smoke-tests** flagged above.
 
-1. **Finish the partial items & the tail:** Tier 2 item 2 (`SpatialSnapshot` splice), Tier 2 item 6
-   (`Mutate` wrapper), then Tier 4 — CLI seams (`IStatusSource`/transport/`TextWriter`), `DesktopAddress`
-   record struct (kills `MoveDesktop`'s 6-bool-and-int signature + the ad-hoc tuple), the
+1. **The Tier-4 tail** (Tier 2 items 2 & 6 are now done): CLI seams (`IStatusSource`/transport/`TextWriter`),
+   `DesktopAddress` record struct (kills `MoveDesktop`'s 6-bool-and-int signature + the ad-hoc tuple), the
    `Teardown()`/`TearDown()` naming trap, `VirtualDesktopController` RCW disposal + `IDisposable`, and IPC
    version negotiation.
 
