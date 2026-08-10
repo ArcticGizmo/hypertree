@@ -13,19 +13,18 @@ green and the app running identically.
 
 ## 🧭 Handoff — where we are & what's next (read this first)
 
-**Anchor:** branch `refactor`, **36 commits** ahead of `main` (tip `c917b4a`, 2026-08-10). Working tree
-clean. Test suite: **295 pass** (was 291 at the start; +4 added by Tier-3 fixes). `App.axaml.cs` is down
-from **2,227 → 557** lines.
+**Anchor:** branch `refactor`, **38 commits** ahead of `main` (tip `5ca9bef`, 2026-08-10). Working tree
+clean. Test suite: **299 pass** (was 291 at the start; +4 Tier-3 fixes, +4 the diagnostics sink).
+`App.axaml.cs` is down from **2,227 → 557** lines.
 
 **Done:** Tier 1 Steps 1–3 ✅ · Tier 2 items 1, 3, 4 ✅ (items 2 & 6 *partially* — Core half done, see
-below) · Tier 3 five of six point-bugs ✅ · Tier 4 `Palette` ✅.
+below) · Tier 3 **all six** point-bugs / cleanups ✅ (diagnostics sink now done) · Tier 4 `Palette` ✅.
 
 **Remaining, in recommended order** (full detail in "Where to go next" at the bottom):
-1. **Tier 3 diagnostics sink** — smallest, unblocks visibility for everything else. Not yet started.
-2. **Tier 2 item 5 — Scene `DrawGlyph`** — the deepest Views item; `SpatialPainter` re-codes all 3 themes.
-3. **Tier 1 Step 4 — `SpatialOverlay`** split (drag engine + legend/chrome).
-4. **Tier 1 Step 5 — `WindowsWindowLayoutController`** split (topology / placement / diagnostics).
-5. **Finish Tier 2 items 2 & 6** (the non-Core halves) + the Tier-4 tail (primitive obsession, `Teardown`
+1. **Tier 2 item 5 — Scene `DrawGlyph`** — the deepest Views item; `SpatialPainter` re-codes all 3 themes.
+2. **Tier 1 Step 4 — `SpatialOverlay`** split (drag engine + legend/chrome).
+3. **Tier 1 Step 5 — `WindowsWindowLayoutController`** split (topology / placement / diagnostics).
+4. **Finish Tier 2 items 2 & 6** (the non-Core halves) + the Tier-4 tail (primitive obsession, `Teardown`
    naming, COM RCW disposal, dead code, IPC versioning).
 
 ### ⚠️ Pending smoke-test (build-verified only — NOT yet run in a dev build)
@@ -202,8 +201,19 @@ Then (done — completing the step):
   non-success HRESULT (explicit best-effort contract; throwing would crash the tray). Build-verified.
 - ✅ **`ControlClient.ReadLine` had no 64KB cap** (the server copy did). Added the matching bound so a tray
   streaming an endless newline-less reply can't make `htree` buffer forever. Build-verified.
-- **~20 blank `catch { }` blocks with no logging** in the interop/IPC layer — the one place the
-  interesting bugs live. → A tiny `Diagnostics.Swallowed(ex, context)` sink + narrow the catch types.
+- ✅ **~20 blank `catch { }` blocks with no logging** in the interop/IPC layer — the one place the
+  interesting bugs live. Added `Hypertree.Diagnostics.Swallowed(ex, context)` — a locked, never-throwing
+  sink that appends a timestamped record to `diagnostics.log` beside the rest of the state (rolls to a
+  single `.1` past 128 KB). Routed ~19 silent swallows through it: every persisted read/write (state,
+  snapshot, monitor-layout, spatial, settings, status) and the key interop failures (PATH register,
+  startup Run key, app launch, AppsFolder enumeration, desktop reorder). **Conscious scoping:** left the
+  high-frequency/expected catches (poll-tick monitor reads, per-subtree registry walk, advisory
+  process-name lookup, already-gone deletes) alone to keep the log signal-not-noise; and kept the catches
+  **broad** rather than narrowing the types as the review suggested — narrowing would change behaviour
+  (unexpected exceptions would newly propagate) against a layer with no runtime coverage, and the log
+  already surfaces the exception type + stack, so "real bugs still surface" is met via the record, not via
+  propagation. Test-covered (`DiagnosticsTests`, +4: contents, append, rollover, never-throws). Build 0/0,
+  299 green. **Behaviour-preserving — no smoke-test needed** (the App/Views layers were untouched).
 
 ---
 
@@ -228,17 +238,10 @@ Then (done — completing the step):
 
 ## Where to go next (remaining work, recommended order)
 
-The big structural wins are done. What's left is one bug-visibility item, two deep Views/Platform splits,
-and a tail of smaller cleanups. Recommended order and how to approach each:
+The big structural wins are done. What's left is two deep Views/Platform splits and a tail of smaller
+cleanups. Recommended order and how to approach each:
 
-1. **Tier 3 — diagnostics sink** *(start here; smallest, unblocks everything else's field-debuggability)*.
-   ~20 blank `catch { }` in the interop/IPC layer swallow the exact exceptions worth seeing. Add a tiny
-   `Diagnostics.Swallowed(ex, context)` (write to `%APPDATA%\hypertree\` or stderr) and route the blank
-   catches through it; narrow `catch (Exception)` to the expected types (`COMException`, `IOException`,
-   `Win32Exception`, `UnauthorizedAccessException`) so real bugs still surface. Low risk, high payoff,
-   partly test-coverable (the sink itself).
-
-2. **Tier 2 item 5 — Scene `DrawGlyph`** *(deepest Views item; H1)*. `SpatialPainter` re-implements all
+1. **Tier 2 item 5 — Scene `DrawGlyph`** *(deepest Views item; H1)*. `SpatialPainter` re-implements all
    three themes (board/metro/ascii) instead of participating in `IScenePainter`; colour math is copied 3×,
    the hit-cell 4×. Give `IScenePainter` a per-cell `DrawGlyph`/`PaintCell` both `SceneRenderer` and the
    spatial map call, and hoist `Lerp`/`Dim`/`BranchColour` + the hit-`Border` onto a shared
@@ -246,17 +249,17 @@ and a tail of smaller cleanups. Recommended order and how to approach each:
    all three map styles in both the row flash and the spatial map. Also clears the Tier-4 dead-code items
    (`SpatialPainter.TileBorder`, stale XML summary) while you're in there.
 
-3. **Tier 1 Step 4 — `SpatialOverlay`** (833 lines). Extract the pointer-drag gesture engine
+2. **Tier 1 Step 4 — `SpatialOverlay`** (833 lines). Extract the pointer-drag gesture engine
    (`_grab`/`_dragging`/`_pressAt`/… ~:483-566) into a `RoomDragController`; move legend + groups-panel
    construction into a `SpatialOverlayChrome` builder, rendering the 24 legend rows from a
    `(key, desc)[]` table in a loop. **Needs a smoke-test** (map drag, legend toggle, groups panel).
 
-4. **Tier 1 Step 5 — `WindowsWindowLayoutController`** (now ~347 after `NativeWindows`). Split into
+3. **Tier 1 Step 5 — `WindowsWindowLayoutController`** (now ~347 after `NativeWindows`). Split into
    `MonitorTopology` (enum + stable-id map + its structs/DllImports), `WindowPlacementApplier`, and move
    `RestoreTraced`/`Probe` diagnostics to a debug-only partial/type. Interop, no coverage — **smoke-test**
    dock/undock restore.
 
-5. **Finish the partial items & the tail:** Tier 2 item 2 (`SpatialSnapshot` splice), Tier 2 item 6
+4. **Finish the partial items & the tail:** Tier 2 item 2 (`SpatialSnapshot` splice), Tier 2 item 6
    (`Mutate` wrapper), then Tier 4 — CLI seams (`IStatusSource`/transport/`TextWriter`), `DesktopAddress`
    record struct (kills `MoveDesktop`'s 6-bool-and-int signature + the ad-hoc tuple), the
    `Teardown()`/`TearDown()` naming trap, `VirtualDesktopController` RCW disposal + `IDisposable`, and IPC
