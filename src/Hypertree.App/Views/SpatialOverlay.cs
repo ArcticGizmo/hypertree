@@ -68,6 +68,10 @@ internal sealed class SpatialOverlay : IStageContent
     private readonly List<(DesktopId Id, Rect Rect)> _hits = new();
     private Guid? _hoverGroup;
 
+    // The pointer-drag gesture engine (press → drag → drop). It owns the drag state; the overlay owns the
+    // model edits it commits and the root's pointer wiring it's fed from.
+    private readonly RoomDragController _drag;
+
     /// <summary>Switch to a room (Enter / double-click) — App resolves the id to a jump.</summary>
     public event Action<DesktopId>? JumpRoomRequested;
     /// <summary>v — cycle the whole-app Map style (Board → Metro → ASCII). App persists it and pushes it back,
@@ -115,10 +119,20 @@ internal sealed class SpatialOverlay : IStageContent
         _camera = camera;
         _scale = Math.Clamp(initialZoom, MinScale, MaxScale);
         _legend = showLegend;
-        _root.PointerPressed += OnPointerPressed;
-        _root.PointerMoved += OnPointerMoved;
-        _root.PointerReleased += OnPointerReleased;
-        _root.PointerCaptureLost += (_, _) => CancelDrag();
+
+        _drag = new RoomDragController(
+            _root,
+            cursor: () => _cursor,
+            dragSetOf: DragSetOf,
+            hostOf: id => _roomHosts.GetValueOrDefault(id),
+            stride: () => SpatialPainter.Stride(_scale),
+            commit: ApplyDrop,
+            snapBack: () => { if (IsOpen) Render(); });
+
+        _root.PointerPressed += (_, e) => _drag.Press(e);
+        _root.PointerMoved += (_, e) => { if (_drag.Grabbing) _drag.Move(e); else UpdateHover(e.GetPosition(_root)); };
+        _root.PointerReleased += (_, e) => _drag.Release(e);
+        _root.PointerCaptureLost += (_, _) => _drag.Cancel();
         _root.PointerExited += (_, _) => SetHoverGroup(null); // pointer left the map — no group is hovered
     }
 
@@ -476,93 +490,25 @@ internal sealed class SpatialOverlay : IStageContent
     }
 
     // ── Drag to move ───────────────────────────────────────────────────────────
-    // Pointer-driven: a plain drag moves the room, ⇧-drag its contiguous block, or the whole group if one is
-    // selected. The room hosts follow the pointer smoothly (no re-render mid-drag, so the pointer capture
-    // holds); on release the raw pixel offset snaps to whole cells and the state is written once.
+    // The gesture state machine lives in RoomDragController; the overlay supplies the two model-facing pieces:
+    // which rooms a grab carries, and how to commit the drop. A plain drag moves the room, ⇧-drag its
+    // contiguous block, or the whole group if one is selected.
 
-    private const double DragThreshold = 6;
-    private bool _tilePressed;                                          // the press bubbling up started on a tile
-    private DesktopId? _grab;                                           // the room picked up
-    private bool _dragging;
-    private Point _pressAt;
-    private readonly Dictionary<DesktopId, Point> _dragHostBase = new();   // host screen top-left at grab
-    private readonly Dictionary<DesktopId, GridPos> _dragGridBase = new(); // grid position at grab, for the drop
-
-    private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    // What a grab of <paramref name="id"/> carries: the whole group if this room is in the selected one, else
+    // its contiguous block on ⇧-drag, else just the room. Null when the room no longer resolves (not draggable).
+    private IReadOnlyList<SpatialRoom>? DragSetOf(DesktopId id, bool shift)
     {
-        bool onTile = _tilePressed;                             // the tile's own handler ran first, on the way up
-        _tilePressed = false;
-        CancelDrag();
-        if (e.ClickCount >= 2) return;                          // a double-click is "switch", never a drag
-        if (!e.GetCurrentPoint(_root).Properties.IsLeftButtonPressed) return;
-        if (!onTile || _cursor is not { } id || RoomOf(id) is null) return;
-
-        _grab = id;
-        _pressAt = e.GetPosition(_root);
-        _dragHostBase.Clear();
-        _dragGridBase.Clear();
-        // What the drag carries: the whole group if this room is in the selected one, else its block on
-        // ⇧-drag, else just the room.
-        IEnumerable<SpatialRoom> set =
-            _selectedGroup is { } g && RoomOf(id)!.GroupId == g ? GroupRooms(g)
-            : e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? Fragment(id)
-            : new[] { RoomOf(id)! };
-        foreach (SpatialRoom r in set)
-        {
-            _dragGridBase[r.Id] = r.Pos;
-            if (_roomHosts.TryGetValue(r.Id, out Control? host))
-                _dragHostBase[r.Id] = new Point(Canvas.GetLeft(host), Canvas.GetTop(host));
-        }
+        if (RoomOf(id) is not { } room) return null;
+        if (_selectedGroup is { } g && room.GroupId == g) return GroupRooms(g);
+        if (shift) return Fragment(id);
+        return new[] { room };
     }
 
-    private void OnPointerMoved(object? sender, PointerEventArgs e)
+    // Commit a drop: the final grid positions are written straight into the shared state, then persisted+redrawn.
+    private void ApplyDrop(IReadOnlyDictionary<DesktopId, GridPos> moves)
     {
-        if (_grab is null) { UpdateHover(e.GetPosition(_root)); return; }
-        Point at = e.GetPosition(_root);
-        if (!_dragging)
-        {
-            if (Math.Abs(at.X - _pressAt.X) < DragThreshold && Math.Abs(at.Y - _pressAt.Y) < DragThreshold) return;
-            _dragging = true;
-            e.Pointer.Capture(_root);
-        }
-        double dx = at.X - _pressAt.X, dy = at.Y - _pressAt.Y;
-        // Move the hosts only — the board is not rebuilt, so the capture (and the gesture) survives.
-        foreach ((DesktopId id, Point basePt) in _dragHostBase)
-            if (_roomHosts.TryGetValue(id, out Control? host))
-            {
-                Canvas.SetLeft(host, basePt.X + dx);
-                Canvas.SetTop(host, basePt.Y + dy);
-            }
-    }
-
-    private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
-    {
-        bool wasDragging = _dragging;
-        Point at = e.GetPosition(_root);
-        var gridBase = new Dictionary<DesktopId, GridPos>(_dragGridBase);
-        double dx = at.X - _pressAt.X, dy = at.Y - _pressAt.Y;
-        e.Pointer.Capture(null);
-        _grab = null;
-        _dragging = false;
-        _dragHostBase.Clear();
-        _dragGridBase.Clear();
-        if (!wasDragging) return;                              // a click, not a drag — selection handled on press
-
-        (double sx, double sy) = SpatialPainter.Stride(_scale);
-        int gdx = (int)Math.Round(dx / sx), gdy = (int)Math.Round(dy / sy);
-        if (gdx == 0 && gdy == 0) { Render(); return; }        // didn't cross a cell — snap the hosts back
-        foreach ((DesktopId id, GridPos basePos) in gridBase) _state.SetPosition(id.Value, basePos.Offset(gdx, gdy));
+        foreach ((DesktopId id, GridPos pos) in moves) _state.SetPosition(id.Value, pos);
         Persist();
-    }
-
-    private void CancelDrag()
-    {
-        bool wasActive = _grab is not null || _dragging;
-        _grab = null;
-        _dragging = false;
-        _dragHostBase.Clear();
-        _dragGridBase.Clear();
-        if (wasActive && IsOpen) Render();                     // snap any visually-moved hosts back to their cells
     }
 
     // Hover: the group whose hull brightens under the mouse. Hit-test the last render's room rects (topmost
@@ -611,7 +557,7 @@ internal sealed class SpatialOverlay : IStageContent
         _roomHosts.Clear();
         _hits.Clear();
         Control board = SpatialPainter.Render(display, width, height, _scale, _camera,
-            onClick: id => { _cursor = id; _selectedGroup = null; _tilePressed = true; Render(); },
+            onClick: id => { _cursor = id; _selectedGroup = null; _drag.NoteTilePressed(); Render(); },
             onActivate: id => JumpRoomRequested?.Invoke(id),
             hits: _hits, selectedGroup: _selectedGroup, style: _stage.MapStyle, roomHosts: _roomHosts,
             hoverGroup: _hoverGroup);
