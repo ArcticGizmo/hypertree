@@ -58,8 +58,8 @@ public sealed partial class App
     {
         if (_model is null) return false;
         if (_model.Locate(id) is not { } at) return false;
-        return at.onMain ? _model.GoToTop(at.desktopIndex)
-                         : _model.GoToBranchDesktop(at.branchIndex, at.desktopIndex);
+        return at.OnMain ? _model.GoToTop(at.DesktopIndex)
+                         : _model.GoToBranchDesktop(at.BranchIndex, at.DesktopIndex);
     }
 
     private bool AnyMapOpen() => _spatialOverlay is { IsOpen: true };
@@ -503,7 +503,7 @@ public sealed partial class App
     // the room is gone (e.g. an external delete since the map was drawn).
     private void WithSelection(DesktopId id, Action<DesktopSelection> act)
     {
-        if (_model?.Locate(id) is { } at) act(new DesktopSelection(at.onMain, at.branchIndex, at.desktopIndex));
+        if (_model?.Locate(id) is { } at) act(new DesktopSelection(at.OnMain, at.BranchIndex, at.DesktopIndex));
     }
 
     // Resolve a group's stable id to its branch index and run <paramref name="act"/>; a no-op if no branch

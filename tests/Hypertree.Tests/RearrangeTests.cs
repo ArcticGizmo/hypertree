@@ -184,7 +184,7 @@ public class RearrangeTests
     {
         var (m, c, _) = Pivot();
         // "a" past "b": the insertion point counts the desktop itself, so index 2 is one place right.
-        Assert.Equal((false, 0, 1), m.MoveDesktop(false, 0, 0, false, 0, 2));
+        Assert.Equal(new DesktopAddress(false, 0, 1), m.MoveDesktop(new(false, 0, 0), new(false, 0, 2)));
 
         Assert.Equal(new[] { "b", "a", "c" }, m.BuildMap().Branches[0].Desktops.Select(d => d.Label));
         Assert.Empty(c.Switches);
@@ -194,7 +194,7 @@ public class RearrangeTests
     public void A_desktop_moves_into_another_branch_at_the_drop_position()
     {
         var (m, _, _) = Pivot();
-        Assert.Equal((false, 1, 1), m.MoveDesktop(false, 0, 1, false, 1, 1)); // feat-1's "b" between x and y
+        Assert.Equal(new DesktopAddress(false, 1, 1), m.MoveDesktop(new(false, 0, 1), new(false, 1, 1))); // feat-1's "b" between x and y
 
         NavMap map = m.BuildMap();
         Assert.Equal(new[] { "a", "c" }, map.Branches[0].Desktops.Select(d => d.Label));
@@ -206,7 +206,7 @@ public class RearrangeTests
     {
         var (m, c, _) = Pivot();
         // feat-1's "b" (D(11)) onto main, between T0 and T1.
-        Assert.Equal((true, -1, 1), m.MoveDesktop(false, 0, 1, true, -1, 1));
+        Assert.Equal(new DesktopAddress(true, -1, 1), m.MoveDesktop(new(false, 0, 1), new(true, -1, 1)));
 
         Assert.Equal(new[] { T0, D(11), T1, T2 }, MainIds(m));
         Assert.Equal(new[] { "a", "c" }, m.BuildMap().Branches[0].Desktops.Select(d => d.Label));
@@ -218,7 +218,7 @@ public class RearrangeTests
     public void A_main_desktop_moves_into_a_branch_and_leaves_the_timeline()
     {
         var (m, _, _) = Pivot();
-        Assert.Equal((false, 1, 2), m.MoveDesktop(true, -1, 1, false, 1, 2)); // T1 onto the end of feat-2
+        Assert.Equal(new DesktopAddress(false, 1, 2), m.MoveDesktop(new(true, -1, 1), new(false, 1, 2))); // T1 onto the end of feat-2
 
         Assert.Equal(new[] { T0, T2 }, MainIds(m));
         Assert.Equal(new[] { "x", "y", "d1" }, m.BuildMap().Branches[1].Desktops.Select(d => d.Label));
@@ -228,7 +228,7 @@ public class RearrangeTests
     public void A_desktop_reordered_within_main_moves_in_the_os_list()
     {
         var (m, c, _) = Pivot();
-        Assert.Equal((true, -1, 1), m.MoveDesktop(true, -1, 0, true, -1, 2)); // T0 between T1 and T2
+        Assert.Equal(new DesktopAddress(true, -1, 1), m.MoveDesktop(new(true, -1, 0), new(true, -1, 2))); // T0 between T1 and T2
 
         Assert.Equal(new[] { T1, T0, T2 }, MainIds(m));
         Assert.Equal((T0, 1), c.Reorders.Single());
@@ -241,7 +241,7 @@ public class RearrangeTests
         var m = new NavigationModel(c);
         m.AddBranch(G("solo", (30, "s")));
 
-        Assert.Equal((true, -1, 3), m.MoveDesktop(false, 0, 0, true, -1, 3));
+        Assert.Equal(new DesktopAddress(true, -1, 3), m.MoveDesktop(new(false, 0, 0), new(true, -1, 3)));
         Assert.Equal(0, m.BranchCount);
         Assert.Equal(new[] { T0, T1, T2, D(30) }, MainIds(m));
     }
@@ -251,7 +251,7 @@ public class RearrangeTests
     {
         var (m, _) = Stack(); // main / A(a) / B(x) / C(p) — one desktop each
         // A's only desktop into C: A dissolves, so C's index shifts up under the move.
-        Assert.Equal((false, 1, 1), m.MoveDesktop(false, 0, 0, false, 2, 1));
+        Assert.Equal(new DesktopAddress(false, 1, 1), m.MoveDesktop(new(false, 0, 0), new(false, 2, 1)));
 
         NavMap map = m.BuildMap();
         Assert.Equal(new[] { "B", "C" }, map.Branches.Select(g => g.Name));
@@ -262,7 +262,7 @@ public class RearrangeTests
     public void An_inserted_desktop_leaves_the_branchs_resume_point_where_it_was()
     {
         var (m, _, _) = Pivot(firstBranchCursor: 2); // feat-1 resumes on "c"
-        m.MoveDesktop(true, -1, 1, false, 0, 0);     // T1 in front of "a"
+        m.MoveDesktop(new(true, -1, 1), new(false, 0, 0));     // T1 in front of "a"
 
         NavMapBranch feat1 = m.BuildMap().Branches[0];
         Assert.Equal(4, feat1.Desktops.Count);
@@ -273,9 +273,9 @@ public class RearrangeTests
     public void A_move_that_cannot_be_resolved_is_rejected()
     {
         var (m, c, _) = Pivot();
-        Assert.Null(m.MoveDesktop(true, -1, 9, false, 0, 0));  // no such main desktop
-        Assert.Null(m.MoveDesktop(false, 5, 0, true, -1, 0));  // no such branch
-        Assert.Null(m.MoveDesktop(false, 0, 0, false, 0, 0));  // already there
+        Assert.Null(m.MoveDesktop(new(true, -1, 9), new(false, 0, 0)));  // no such main desktop
+        Assert.Null(m.MoveDesktop(new(false, 5, 0), new(true, -1, 0)));  // no such branch
+        Assert.Null(m.MoveDesktop(new(false, 0, 0), new(false, 0, 0)));  // already there
         Assert.Empty(c.Reorders);
     }
 
@@ -285,7 +285,7 @@ public class RearrangeTests
         var (m, c, _) = Pivot();
         c.Remove(D(11), T0); // deleted from Task View — the open map is still drawing a tile for it
 
-        Assert.Null(m.MoveDesktop(false, 0, 1, true, -1, 0));
+        Assert.Null(m.MoveDesktop(new(false, 0, 1), new(true, -1, 0)));
         Assert.Equal(3, m.BuildMap().Branches[0].Desktops.Count); // refused outright, branch untouched
         Assert.Empty(c.Reorders);
     }
@@ -295,7 +295,7 @@ public class RearrangeTests
     {
         var c = new FakeDesktopController(new[] { T0 }, 0);
         var m = new NavigationModel(c);
-        Assert.Null(m.MoveDesktop(true, -1, 0, true, -1, 1));
+        Assert.Null(m.MoveDesktop(new(true, -1, 0), new(true, -1, 1)));
         Assert.Empty(c.Reorders);
     }
 

@@ -76,7 +76,7 @@ public sealed partial class App
         // back to below main.
         if (_stage is { HasDurableBase: true } && _spatialOverlay?.SelectedRoom is { } room
             && _model.Locate(room) is { } at)
-            _model.AddBranchBelow(at.onMain, at.branchIndex, branch);
+            _model.AddBranchBelow(at.OnMain, at.BranchIndex, branch);
         else _model.AddBranch(branch);
         RefreshOrFlash();
     }

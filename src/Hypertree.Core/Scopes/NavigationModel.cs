@@ -422,9 +422,11 @@ public sealed class NavigationModel
     /// since the main timeline <em>is</em> that order. Returns the desktop's new slot, or null if the move
     /// was rejected or resolved to a no-op.
     /// </summary>
-    public (bool onMain, int branchIndex, int desktopIndex)? MoveDesktop(
-        bool fromMain, int fromBranch, int fromDesktop, bool toMain, int toBranch, int toIndex)
+    public DesktopAddress? MoveDesktop(DesktopAddress fromAddr, DesktopAddress toAddr)
     {
+        (bool fromMain, int fromBranch, int fromDesktop) = (fromAddr.OnMain, fromAddr.BranchIndex, fromAddr.DesktopIndex);
+        (bool toMain, int toBranch, int toIndex) = (toAddr.OnMain, toAddr.BranchIndex, toAddr.DesktopIndex);
+
         DesktopRef? source = fromMain
             ? (fromDesktop >= 0 && fromDesktop < _topRow.Count ? _topRow[fromDesktop] : null)
             : (fromBranch >= 0 && fromBranch < _branches.Count
@@ -478,18 +480,18 @@ public sealed class NavigationModel
     /// <see cref="MoveDesktop"/> that resolves the group id to a slot. Returns the desktop's new position,
     /// or null when the desktop or group can't be resolved, or it's already in that group (a no-op).
     /// </summary>
-    public (bool onMain, int branchIndex, int desktopIndex)? MoveDesktopToGroup(DesktopId id, Guid groupId)
+    public DesktopAddress? MoveDesktopToGroup(DesktopId id, Guid groupId)
     {
         if (Locate(id) is not { } at) return null;
         if (groupId == Guid.Empty)
         {
-            if (at.onMain) return null;                                   // already ungrouped
-            return MoveDesktop(false, at.branchIndex, at.desktopIndex, true, -1, _topRow.Count);
+            if (at.OnMain) return null;                                   // already ungrouped
+            return MoveDesktop(at, new DesktopAddress(true, -1, _topRow.Count));
         }
         int to = IndexOfBranch(groupId);
         if (to < 0) return null;
-        if (!at.onMain && at.branchIndex == to) return null;             // already in that group
-        return MoveDesktop(at.onMain, at.branchIndex, at.desktopIndex, false, to, _branches[to].Count);
+        if (!at.OnMain && at.BranchIndex == to) return null;             // already in that group
+        return MoveDesktop(at, new DesktopAddress(false, to, _branches[to].Count));
     }
 
     /// <summary>
@@ -502,15 +504,15 @@ public sealed class NavigationModel
     public Branch? MoveDesktopToNewBranch(DesktopId id, string name)
     {
         if (Locate(id) is not { } at) return null;
-        DesktopRef moved = at.onMain
-            ? _topRow[at.desktopIndex]
-            : _branches[at.branchIndex].Desktops[at.desktopIndex];
+        DesktopRef moved = at.OnMain
+            ? _topRow[at.DesktopIndex]
+            : _branches[at.BranchIndex].Desktops[at.DesktopIndex];
 
-        if (!at.onMain)
+        if (!at.OnMain)
         {
-            Branch from = _branches[at.branchIndex];
-            from.RemoveDesktopAt(at.desktopIndex);
-            if (from.Count == 0) { _branches.RemoveAt(at.branchIndex); AdjustForRemoval(at.branchIndex); }
+            Branch from = _branches[at.BranchIndex];
+            from.RemoveDesktopAt(at.DesktopIndex);
+            if (from.Count == 0) { _branches.RemoveAt(at.BranchIndex); AdjustForRemoval(at.BranchIndex); }
         }
 
         var branch = new Branch(name, new[] { moved });
@@ -520,13 +522,13 @@ public sealed class NavigationModel
 
     /// <summary>Where a desktop sits in the stack right now — main (branch index -1) or a branch — or null
     /// if we don't track it. Used to follow a desktop after a structural change moved it.</summary>
-    public (bool onMain, int branchIndex, int desktopIndex)? Locate(DesktopId id)
+    public DesktopAddress? Locate(DesktopId id)
     {
         for (int i = 0; i < _topRow.Count; i++)
-            if (_topRow[i].Id == id) return (true, -1, i);
+            if (_topRow[i].Id == id) return new DesktopAddress(true, -1, i);
         for (int gi = 0; gi < _branches.Count; gi++)
             for (int j = 0; j < _branches[gi].Desktops.Count; j++)
-                if (_branches[gi].Desktops[j].Id == id) return (false, gi, j);
+                if (_branches[gi].Desktops[j].Id == id) return new DesktopAddress(false, gi, j);
         return null;
     }
 
@@ -705,19 +707,19 @@ public sealed class NavigationModel
         DesktopId cur = _desktops.Current;
         if (Locate(cur) is not { } at) { Resync(); return true; }
 
-        bool alreadyThere = at.onMain
-            ? _onMain && _topIndex == at.desktopIndex
-            : !_onMain && _currentBranch == at.branchIndex
-                       && _branches[at.branchIndex].LastUsedIndex == at.desktopIndex;
+        bool alreadyThere = at.OnMain
+            ? _onMain && _topIndex == at.DesktopIndex
+            : !_onMain && _currentBranch == at.BranchIndex
+                       && _branches[at.BranchIndex].LastUsedIndex == at.DesktopIndex;
         _target = cur; // either way, this is the desktop the next Commit measures a move from
         if (alreadyThere) return false;
 
-        if (at.onMain) { _onMain = true; _topIndex = at.desktopIndex; }
+        if (at.OnMain) { _onMain = true; _topIndex = at.DesktopIndex; }
         else
         {
             _onMain = false;
-            _currentBranch = at.branchIndex;
-            _branches[at.branchIndex].LastUsedIndex = at.desktopIndex;
+            _currentBranch = at.BranchIndex;
+            _branches[at.BranchIndex].LastUsedIndex = at.DesktopIndex;
         }
         ClampState();
         SaveAndNotify();
@@ -734,8 +736,8 @@ public sealed class NavigationModel
         // (mirrors AnchorToCurrent). A desktop we don't track leaves the cursor put, then ClampState fixes up.
         if (Locate(_desktops.Current) is { } at)
         {
-            if (at.onMain) { _onMain = true; _topIndex = at.desktopIndex; }
-            else { _onMain = false; _currentBranch = at.branchIndex; _branches[at.branchIndex].LastUsedIndex = at.desktopIndex; }
+            if (at.OnMain) { _onMain = true; _topIndex = at.DesktopIndex; }
+            else { _onMain = false; _currentBranch = at.BranchIndex; _branches[at.BranchIndex].LastUsedIndex = at.DesktopIndex; }
         }
         ClampState();
 

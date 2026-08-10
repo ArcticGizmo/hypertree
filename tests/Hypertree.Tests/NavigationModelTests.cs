@@ -350,7 +350,7 @@ public class NavigationModelTests
 
         var at = m.MoveDesktopToGroup(T1, feat2);
         Assert.NotNull(at);
-        Assert.False(at!.Value.onMain);
+        Assert.False(at!.Value.OnMain);
 
         Assert.DoesNotContain(T1, Grp(m, "main").Desktops.Select(d => d.Id));    // left the main timeline
         Assert.Equal(new[] { D(20), D(21), T1 }, Grp(m, "feat-2").Desktops.Select(d => d.Id)); // appended
@@ -364,7 +364,7 @@ public class NavigationModelTests
 
         var at = m.MoveDesktopToGroup(D(21), Guid.Empty); // feat-2's "y" → main (ungrouped)
         Assert.NotNull(at);
-        Assert.True(at!.Value.onMain);
+        Assert.True(at!.Value.OnMain);
 
         Assert.Equal(mainBefore + 1, Grp(m, "main").Desktops.Count);
         Assert.Contains(D(21), Grp(m, "main").Desktops.Select(d => d.Id));
@@ -378,7 +378,7 @@ public class NavigationModelTests
         // The branch desktop must exist in the OS list, since returning it to main asks the OS to reorder it.
         var m = new NavigationModel(new FakeDesktopController(new[] { T0, T1, T2, D(30) }, 0));
         m.AddBranch(G("solo", (30, "only"))); // one-desktop branch, below main; claims D(30) off main
-        Assert.True(m.MoveDesktopToGroup(D(30), Guid.Empty)!.Value.onMain);
+        Assert.True(m.MoveDesktopToGroup(D(30), Guid.Empty)!.Value.OnMain);
         Assert.Equal(0, m.BranchCount);        // the emptied branch is gone
     }
 

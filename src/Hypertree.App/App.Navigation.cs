@@ -205,8 +205,8 @@ public sealed partial class App
     {
         if (_model is null || target is not { } id || _model.Locate(id) is not { } at) return;
 
-        if (at.onMain) _model.GoToTop(at.desktopIndex);
-        else _model.GoToBranchDesktop(at.branchIndex, at.desktopIndex);
+        if (at.OnMain) _model.GoToTop(at.DesktopIndex);
+        else _model.GoToBranchDesktop(at.BranchIndex, at.DesktopIndex);
 
         if (AnyMapOpen()) SyncOpenMapToCurrent();
         else FlashBoard(cur, mods, move: null, animate: false, fade: WindowFx.SystemAnimationsEnabled());
