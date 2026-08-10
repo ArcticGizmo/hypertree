@@ -118,8 +118,12 @@ Then (done — completing the step):
    `OverlayStage`, `SwitcherWindow`, `TaskbarLabel`, `RestoreCurtain`). Consolidated into `WindowFx` as
    `SetClickThrough`/`SetNoActivate`/`SetToolWindow`/`LiftTopmost`; each class's wrapper now delegates
    (call sites unchanged), per-class constants + P/Invoke deleted. Build 0/0, 295 green.
-4. **Five prompt-card classes** duplicate the entire card scaffold + an identical arrow-key focus
-   handler, and have already drifted (widths 360/380/440). → Abstract `CardContent` base.
+4. ✅ **Five prompt-card classes** duplicated the card scaffold + IStageContent boilerplate + identical
+   Esc/arrow key handlers + submit guard, and had drifted (Left/Right-only arrows in one, widths
+   360/380/440, a stray #999 muted). → Abstract `CardContent` base owns all of it (+ Cancel/OK + a
+   `ButtonRow` helper); subclasses now supply only their field stack + `FocusInitial`/`TryApply`.
+   ~700 lines → 374 + a 136-line base. Custom-command arrows unified to Left/Up + Right/Down.
+   Build 0/0, 295 green.
 5. **Scene abstraction bypassed** — `SpatialPainter` doesn't implement `IScenePainter` and re-codes all
    three themes by hand; colour math in 3 copies, hit-cell in 4. → Give `IScenePainter` a `DrawGlyph`
    both renderers share.
