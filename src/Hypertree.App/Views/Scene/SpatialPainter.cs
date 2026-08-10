@@ -480,8 +480,16 @@ internal static class SpatialPainter
 
         if (room.Selected)
         {
+            // Keep the focus ring concentric with the dot regardless of zoom: layout rounding rounds two
+            // different-radius circles to device pixels independently, drifting their centres apart by up to
+            // a pixel (the ring reads as sitting slightly high). Opt both out so they share the exact centre.
+            dot.UseLayoutRounding = false;
             double fr = rOut + 6 * s;
-            var focus = new Ellipse { Width = fr * 2, Height = fr * 2, Stroke = new SolidColorBrush(Focus), StrokeThickness = 2 * s };
+            var focus = new Ellipse
+            {
+                Width = fr * 2, Height = fr * 2, Stroke = new SolidColorBrush(Focus), StrokeThickness = 2 * s,
+                UseLayoutRounding = false,
+            };
             Canvas.SetLeft(focus, cx - fr); Canvas.SetTop(focus, cy - fr);
             canvas.Children.Add(focus);
         }

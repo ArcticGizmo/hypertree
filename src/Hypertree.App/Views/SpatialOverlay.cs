@@ -120,6 +120,10 @@ internal sealed class SpatialOverlay : IStageContent
             snapBack: () => { if (IsOpen) Render(); });
 
         _root.PointerPressed += (_, e) => _drag.Press(e);
+        // Track hover on enter as well as move: when the map is raised under an already-resting cursor the
+        // first event Avalonia delivers is the enter, so hovering the group it's over lights up straight away
+        // rather than only after the pointer first jiggles.
+        _root.PointerEntered += (_, e) => { if (!_drag.Grabbing) UpdateHover(e.GetPosition(_root)); };
         _root.PointerMoved += (_, e) => { if (_drag.Grabbing) _drag.Move(e); else UpdateHover(e.GetPosition(_root)); };
         _root.PointerReleased += (_, e) => _drag.Release(e);
         _root.PointerCaptureLost += (_, _) => _drag.Cancel();

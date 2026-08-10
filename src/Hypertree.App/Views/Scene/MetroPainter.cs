@@ -145,8 +145,17 @@ internal sealed class MetroPainter : IScenePainter
 
         if (st.Selected)
         {
+            // Pin the dot and its focus ring to the exact centre: with layout rounding on (the default),
+            // two circles of different radii are rounded to device pixels independently, which can drift
+            // their centres apart by up to a pixel at fractional zoom — reading as a ring sitting slightly
+            // high of the dot. Opting both out keeps them concentric at every zoom.
+            dot.UseLayoutRounding = false;
             double fr = rOut + 6 * s;
-            var focusRing = new Ellipse { Width = fr * 2, Height = fr * 2, Stroke = new SolidColorBrush(Focus), StrokeThickness = 2 * s };
+            var focusRing = new Ellipse
+            {
+                Width = fr * 2, Height = fr * 2, Stroke = new SolidColorBrush(Focus), StrokeThickness = 2 * s,
+                UseLayoutRounding = false,
+            };
             Canvas.SetLeft(focusRing, x - fr);
             Canvas.SetTop(focusRing, y - fr);
             canvas.Children.Add(focusRing);
