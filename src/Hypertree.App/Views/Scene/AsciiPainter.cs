@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -22,14 +21,6 @@ internal sealed class AsciiPainter : IScenePainter
     private static readonly Color Focus = Palette.Accent;
     private static readonly Color Here = Palette.Here;
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
-
-    private static readonly Color[] LinePalette =
-    {
-        Color.Parse("#F4795B"), Color.Parse("#5BC8F4"), Color.Parse("#7BD88F"), Color.Parse("#C99BF4"),
-        Color.Parse("#F4C95B"), Color.Parse("#F45B9C"), Color.Parse("#63D6C4"), Color.Parse("#9CB2F4"),
-    };
-
-    private static Color BranchColour(int i) => LinePalette[((i % LinePalette.Length) + LinePalette.Length) % LinePalette.Length];
 
     private const double FontSize = 15;
     private const int InnerW = 13;          // characters between the vertical box borders
@@ -75,7 +66,7 @@ internal sealed class AsciiPainter : IScenePainter
         IReadOnlyList<Rect> cells = frame.Cells;
         if (cells.Count == 0) return;
 
-        Color rowColour = frame.Row.IsMain ? MainLine : BranchColour(frame.Row.BranchIndex);
+        Color rowColour = frame.Row.IsMain ? MainLine : ScenePaint.BranchColour(frame.Row.BranchIndex);
         if (!frame.Row.Active) rowColour = Dim(rowColour, 0.55); // a resting timeline recedes (by colour, not opacity)
 
         // Row label above the first card: "» main" or "● name", on its own opaque ground so the spine doesn't
@@ -110,22 +101,9 @@ internal sealed class AsciiPainter : IScenePainter
 
             if (cell.Here) AddCursor(canvas, cells[c], s);
 
-            if (onClick is not null || onActivate is not null)
-            {
-                var hit = new Border
-                {
-                    Width = cells[c].Width, Height = cells[c].Height, Background = Brushes.Transparent,
-                    Cursor = new Cursor(StandardCursorType.Hand),
-                };
-                hit.PointerPressed += (_, e) =>
-                {
-                    if (e.ClickCount >= 2) onActivate?.Invoke(col);
-                    else onClick?.Invoke(col);
-                };
-                Canvas.SetLeft(hit, cells[c].X);
-                Canvas.SetTop(hit, cells[c].Y);
-                canvas.Children.Add(hit);
-            }
+            ScenePaint.HitCell(canvas, cells[c],
+                               onClick is null ? null : () => onClick(col),
+                               onActivate is null ? null : () => onActivate(col));
         }
     }
 
@@ -170,12 +148,8 @@ internal sealed class AsciiPainter : IScenePainter
         => max <= 0 ? "" : text.Length <= max ? text : text.Substring(0, max);
 
     // Opaque dim toward the ground, so a resting timeline recedes without going translucent over the live
-    // desktop behind the overlay (mirrors the metro theme's colour-based dimming).
-    private static Color Dim(Color c, double t)
-    {
-        byte M(byte from, byte to) => (byte)Math.Round(from + (to - from) * t);
-        return Color.FromArgb(0xFF, M(Ground.R, c.R), M(Ground.G, c.G), M(Ground.B, c.B));
-    }
+    // desktop behind the overlay (shares the arithmetic with the other themes via ScenePaint).
+    private static Color Dim(Color c, double t) => ScenePaint.Toward(Ground, c, t);
 
     // A hard on/off blink — a terminal cursor, not a fade. Tied to the visual-tree lifetime so it self-stops
     // on re-render; best-effort, never load-bearing (mirrors MetroPainter.Pulse).
