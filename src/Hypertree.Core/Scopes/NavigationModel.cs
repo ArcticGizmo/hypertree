@@ -282,8 +282,7 @@ public sealed class NavigationModel
         if (id == _target) return false;
         _target = id;
         _desktops.SwitchTo(id);
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
         return true;
     }
 
@@ -310,8 +309,7 @@ public sealed class NavigationModel
         if (!_onMain && _currentBranch >= at) _currentBranch++; // existing selection shifted down one
         ClampState();
         SyncTopRow();
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
     }
 
     /// <summary>Add a branch directly below a <b>selection anchor</b> rather than below main. A branch is a
@@ -335,8 +333,7 @@ public sealed class NavigationModel
         if (!_onMain && _currentBranch >= at) _currentBranch++; // existing selection shifted down one
         ClampState();
         SyncTopRow();
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
     }
 
     /// <summary>
@@ -354,8 +351,7 @@ public sealed class NavigationModel
         Branch g = _branches[branchIndex];
         g.InsertDesktop(g.Count, desktop);
         SyncTopRow();
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
         return g.Count - 1;
     }
 
@@ -393,8 +389,7 @@ public sealed class NavigationModel
         if (cursorBranch is not null) _currentBranch = _branches.IndexOf(cursorBranch);
         ClampState();
 
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
         return _branches.IndexOf(theBranch);
     }
 
@@ -414,8 +409,7 @@ public sealed class NavigationModel
 
         _mainSlot = row;
         ClampState();
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
         return row;
     }
 
@@ -585,8 +579,7 @@ public sealed class NavigationModel
         AdjustForRemoval(index);
         SyncTopRow();
         _target = CurrentDesktop().Id; // re-anchor: removing the branch you were in lands you on main
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
         return removed;
     }
 
@@ -606,8 +599,7 @@ public sealed class NavigationModel
             if (branchIndex < 0 || branchIndex >= _branches.Count) return;
             _branches[branchIndex].SetLabel(desktopIndex, label);
         }
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
     }
 
     // ── Single-desktop deletion (× badge / delete button) ─────────────────────────
@@ -635,8 +627,7 @@ public sealed class NavigationModel
     {
         if (index < 0 || index >= _branches.Count) return;
         _branches[index].SetName(name);
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
     }
 
     /// <summary>
@@ -729,8 +720,7 @@ public sealed class NavigationModel
             _branches[at.branchIndex].LastUsedIndex = at.desktopIndex;
         }
         ClampState();
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
         return true;
     }
 
@@ -750,8 +740,7 @@ public sealed class NavigationModel
         ClampState();
 
         _target = CurrentDesktop().Id;
-        Save();
-        Changed?.Invoke();
+        SaveAndNotify();
     }
 
     // ── Snapshots (named layout capture / restore) ───────────────────────────────
@@ -831,5 +820,15 @@ public sealed class NavigationModel
             MainSlot = _mainSlot,
             Branches = _branches.Select(ToPersisted).ToList(),
         });
+    }
+
+    // The tail every committed mutation shares: persist the new state, then notify observers, in that order.
+    // A no-op mutator returns before reaching this (so it neither saves nor fires Changed); the reconciling
+    // mutators (SyncTopRow, DetachBranchDesktop) deliberately skip it too — they run inside another operation
+    // that saves, or leave persistence to the caller's follow-up Resync.
+    private void SaveAndNotify()
+    {
+        Save();
+        Changed?.Invoke();
     }
 }
