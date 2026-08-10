@@ -56,8 +56,9 @@ public sealed class FileMonitorLayoutStore : IMonitorLayoutStore
             if (!File.Exists(Path)) return new MonitorLayoutFile();
             return JsonSerializer.Deserialize<MonitorLayoutFile>(File.ReadAllText(Path)) ?? new MonitorLayoutFile();
         }
-        catch
+        catch (Exception ex)
         {
+            Diagnostics.Swallowed(ex, "FileMonitorLayoutStore.Load");
             return new MonitorLayoutFile();
         }
     }
@@ -65,7 +66,8 @@ public sealed class FileMonitorLayoutStore : IMonitorLayoutStore
     private void Save(MonitorLayoutFile file)
     {
         try { StateDirectory.WriteAtomic(Path, JsonSerializer.Serialize(file, Options)); }
-        catch { /* best-effort; losing a write is better than crashing the tray */ }
+        // best-effort; losing a write is better than crashing the tray
+        catch (Exception ex) { Diagnostics.Swallowed(ex, "FileMonitorLayoutStore.Save"); }
     }
 
     public MonitorLayoutSnapshot? GetAuto(string setKey)

@@ -36,7 +36,7 @@ public sealed class PathInstaller : IPathInstaller
         get
         {
             try { return PathEntries.Contains(ReadRaw(out _), InstallDir()); }
-            catch { return false; }
+            catch (Exception ex) { Diagnostics.Swallowed(ex, "PathInstaller.IsRegistered"); return false; }
         }
     }
 
@@ -57,7 +57,8 @@ public sealed class PathInstaller : IPathInstaller
             key.SetValue(ValueName, updated, KindFor(kind, updated));
             Broadcast();
         }
-        catch { /* best-effort — never fail an install over a PATH entry */ }
+        // best-effort — never fail an install over a PATH entry
+        catch (Exception ex) { Diagnostics.Swallowed(ex, "PathInstaller.Edit"); }
     }
 
     // The raw, UNEXPANDED value. Absent PATH reads as null, which the pure helpers already handle.

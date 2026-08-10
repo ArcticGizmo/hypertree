@@ -76,8 +76,9 @@ public sealed class FileSpatialStore : ISpatialStore
             if (!File.Exists(Path)) return new SpatialState();
             return JsonSerializer.Deserialize<SpatialState>(File.ReadAllText(Path)) ?? new SpatialState();
         }
-        catch
+        catch (Exception ex)
         {
+            Diagnostics.Swallowed(ex, "FileSpatialStore.Load");
             return new SpatialState();
         }
     }
@@ -85,6 +86,7 @@ public sealed class FileSpatialStore : ISpatialStore
     public void Save(SpatialState state)
     {
         try { Hypertree.Store.StateDirectory.WriteAtomic(Path, JsonSerializer.Serialize(state, Options)); }
-        catch { /* best-effort; losing a write is better than crashing the tray */ }
+        // best-effort; losing a write is better than crashing the tray
+        catch (Exception ex) { Diagnostics.Swallowed(ex, "FileSpatialStore.Save"); }
     }
 }

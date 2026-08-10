@@ -210,7 +210,8 @@ public sealed class VirtualDesktopController : IDesktopController
             if (landed >= 0 && landed != index)
                 _vdm.MoveDesktop(vd, Math.Clamp(index + (index - landed), 0, n - 1));
         }
-        catch (COMException) { /* shell refused the reorder — the desktop keeps its place */ }
+        // shell refused the reorder — the desktop keeps its place
+        catch (COMException ex) { Diagnostics.Swallowed(ex, "VirtualDesktopController.Reorder"); }
     }
 
     private int OrdinalOf(DesktopId id)

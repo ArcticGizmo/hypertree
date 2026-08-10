@@ -66,8 +66,9 @@ public sealed class FileSnapshotStore : ISnapshotStore
             if (!File.Exists(Path)) return new List<Snapshot>();
             return JsonSerializer.Deserialize<List<Snapshot>>(File.ReadAllText(Path)) ?? new List<Snapshot>();
         }
-        catch
+        catch (Exception ex)
         {
+            Diagnostics.Swallowed(ex, "FileSnapshotStore.Load");
             return new List<Snapshot>();
         }
     }
@@ -75,6 +76,7 @@ public sealed class FileSnapshotStore : ISnapshotStore
     public void Save(IReadOnlyList<Snapshot> snapshots)
     {
         try { StateDirectory.WriteAtomic(Path, JsonSerializer.Serialize(snapshots, Options)); }
-        catch { /* best-effort; losing a write is better than crashing the tray */ }
+        // best-effort; losing a write is better than crashing the tray
+        catch (Exception ex) { Diagnostics.Swallowed(ex, "FileSnapshotStore.Save"); }
     }
 }

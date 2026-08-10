@@ -61,7 +61,8 @@ public static class StatusFile
     public static void Write(StatusSnapshot snapshot)
     {
         try { Store.StateDirectory.WriteAtomic(FilePath, JsonSerializer.Serialize(snapshot, TypeInfo)); }
-        catch { /* best-effort — a status write is never worth failing the tray over */ }
+        // best-effort — a status write is never worth failing the tray over
+        catch (Exception ex) { Hypertree.Diagnostics.Swallowed(ex, "StatusFile.Write"); }
     }
 
     /// <summary>Remove the file on a clean exit, so nothing reports a tray that has gone.</summary>
@@ -93,7 +94,8 @@ public static class StatusFile
                 return IsAlive(snapshot.Pid) ? snapshot : null;
             }
             catch (IOException) { Thread.Sleep(15); } // mid-replace — try again
-            catch { return null; }                    // malformed / unreadable — treat as no status
+            // malformed / unreadable — treat as no status
+            catch (Exception ex) { Hypertree.Diagnostics.Swallowed(ex, "StatusFile.Read"); return null; }
         }
         return null;
     }

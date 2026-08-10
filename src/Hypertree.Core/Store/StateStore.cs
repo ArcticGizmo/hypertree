@@ -63,8 +63,9 @@ public sealed class FileStateStore : IStateStore
             if (!File.Exists(Path)) return new PersistedState();
             return JsonSerializer.Deserialize<PersistedState>(File.ReadAllText(Path)) ?? new PersistedState();
         }
-        catch
+        catch (Exception ex)
         {
+            Diagnostics.Swallowed(ex, "FileStateStore.Load");
             return new PersistedState();
         }
     }
@@ -72,6 +73,7 @@ public sealed class FileStateStore : IStateStore
     public void Save(PersistedState state)
     {
         try { StateDirectory.WriteAtomic(Path, JsonSerializer.Serialize(state, Options)); }
-        catch { /* best-effort; losing a write is better than crashing the tray */ }
+        // best-effort; losing a write is better than crashing the tray
+        catch (Exception ex) { Diagnostics.Swallowed(ex, "FileStateStore.Save"); }
     }
 }

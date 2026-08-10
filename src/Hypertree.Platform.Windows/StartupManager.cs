@@ -31,7 +31,7 @@ public sealed class StartupManager : IStartupManager
                 using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKey);
                 return key?.GetValue(ValueName) is not null;
             }
-            catch { return false; }
+            catch (Exception ex) { Diagnostics.Swallowed(ex, "StartupManager.IsEnabled"); return false; }
         }
     }
 
@@ -58,7 +58,7 @@ public sealed class StartupManager : IStartupManager
                 key.DeleteValue(ValueName, throwOnMissingValue: false);
             }
         }
-        catch { /* best-effort */ }
+        catch (Exception ex) { Diagnostics.Swallowed(ex, "StartupManager.SetEnabled"); }
     }
 
     // A Velopack install lays the app out as  <root>\current\hypertree.exe  with a sibling

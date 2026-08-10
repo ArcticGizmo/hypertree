@@ -225,8 +225,9 @@ public sealed class FileSettingsStore : ISettingsStore
             MigrateLegacyTaskbarLabel(json, settings);
             return settings;
         }
-        catch
+        catch (Exception ex)
         {
+            Diagnostics.Swallowed(ex, "FileSettingsStore.Load");
             return new AppSettings();
         }
     }
@@ -250,6 +251,7 @@ public sealed class FileSettingsStore : ISettingsStore
     public void Save(AppSettings settings)
     {
         try { Hypertree.Store.StateDirectory.WriteAtomic(Path, JsonSerializer.Serialize(settings, Options)); }
-        catch { /* best-effort; losing a write is better than crashing the tray */ }
+        // best-effort; losing a write is better than crashing the tray
+        catch (Exception ex) { Diagnostics.Swallowed(ex, "FileSettingsStore.Save"); }
     }
 }
