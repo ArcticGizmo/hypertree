@@ -166,10 +166,10 @@ public sealed partial class App
     private void RemoveBranch(int index)
     {
         if (_model is null) return;
-        // RemoveBranch reassigns the branch's still-live desktops onto main; TearDown then destroys them in
-        // the OS. Resync re-derives the model from the live desktop list so the map reflects the destruction
+        // RemoveBranch reassigns the branch's still-live desktops onto main; TearDownBranch then destroys them
+        // in the OS. Resync re-derives the model from the live desktop list so the map reflects the destruction
         // now — without it the destroyed desktops ghost onto main until the next reconcile wipes them.
-        TearDown(_model.RemoveBranch(index));
+        TearDownBranch(_model.RemoveBranch(index));
         _model.Resync();
         RefreshOrFlash();
     }
@@ -235,7 +235,7 @@ public sealed partial class App
         => _stage?.Present(new ConfirmContent(message, onConfirm));
 
     // Remove a branch's desktops — but ONLY ones Hypertree created, never the user's own desktops.
-    private void TearDown(Branch? branch)
+    private void TearDownBranch(Branch? branch)
     {
         if (branch is null || _model is null || _desktops is null) return;
         DesktopId fallback = _model.FallbackDesktopId;

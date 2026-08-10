@@ -130,7 +130,7 @@ internal sealed class BoardPainter : IScenePainter
         canvas.Children.Add(label);
     }
 
-    // ── Tile drawing (ported from BoardView; position-agnostic — the caller places it) ─────────────
+    // ── Tile drawing (the board tile look; position-agnostic — the caller places it) ─────────────
 
     private static Control Tile(string caption, bool isStream, bool focused, bool here, int windowCount, double s,
                                 double tileW, double screenH, double capH, Action? onClick, Action? onDelete = null,
