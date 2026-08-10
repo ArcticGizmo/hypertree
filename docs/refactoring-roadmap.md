@@ -13,19 +13,22 @@ green and the app running identically.
 
 ## 🧭 Handoff — where we are & what's next (read this first)
 
-**Anchor:** branch `refactor`, **48 commits** ahead of `main` (tip `e1192da`, 2026-08-10). Working tree
-clean. Test suite: **304 pass** (was 291 at the start; +4 Tier-3 fixes, +4 diagnostics sink, +5 RowSplice).
-`App.axaml.cs` is down from **2,227 → 557** lines; `SpatialOverlay` from **833 → 575**;
+**Anchor:** branch `refactor`, **52 commits** ahead of `main` (tip `702f139`, 2026-08-10). Working tree
+clean. Test suite: **311 pass** (was 291 at the start; +4 Tier-3 fixes, +4 diagnostics sink, +5 RowSplice,
++7 CLI commands). `App.axaml.cs` is down from **2,227 → 557** lines; `SpatialOverlay` from **833 → 575**;
 `WindowsWindowLayoutController` from **347 → 149** (+ 3 partials).
 
-**Done:** Tier 1 Steps 1–5 ✅ (all four God classes addressed) · Tier 2 items 1, 2, 3, 4, 6 ✅ (item 5
-*partially* — colour/hit-cell dedup done, glyph merge consciously declined) · Tier 3 **all six**
-point-bugs / cleanups ✅ · Tier 4 `Palette` ✅.
+**The planned refactor is essentially complete.** Tier 1 Steps 1–5 ✅ (all four God classes) · Tier 2 items
+1–4, 6 ✅ (item 5 *partial* — colour/hit-cell dedup done, glyph merge consciously declined) · Tier 3 **all
+six** ✅ · Tier 4 ✅ except two deliberate leave-alones.
 
-**Remaining, in recommended order** (full detail in "Where to go next" at the bottom):
-1. **The Tier-4 tail** — CLI seams, `DesktopAddress` record struct (primitive obsession), the
-   `Teardown()`/`TearDown()` naming trap, `VirtualDesktopController` RCW disposal + `IDisposable`, remaining
-   dead code, IPC version negotiation.
+**Remaining — nothing structural left; two documented non-goals + a runtime pass:**
+1. **⚠️ Run the pending smoke-test batch** (below) — the biggest outstanding item. Six App/Views/Platform
+   changes are build-verified + test-green but never run in a dev build (the App layer has no automated
+   coverage).
+2. **Two deliberate leave-alones** (full rationale in Tier 4): `VirtualDesktopController` RCW disposal
+   (COM identity-unification crash risk, no coverage) and IPC version negotiation (a feature, not a
+   maintainability refactor). Don't pick these up as routine cleanups.
 
 ### ⚠️ Pending smoke-test (build-verified only — NOT yet run in a dev build)
 The user last confirmed a smoke-test through the `SettingsWindow` fix. Everything since is compile-clean
@@ -257,39 +260,57 @@ Split along its banner regions into partials (the App Step 1 playbook), not sepa
 
 ## Tier 4 — Testability & lower-impact
 
-- **CLI is untestable static-on-static** (`Commands.cs` reads `StatusFile`, calls static
-  `ControlClient.Send`, writes static `Output`); `UpdateChecker` too. → Inject seams.
+- 🟡 **CLI is untestable static-on-static.** ✅ **`Commands` DONE:** injected `IStatusSource` /
+  `IControlTransport` / `ICliOutput` seams (production adapters `StatusFileSource` / `ControlClientTransport`
+  / `ConsoleOutput`), made `Commands` an instance wired once in `Program.Main`. Now unit-tested
+  (`CliCommandsTests`, +7); the e2e tests still pass. Core/CLI — fully verified, 311 green. **Remaining:**
+  `UpdateChecker` seams deferred — it lives in `Hypertree.App`, which the test project doesn't reference, so
+  seaming it would be build-verified only (no test payoff until the App layer gets a harness).
 - ✅ **Style constants scattered across ~14 files** with divergent names for the same hex → consolidated
   into one `Palette` class (Ink/Muted/Accent/Here/Stroke/CardBg, as both `Color` and cached `IBrush`).
   Named `Palette` not `Theme` (Avalonia's `StyledElement.Theme` would shadow it). Build 0/0, 295 green.
-- **Primitive obsession**: `MoveDesktop(bool,int,int,bool,int,int)` + ad-hoc `(bool,int,int)` tuple.
-  → `readonly record struct DesktopAddress`.
-- **Naming trap**: `Teardown()` (app shutdown) vs `TearDown(Branch?)` (destroy branch desktops).
-- Transient COM RCWs never released in `VirtualDesktopController` (minted every 250ms poll tick);
-  class isn't `IDisposable`.
-- Dead code: `SpatialPainter.TileBorder`, `SW_RESTORE`/`SW_MINIMIZE`, stale `<see cref="BoardView"/>`,
-  a stale XML summary on `SpatialPainter`.
-- **IPC has no version negotiation** despite a separately-PATH-installed `htree.exe` that goes stale
-  after a Velopack update.
+- ✅ **Primitive obsession**: `MoveDesktop(bool,int,int,bool,int,int)` + ad-hoc `(bool,int,int)` tuple →
+  `readonly record struct DesktopAddress(bool OnMain, int BranchIndex, int DesktopIndex)`, used for Locate's
+  return and MoveDesktop's from/to. Behaviour-preserving (RearrangeTests/NavigationModelTests unchanged);
+  Core+App 0/0, 304 green.
+- ✅ **Naming trap**: `TearDown(Branch?)` renamed to `TearDownBranch` (the app-lifecycle `Teardown()` keeps
+  its name). Pure rename, App 0/0.
+- ⛔ **Transient COM RCWs never released in `VirtualDesktopController`** (minted every 250ms poll tick);
+  class isn't `IDisposable`. **Deliberately deferred.** The controller is an app-lifetime singleton exposed
+  only as `IDesktopController` (not `IDisposable`), so field disposal only matters at process exit (the OS
+  reclaims anyway) — low value. The flagged concern is the *transient* desktop RCWs, but aggressively
+  `Marshal.ReleaseComObject`-ing them risks RCW **identity-unification** crashes ("COM object separated from
+  its RCW") on these undocumented shell interfaces, and .NET's RCW finalizer already reclaims them. Not safe
+  to do blind against a no-coverage interop surface that can't be smoke-tested here; wants a dedicated spike
+  + smoke-test if pursued.
+- ✅ **Dead code**: `SpatialPainter.TileBorder` (ScenePaint pass), `SW_RESTORE`/`SW_MINIMIZE` (Step 5),
+  stale `BoardView` mention + `SpatialPainter` stale summary — all cleared.
+- ⏭️ **IPC has no version negotiation** despite a separately-PATH-installed `htree.exe` that goes stale
+  after a Velopack update. **Not done — this is a feature, not a maintainability refactor**, so it's out of
+  scope for this effort; left for a deliberate design pass (it needs a wire-protocol version field + a
+  mismatch policy, and a decision on how a stale `htree` should behave).
 
 ---
 
 ## Where to go next (remaining work, recommended order)
 
-All four God classes are addressed and every structural win is done. What's left is a tail of smaller,
-mostly Core-testable cleanups. Recommended order and how to approach each:
+Every structural win in the review is done — the four God classes are split, the duplicated invariants are
+collapsed to single sources, the latent bugs are fixed, and the tail cleanups are cleared. What's left is a
+runtime pass and a few deliberate non-goals.
 
-> **Two conscious partials — don't re-attempt as "cleanups".** *(a)* Tier 2 item 5 (Scene): `ScenePaint`
-> now owns the shared colour math + hit-cell, but a shared `IScenePainter.DrawGlyph` merging the row-cell and
-> spatial-room glyph *bodies* was declined (the forms diverge on purpose). *(b)* Tier 1 Step 5: the Win32
-> layout controller is split into partials, but extracting `MonitorTopology`/`WindowPlacementApplier` as
-> separate types was declined (shared `RECT`/interop straddles both). Both are behaviour-preserving as-is;
-> revisit only if a real need appears. Both **still await the smoke-tests** flagged above.
+1. **Run the smoke-test batch** (the ⚠️ list up top) — six App/Views/Platform changes are build-verified and
+   test-green but never run in a dev build. This is the one thing genuinely outstanding; the App layer has
+   no automated coverage, so a human pass is how these get confirmed.
 
-1. **The Tier-4 tail** (Tier 2 items 2 & 6 are now done): CLI seams (`IStatusSource`/transport/`TextWriter`),
-   `DesktopAddress` record struct (kills `MoveDesktop`'s 6-bool-and-int signature + the ad-hoc tuple), the
-   `Teardown()`/`TearDown()` naming trap, `VirtualDesktopController` RCW disposal + `IDisposable`, and IPC
-   version negotiation.
+**Deliberate non-goals — don't pick these up as routine "cleanups":**
+- **Scene `DrawGlyph`** (Tier 2 item 5): the shared colour/hit-cell dedup is done via `ScenePaint`; merging
+  the row-cell and spatial-room glyph *bodies* was declined (they diverge on purpose).
+- **`MonitorTopology`/`WindowPlacementApplier` types** (Tier 1 Step 5): the controller is split into
+  partials; separate types were declined (shared `RECT`/interop straddles topology and placement).
+- **`VirtualDesktopController` RCW disposal** (Tier 4): COM identity-unification crash risk on undocumented
+  shell interfaces, no coverage — wants its own spike + smoke-test, not a drive-by.
+- **IPC version negotiation** (Tier 4): a feature, not a maintainability refactor — a separate design pass.
+- **`UpdateChecker` seams** (Tier 4): no test payoff until the App layer has a harness.
 
 **Leave alone** (genuinely well-factored): `SpatialHull`, `SpatialTidy`, `SpatialNavigation`,
 `MapCamera`, `NavHistory`, `Branch`, and the `ComInterop`/`DISPLAYCONFIG` marshalling.
