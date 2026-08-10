@@ -167,18 +167,10 @@ public sealed class NavigationModel
     // spatial, status) and every re-slot walks this one order, and the cursor's row is derived from it here —
     // so the "splice main in at its slot" invariant and its off-by-one live in exactly one place.
 
-    internal const int MainRowMarker = -1; // stands in for the main timeline within a row-index sequence (shared with NavProjection)
+    internal const int MainRowMarker = RowSplice.MainMarker; // shared with NavProjection; the one definition lives in RowSplice
 
     // Branch indices in draw order with main (MainRowMarker) spliced in at its clamped slot.
-    private IReadOnlyList<int> RowOrder()
-    {
-        int slot = Math.Clamp(_mainSlot, 0, _branches.Count);
-        var seq = new List<int>(_branches.Count + 1);
-        for (int i = 0; i < slot; i++) seq.Add(i);
-        seq.Add(MainRowMarker);
-        for (int i = slot; i < _branches.Count; i++) seq.Add(i);
-        return seq;
-    }
+    private IReadOnlyList<int> RowOrder() => RowSplice.Order(_branches.Count, _mainSlot);
 
     // The cursor's index in that combined sequence. A branch below main is pushed down one row because main
     // occupies a row of its own.
