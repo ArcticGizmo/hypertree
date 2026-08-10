@@ -9,6 +9,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.5.0] - 2026-08-10
+
+### Changed
+
+- Rooms on the spatial map dim by focus — the selected room stays brightest, its groupmates a notch down, other groups dimmer still.
+
+### Fixed
+
+- Clicking a room on the spatial map no longer drops the click or flickers the cursor between hand and arrow.
+- The metro map's selection ring sits centered on its station dot.
+- Changing a setting no longer resets the map zoom, picker zoom, or legend.
+- `htree` reports an unknown option instead of silently ignoring it — `htree status --jsonn` exits with an error.
+- `HYPERTREE_STATE_DIR` redirects all of Hypertree's state, not just the status file, and state writes are atomic.
+
+---
+
 ## [v0.4.2] - 2026-08-09
 
 ### Added
