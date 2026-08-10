@@ -13,18 +13,17 @@ green and the app running identically.
 
 ## 🧭 Handoff — where we are & what's next (read this first)
 
-**Anchor:** branch `refactor`, **40 commits** ahead of `main` (tip `e288059`, 2026-08-10). Working tree
+**Anchor:** branch `refactor`, **43 commits** ahead of `main` (tip `46cb963`, 2026-08-10). Working tree
 clean. Test suite: **299 pass** (was 291 at the start; +4 Tier-3 fixes, +4 the diagnostics sink).
-`App.axaml.cs` is down from **2,227 → 557** lines.
+`App.axaml.cs` is down from **2,227 → 557** lines; `SpatialOverlay` from **833 → 575**.
 
-**Done:** Tier 1 Steps 1–3 ✅ · Tier 2 items 1, 3, 4 ✅ (items 2 & 6 *partially* — Core half done; item 5
+**Done:** Tier 1 Steps 1–4 ✅ · Tier 2 items 1, 3, 4 ✅ (items 2 & 6 *partially* — Core half done; item 5
 *partially* — colour/hit-cell dedup done, glyph merge consciously declined) · Tier 3 **all six**
 point-bugs / cleanups ✅ · Tier 4 `Palette` ✅.
 
 **Remaining, in recommended order** (full detail in "Where to go next" at the bottom):
-1. **Tier 1 Step 4 — `SpatialOverlay`** split (drag engine + legend/chrome).
-2. **Tier 1 Step 5 — `WindowsWindowLayoutController`** split (topology / placement / diagnostics).
-3. **Finish Tier 2 items 2 & 6** (the non-Core halves) + the Tier-4 tail (primitive obsession, `Teardown`
+1. **Tier 1 Step 5 — `WindowsWindowLayoutController`** split (topology / placement / diagnostics).
+2. **Finish Tier 2 items 2 & 6** (the non-Core halves) + the Tier-4 tail (primitive obsession, `Teardown`
    naming, COM RCW disposal, dead code, IPC versioning).
 
 ### ⚠️ Pending smoke-test (build-verified only — NOT yet run in a dev build)
@@ -38,6 +37,12 @@ and test-green but **unverified at runtime** (the App/Views layers have no autom
 - **`ScenePaint`** — all three map styles (board/metro/ascii) in both the row flash and the spatial map:
   cell/room colours, resting-timeline dimming, branch hues, and click (select) / double-click (activate)
   on cells and rooms. (Board is untouched; the shared bits are the metro/ascii/spatial colour + hit-cell.)
+- **`SpatialOverlay` split** (`RoomDragController` + `SpatialOverlayChrome`) — on the spatial map: drag a
+  room to a new cell; ⇧-drag its contiguous block; with a group selected (⇧G → click a row), drag any of its
+  rooms to move the whole group; a sub-cell drag snaps back; plain click selects, double-click switches. And
+  the chrome: the legend renders identically, `l` hides/shows it (small "l legend" pill when hidden), the `v`
+  row names the next style, ⇧G groups panel — row-click selects the group (cursor jumps into it), a swatch
+  opens the palette, picking a colour recolours the group.
 
 ### Working conventions (so a fresh context matches what's been done)
 - **Build check (App/Views/Platform):** a dev instance of Hypertree often holds the output DLLs locked, so
@@ -138,11 +143,16 @@ Then (done — completing the step):
 
 **Step 3 complete.**
 
-### Step 4 — `SpatialOverlay`
-- Extract the pointer-drag gesture engine (`_grab`/`_dragging`/`_pressAt`/... at `:483-566`) into a
-  `RoomDragController`.
-- Move legend + groups-panel construction into a `SpatialOverlayChrome` builder; render the 24 legend
-  rows from a `(string key, string desc)[]` table in a loop, not 24 imperative `Add` calls.
+### Step 4 — `SpatialOverlay` ✅ DONE (833 → 575 lines)
+- ✅ **`RoomDragController`** — the pointer-drag state machine (press → drag → drop) lifted out; the overlay
+  supplies a small callback seam (cursor room, drag-set resolver, host lookup, cell stride, commit/snap-back)
+  and keeps the root's pointer wiring + hover. Line-for-line behaviour.
+- ✅ **`SpatialOverlayChrome`** — legend (+ hint pill) and groups panel moved to a builder; the ~20 legend
+  rows now render from a `(keycap, desc)[]` table in a loop (the `v` row computed from `MapStyle`). The
+  interactive groups panel takes a `GroupsPanelCallbacks` record (select / toggle-palette / recolour) — a
+  view/builder split, mutation stays in the overlay.
+- Build 0/0, 299 green. ⚠️ **Runtime-unverified — smoke-test** (see the pending list): room drag / ⇧-block /
+  group drag / snap-back, and the legend + `l` toggle + ⇧G groups panel + swatch recolour.
 
 ### Step 5 — `WindowsWindowLayoutController`
 - Split into `MonitorTopology` (enum + stable-id map + its structs/DllImports),
@@ -250,8 +260,8 @@ Then (done — completing the step):
 
 ## Where to go next (remaining work, recommended order)
 
-The big structural wins are done. What's left is two deep Views/Platform splits and a tail of smaller
-cleanups. Recommended order and how to approach each:
+The big structural wins are done. What's left is one deep Platform split and a tail of smaller cleanups.
+Recommended order and how to approach each:
 
 > **Tier 2 item 5 (Scene) — partially done.** The `ScenePaint` helper now owns the shared colour math +
 > hit-cell (Ascii/Metro/Spatial), and the two Tier-4 dead-code items are cleared. The remaining piece — a
@@ -259,17 +269,12 @@ cleanups. Recommended order and how to approach each:
 > declined** (the two forms diverge on purpose; see Tier 2 item 5). Don't re-attempt it as a "cleanup"; if a
 > future need genuinely shares a glyph, revisit then. **Still awaiting the smoke-test** flagged above.
 
-1. **Tier 1 Step 4 — `SpatialOverlay`** (833 lines). Extract the pointer-drag gesture engine
-   (`_grab`/`_dragging`/`_pressAt`/… ~:483-566) into a `RoomDragController`; move legend + groups-panel
-   construction into a `SpatialOverlayChrome` builder, rendering the 24 legend rows from a
-   `(key, desc)[]` table in a loop. **Needs a smoke-test** (map drag, legend toggle, groups panel).
-
-2. **Tier 1 Step 5 — `WindowsWindowLayoutController`** (now ~347 after `NativeWindows`). Split into
+1. **Tier 1 Step 5 — `WindowsWindowLayoutController`** (now ~347 after `NativeWindows`). Split into
    `MonitorTopology` (enum + stable-id map + its structs/DllImports), `WindowPlacementApplier`, and move
    `RestoreTraced`/`Probe` diagnostics to a debug-only partial/type. Interop, no coverage — **smoke-test**
    dock/undock restore.
 
-3. **Finish the partial items & the tail:** Tier 2 item 2 (`SpatialSnapshot` splice), Tier 2 item 6
+2. **Finish the partial items & the tail:** Tier 2 item 2 (`SpatialSnapshot` splice), Tier 2 item 6
    (`Mutate` wrapper), then Tier 4 — CLI seams (`IStatusSource`/transport/`TextWriter`), `DesktopAddress`
    record struct (kills `MoveDesktop`'s 6-bool-and-int signature + the ad-hoc tuple), the
    `Teardown()`/`TearDown()` naming trap, `VirtualDesktopController` RCW disposal + `IDisposable`, and IPC
