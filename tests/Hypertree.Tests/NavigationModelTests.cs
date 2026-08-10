@@ -75,7 +75,7 @@ public class NavigationModelTests
         var (m, c) = New(current: 1);
         Assert.True(m.OnTop);
         Assert.Empty(c.Switches);
-        Assert.True(m.BuildMap().TopRow[1].IsCurrent);
+        Assert.True(m.Map().TopRow[1].IsCurrent);
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public class NavigationModelTests
         m.AddBranch(G("two", G2)); // inserted directly below main → nearest
         Assert.True(m.Apply(NavAction.Dive)); // Down from main enters the branch below = "two"
         Assert.Equal(D(20), c.Current);
-        Assert.Equal("two", m.BuildMap().Branches[0].Name);
+        Assert.Equal("two", m.Map().Branches[0].Name);
     }
 
     [Fact]
@@ -206,7 +206,7 @@ public class NavigationModelTests
         m.Apply(NavAction.Dive);
         m.Apply(NavAction.Dive);
         m.Apply(NavAction.Surface);
-        Assert.Equal(new[] { "A", "B", "C" }, m.BuildMap().Branches.Select(g => g.Name));
+        Assert.Equal(new[] { "A", "B", "C" }, m.Map().Branches.Select(g => g.Name));
     }
 
     // ── The stable pivot: main sits between branches and never moves ───────────────
@@ -215,7 +215,7 @@ public class NavigationModelTests
     public void Pivot_renders_branches_above_and_below_a_fixed_main_slot()
     {
         var (m, _) = Pivot();
-        NavMap map = m.BuildMap();
+        var map =m.Map();
         Assert.True(map.OnTop);
         Assert.Equal(1, map.TopPosition); // feat-1 above main, feat-2 below
         Assert.Equal(new[] { "feat-1", "feat-2" }, map.Branches.Select(g => g.Name));
@@ -229,7 +229,7 @@ public class NavigationModelTests
         Assert.False(m.OnTop);
         Assert.Equal((0, 0), m.CurrentBranchDesktop);
         Assert.Equal(D(10), c.Current);
-        Assert.Equal(1, m.BuildMap().TopPosition); // main did NOT leap — still slot 1
+        Assert.Equal(1, m.Map().TopPosition); // main did NOT leap — still slot 1
     }
 
     [Fact]
@@ -240,7 +240,7 @@ public class NavigationModelTests
         Assert.False(m.OnTop);
         Assert.Equal((1, 0), m.CurrentBranchDesktop);
         Assert.Equal(D(20), c.Current);
-        Assert.Equal(1, m.BuildMap().TopPosition);
+        Assert.Equal(1, m.Map().TopPosition);
     }
 
     [Fact]
@@ -252,7 +252,7 @@ public class NavigationModelTests
         Assert.True(m.OnTop);
         Assert.True(m.Apply(NavAction.Surface));  // main → feat-1 (above)
         Assert.Equal((0, 0), m.CurrentBranchDesktop);
-        Assert.Equal(1, m.BuildMap().TopPosition); // whole sequence unchanged throughout
+        Assert.Equal(1, m.Map().TopPosition); // whole sequence unchanged throughout
     }
 
     [Fact]
@@ -260,7 +260,7 @@ public class NavigationModelTests
     {
         var (m, _) = Pivot(); // feat-1 above (slot 1), feat-2 below
         m.AddBranch(G("hotfix", G3));
-        NavMap map = m.BuildMap();
+        var map =m.Map();
         Assert.Equal(1, map.TopPosition); // still one branch above main
         Assert.Equal(new[] { "feat-1", "hotfix", "feat-2" }, map.Branches.Select(g => g.Name));
     }
@@ -272,7 +272,7 @@ public class NavigationModelTests
     {
         var (m, _) = Pivot(); // feat-1 above main (slot 1), feat-2 below
         m.AddBranchBelow(onMain: true, branchIndex: -1, G("hotfix", G3));
-        NavMap map = m.BuildMap();
+        var map =m.Map();
         Assert.Equal(1, map.TopPosition); // unchanged
         Assert.Equal(new[] { "feat-1", "hotfix", "feat-2" }, map.Branches.Select(g => g.Name));
     }
@@ -282,7 +282,7 @@ public class NavigationModelTests
     {
         var (m, _) = Pivot();
         m.AddBranchBelow(onMain: false, branchIndex: 1, G("hotfix", G3)); // below feat-2 (below main)
-        NavMap map = m.BuildMap();
+        var map =m.Map();
         Assert.Equal(1, map.TopPosition); // main slot unchanged — insertion was below main
         Assert.Equal(new[] { "feat-1", "feat-2", "hotfix" }, map.Branches.Select(g => g.Name));
     }
@@ -292,7 +292,7 @@ public class NavigationModelTests
     {
         var (m, _) = Pivot();
         m.AddBranchBelow(onMain: false, branchIndex: 0, G("hotfix", G3)); // below feat-1 (above main)
-        NavMap map = m.BuildMap();
+        var map =m.Map();
         Assert.Equal(2, map.TopPosition); // now two branches above main — main sank to keep place
         Assert.Equal(new[] { "feat-1", "hotfix", "feat-2" }, map.Branches.Select(g => g.Name));
     }
@@ -303,12 +303,12 @@ public class NavigationModelTests
     public void AddDesktopToBranch_appends_to_that_branch_and_keeps_it_off_main()
     {
         var (m, c) = Pivot();          // feat-1 = a,b,c (above main); feat-2 = x,y (below)
-        int mainBefore = m.BuildMap().TopRow.Count;
+        int mainBefore = m.Map().TopRow.Count;
 
         DesktopId id = c.Create("feat-2 · z"); // App creates the OS desktop, then records where it belongs
         Assert.Equal(2, m.AddDesktopToBranch(1, new DesktopRef(id, "z")));
 
-        NavMap map = m.BuildMap();
+        var map =m.Map();
         Assert.Equal(new[] { "x", "y", "z" }, map.Branches[1].Desktops.Select(d => d.Label));
         Assert.Equal(mainBefore, map.TopRow.Count); // claimed by a branch, so it never shows up on main
         Assert.Equal(1, map.TopPosition);           // structure otherwise untouched
@@ -411,7 +411,7 @@ public class NavigationModelTests
         m.AddBranch(G("solo", (30, "only")));
         Branch? b = m.MoveDesktopToNewBranch(D(30), "moved");
         Assert.NotNull(b);
-        Assert.Equal(new[] { "moved" }, m.BuildMap().Branches.Select(g => g.Name)); // old dissolved, new present
+        Assert.Equal(new[] { "moved" }, m.Map().Branches.Select(g => g.Name)); // old dissolved, new present
         Assert.Equal(new[] { D(30) }, b!.Desktops.Select(d => d.Id));
     }
 
@@ -436,7 +436,7 @@ public class NavigationModelTests
         Assert.False(m.OnTop);
         Assert.Equal((1, 1), m.CurrentBranchDesktop);
         Assert.Equal(D(21), c.Current);
-        Assert.Equal(1, m.BuildMap().TopPosition);
+        Assert.Equal(1, m.Map().TopPosition);
     }
 
     // ── Branch removal ──────────────────────────────────────────────────────────
@@ -459,7 +459,7 @@ public class NavigationModelTests
     {
         var (m, _) = Pivot();      // feat-1 above main (slot 1), feat-2 below
         m.RemoveBranch(0);          // drop feat-1 (above) → main rises to slot 0
-        NavMap map = m.BuildMap();
+        var map =m.Map();
         Assert.Equal(0, map.TopPosition);
         Assert.Equal(new[] { "feat-2" }, map.Branches.Select(g => g.Name));
     }
@@ -511,7 +511,7 @@ public class NavigationModelTests
         var (m, c) = New();          // the map/palette path — Reconcile precedes every surface
         c.JumpExternally(T2);
         m.Reconcile();
-        Assert.True(m.BuildMap().TopRow[2].IsCurrent);
+        Assert.True(m.Map().TopRow[2].IsCurrent);
     }
 
     // ── Reconcile against externally-deleted desktops ───────────────────────────
@@ -522,7 +522,7 @@ public class NavigationModelTests
         var (m, c) = Pivot(); // feat-1: a,b,c (10,11,12); feat-2: x,y
         c.Remove(D(11), T0);  // user deletes feat-1's "b" from Task View
         m.Reconcile();
-        var g = m.BuildMap().Branches.First(x => x.Name == "feat-1");
+        var g = m.Map().Branches.First(x => x.Name == "feat-1");
         Assert.Equal(new[] { "a", "c" }, g.Desktops.Select(t => t.Label));
     }
 
@@ -533,7 +533,7 @@ public class NavigationModelTests
         c.Remove(D(20), T0);
         c.Remove(D(21), T0); // feat-2 entirely gone from the OS
         m.Reconcile();
-        Assert.Equal(new[] { "feat-1" }, m.BuildMap().Branches.Select(g => g.Name));
+        Assert.Equal(new[] { "feat-1" }, m.Map().Branches.Select(g => g.Name));
     }
 
     // ── Single-desktop deletion ──────────────────────────────────────────────────
@@ -546,7 +546,7 @@ public class NavigationModelTests
         DesktopId? id = m.DetachBranchDesktop(0, 1); // remove b
         Assert.Equal(D(11), id);
         Assert.Equal(1, m.BranchCount);
-        Assert.Equal(new[] { "a", "c" }, m.BuildMap().Branches[0].Desktops.Select(t => t.Label));
+        Assert.Equal(new[] { "a", "c" }, m.Map().Branches[0].Desktops.Select(t => t.Label));
     }
 
     [Fact]
@@ -585,7 +585,7 @@ public class NavigationModelTests
         };
         var m = new NavigationModel(new FakeDesktopController(ids, 0), new InMemoryStore(state));
 
-        Assert.Equal(0, m.BuildMap().TopPosition);              // main sits first, above both branches
+        Assert.Equal(0, m.Map().TopPosition);              // main sits first, above both branches
         Assert.True(m.BuildStatus().Rows[0].IsMain);
     }
 
@@ -606,7 +606,7 @@ public class NavigationModelTests
         };
         var m = new NavigationModel(new FakeDesktopController(ids, 0), new InMemoryStore(state));
 
-        Assert.Equal(0, m.BuildMap().TopPosition);
+        Assert.Equal(0, m.Map().TopPosition);
     }
 
     // ── Snapshots (capture / restore a whole named layout) ───────────────────────
@@ -632,12 +632,12 @@ public class NavigationModelTests
         var (_, c) = Pivot();
         // A fresh model over the same OS (no persisted branches) sees all 8 desktops as unbranched.
         var fresh = new NavigationModel(c);
-        Assert.Equal(8, fresh.BuildMap().TopRow.Count);
-        Assert.Empty(fresh.BuildMap().Branches);
+        Assert.Equal(8, fresh.Map().TopRow.Count);
+        Assert.Empty(fresh.Map().Branches);
 
         fresh.RestoreStructure(1, new[] { G("feat-1", G1), G("feat-2", G2) });
 
-        NavMap map = fresh.BuildMap();
+        var map =fresh.Map();
         Assert.Equal(3, map.TopRow.Count);  // only T0,T1,T2 stay on the main timeline now
         Assert.Equal(1, map.TopPosition);   // the restored main slot is honoured
         Assert.Equal(new[] { "feat-1", "feat-2" }, map.Branches.Select(g => g.Name));
@@ -657,7 +657,7 @@ public class NavigationModelTests
             .ToList();
         target.RestoreStructure(snap.MainSlot, branches);
 
-        NavMap a = source.BuildMap(), b = target.BuildMap();
+        MapView a = source.Map(), b = target.Map();
         Assert.Equal(a.TopPosition, b.TopPosition);
         Assert.Equal(a.TopRow.Count, b.TopRow.Count);
         Assert.Equal(a.Branches.Select(g => g.Name), b.Branches.Select(g => g.Name));
@@ -669,18 +669,18 @@ public class NavigationModelTests
     // ── Per-desktop window counts on the map ─────────────────────────────────────
 
     [Fact]
-    public void BuildMap_carries_per_desktop_window_counts_onto_the_tiles()
+    public void Map_carries_per_desktop_window_counts_onto_the_tiles()
     {
         var (m, c) = Pivot();
         c.WinCounts[T0] = 4;     // a main desktop
         c.WinCounts[D(10)] = 2;  // feat-1's "a"
         // D(11) ("b") and everything else left unset → 0
 
-        NavMap map = m.BuildMap();
+        var map =m.Map();
         Assert.Equal(4, map.TopRow[0].WindowCount);
         Assert.Equal(0, map.TopRow[1].WindowCount); // unset desktop reads as empty
 
-        NavMapBranch feat1 = map.Branches.First(g => g.Name == "feat-1");
+        var feat1 = map.Branches.First(g => g.Name == "feat-1");
         Assert.Equal(2, feat1.Desktops[0].WindowCount);
         Assert.Equal(0, feat1.Desktops[1].WindowCount);
     }
@@ -688,12 +688,12 @@ public class NavigationModelTests
     // ── "Came from" green marker during navigation ───────────────────────────────
 
     [Fact]
-    public void BuildMap_marks_the_came_from_desktop_as_here()
+    public void Map_marks_the_came_from_desktop_as_here()
     {
         var (m, _) = New(current: 0); // on T0
         m.Apply(NavAction.MoveRight); // now on T1, having come from T0
 
-        NavMap map = m.BuildMap(T0);
+        var map =m.Map(T0);
         Assert.True(map.TopRow[0].IsHere);    // T0 (came from) → green
         Assert.False(map.TopRow[0].IsCurrent);
         Assert.True(map.TopRow[1].IsCurrent); // T1 (now) → blue
@@ -701,9 +701,9 @@ public class NavigationModelTests
     }
 
     [Fact]
-    public void BuildMap_without_a_came_from_marks_nothing_here()
+    public void Map_without_a_came_from_marks_nothing_here()
     {
         var (m, _) = New();
-        Assert.All(m.BuildMap().TopRow, t => Assert.False(t.IsHere));
+        Assert.All(m.Map().TopRow, t => Assert.False(t.IsHere));
     }
 }

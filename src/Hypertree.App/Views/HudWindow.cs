@@ -188,8 +188,9 @@ internal sealed class HudWindow : Window
         MakeClickThrough();
     }
 
-    /// <summary>Show the board centred on the primary screen; it stays up while <paramref name="holdMods"/>
-    /// are held (pass <see cref="HotkeyModifiers.None"/> for a non-gesture flash that just times out).</summary>
+    /// <summary>Flash the spatial board centred on the primary screen; it stays up while
+    /// <paramref name="holdMods"/> are held (pass <see cref="HotkeyModifiers.None"/> for a non-gesture flash
+    /// that just times out).</summary>
     /// <remarks>
     /// Two independent pieces of motion, because they answer different complaints:
     /// <list type="bullet">
@@ -205,16 +206,6 @@ internal sealed class HudWindow : Window
     /// The board only ever fades, never moves. Callers gate both on the OS "show animations" preference, so
     /// reduce-motion still snaps.
     /// </remarks>
-    public void Flash(NavMap map, HotkeyModifiers holdMods, NavAction? move = null, bool animate = false,
-                      bool fromLeadingEdge = true, MapStyle style = MapStyle.Board, bool fade = false)
-    {
-        PrepareSurface();
-        FlashBoard(MapSurface.Render(map, Width, Height, style, MapZoom, camera: _camera),
-                   holdMods, move, animate, fromLeadingEdge, fade);
-    }
-
-    /// <summary>Flash the <b>spatial</b> board — the same transient HUD, drawn from the spatial scene so a
-    /// navigation in spatial mode shows the layout you configured rather than the row list.</summary>
     public void Flash(SpatialScene scene, MapStyle style, HotkeyModifiers holdMods, NavAction? move = null,
                       bool animate = false, bool fromLeadingEdge = true, bool fade = false)
     {

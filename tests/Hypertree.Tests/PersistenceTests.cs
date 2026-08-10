@@ -36,7 +36,7 @@ public class PersistenceTests
         // Restart: fresh model, same store, same OS desktops.
         var m2 = new NavigationModel(new FakeDesktopController(ids, 0), store);
         Assert.Equal(1, m2.BranchCount);
-        NavMap map = m2.BuildMap();
+        var map = m2.Map();
         Assert.Equal(2, map.TopRow.Count);              // D(10)/D(11) are NOT orphaned into the top row
         Assert.Equal("feat", map.Branches[0].Name);
         Assert.Equal(new[] { "a", "b" }, map.Branches[0].Desktops.Select(t => t.Label));
@@ -64,6 +64,6 @@ public class PersistenceTests
         // Only D(10) survives.
         var m = new NavigationModel(new FakeDesktopController(new[] { D(0), D(10) }, 0), store);
         Assert.Equal(1, m.BranchCount);
-        Assert.Single(m.BuildMap().Branches[0].Desktops);
+        Assert.Single(m.Map().Branches[0].Desktops);
     }
 }

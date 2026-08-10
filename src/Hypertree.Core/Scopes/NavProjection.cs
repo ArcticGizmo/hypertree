@@ -28,35 +28,9 @@ internal sealed record NavLayout(
 /// </summary>
 internal static class NavProjection
 {
-    /// <summary>Render-ready row snapshot: main timeline + branches in natural order plus main's slot; the
-    /// renderer splices main in. <paramref name="cameFrom"/> marks that desktop with the "here" outline.</summary>
-    public static NavMap Map(NavLayout m, Func<DesktopId, int> windows, DesktopId? cameFrom)
-    {
-        bool CameFrom(DesktopId id) => cameFrom == id;
-
-        var top = new List<NavMapTile>(m.TopRow.Count);
-        for (int i = 0; i < m.TopRow.Count; i++)
-            top.Add(new NavMapTile(m.TopRow[i].Label, m.OnMain && i == m.TopIndex,
-                                   IsHere: CameFrom(m.TopRow[i].Id), WindowCount: windows(m.TopRow[i].Id)));
-
-        var branches = new List<NavMapBranch>(m.Branches.Count);
-        for (int gi = 0; gi < m.Branches.Count; gi++)
-        {
-            Branch g = m.Branches[gi];
-            bool current = !m.OnMain && gi == m.CurrentBranch;
-            var tiles = new List<NavMapTile>(g.Desktops.Count);
-            for (int j = 0; j < g.Desktops.Count; j++)
-                tiles.Add(new NavMapTile(g.Desktops[j].Label, current && j == g.LastUsedIndex,
-                                         IsHere: CameFrom(g.Desktops[j].Id), WindowCount: windows(g.Desktops[j].Id)));
-            branches.Add(new NavMapBranch(gi, g.Name, tiles, current, g.LastUsedIndex));
-        }
-
-        return new NavMap(top, m.TopRow.Count == 0 ? 0 : m.TopIndex, m.OnMain, branches, m.MainSlot);
-    }
-
-    /// <summary>The id-carrying structural snapshot the spatial map is built from — the spatial twin of
-    /// <see cref="Map"/>. Keeps the branch/desktop ids spatial state is keyed by, and emits groups in draw
-    /// order (branches above main, main as the <see cref="Guid.Empty"/> bucket, branches below).</summary>
+    /// <summary>The id-carrying structural snapshot the spatial map is built from. Keeps the branch/desktop
+    /// ids spatial state is keyed by, and emits groups in draw order (branches above main, main as the
+    /// <see cref="Guid.Empty"/> bucket, branches below).</summary>
     public static SpatialSource Spatial(NavLayout m, Func<DesktopId, int> windows, DesktopId? cameFrom)
     {
         bool CameFrom(DesktopId id) => cameFrom == id;

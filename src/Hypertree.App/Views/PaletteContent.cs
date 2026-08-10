@@ -12,14 +12,13 @@ namespace Hypertree.App.Views;
 
 /// <summary>One filterable row in a palette: a primary <paramref name="Label"/>, an optional dimmer
 /// <paramref name="Detail"/> (also folded into the match text, so e.g. a branch name filters its
-/// desktops), an optional trailing <paramref name="Glyph"/>, the action to run when it's chosen, and an
-/// optional <paramref name="Preview"/> board to show behind the palette while it's the selected row.
+/// desktops), an optional trailing <paramref name="Glyph"/>, and the action to run when it's chosen.
 /// <paramref name="LoadIcon"/>, when set, supplies a leading icon fetched asynchronously (the app
 /// launcher's app icons) — the row shows a blank slot until it resolves. <paramref name="SpatialPreview"/>
-/// is the spatial-model twin of <paramref name="Preview"/>: the scene shown behind the card while the user
-/// is in the spatial map, so a row can highlight its target as a room rather than a row-map tile.</summary>
+/// is the spatial scene shown behind the card while it's the selected row, so a row can highlight its
+/// target as a room (a jump destination, a snapshot's layout) rather than the live map.</summary>
 internal sealed record PaletteItem(string Label, string? Detail, string? Glyph, Action Choose,
-                                   Func<NavMap>? Preview = null, string? DisabledReason = null,
+                                   string? DisabledReason = null,
                                    Action? OnDelete = null, Func<Task<IImage?>>? LoadIcon = null,
                                    Func<SpatialScene>? SpatialPreview = null)
 {
@@ -37,8 +36,8 @@ internal sealed record PaletteItem(string Label, string? Detail, string? Glyph, 
 /// Up/Down or Tab to move, Enter to choose the highlighted row, Esc or a click on the board to step back.
 ///
 /// The card floats near the top of the stage over the live map backdrop (the stage renders it); as the
-/// selection moves, a row's <see cref="PaletteItem.Preview"/> board is shown behind instead — a
-/// jump-target highlight, a command's target, a snapshot's layout — via <see cref="BackdropBoard"/> +
+/// selection moves, a row's <see cref="PaletteItem.SpatialPreview"/> scene is shown behind instead — a
+/// jump-target highlight, a snapshot's layout — via <see cref="BackdropScene"/> +
 /// <see cref="OverlayStage.RefreshBackdrop"/>. Rows with no preview fall back to the live map. The
 /// window-level concerns (cover the primary, force-foreground, dismiss-on-deactivate) belong to the
 /// stage; this class is just the view plus its keyboard/filter behaviour.
@@ -134,15 +133,8 @@ internal sealed class PaletteContent : IStageContent
     public bool DismissOnDeactivate => true;
     public bool DismissOnClickAway => true; // a click on the board steps back, like Esc
 
-    // The board behind the card: the selected row's preview, or null ⇒ the stage's live map.
-    public NavMap? BackdropBoard()
-    {
-        PaletteItem? sel = _selected >= 0 && _selected < _filtered.Count ? _filtered[_selected] : null;
-        return sel?.Preview?.Invoke();
-    }
-
-    // The spatial scene behind the card in spatial mode: the selected row's spatial preview, or null ⇒ the
-    // stage falls back to its live spatial scene.
+    // The spatial scene behind the card: the selected row's spatial preview, or null ⇒ the stage falls back
+    // to its live spatial scene.
     public SpatialScene? BackdropScene()
     {
         PaletteItem? sel = _selected >= 0 && _selected < _filtered.Count ? _filtered[_selected] : null;

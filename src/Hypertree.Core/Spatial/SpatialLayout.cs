@@ -13,9 +13,8 @@ public sealed record GroupHull(
     SpatialGroup Group, IReadOnlyList<IReadOnlyList<LayoutPoint>> Loops, LayoutRect Rect);
 
 /// <summary>
-/// Where every room sits in <b>world space</b> for the spatial map — the spatial twin of
-/// <see cref="SceneLayout"/>, and an <see cref="ICameraLayout"/> so the shared <see cref="MapCamera"/> frames
-/// and pans it exactly as it does the rows. A room at grid <c>(gx, gy)</c> is centred at
+/// Where every room sits in <b>world space</b> for the spatial map — an <see cref="ICameraLayout"/> so the
+/// shared <see cref="MapCamera"/> frames and pans it. A room at grid <c>(gx, gy)</c> is centred at
 /// <c>(gx · CellStride, gy · RowPitch)</c> — the same metrics vocabulary the row layout uses, so one camera
 /// serves both. Coordinates are cursor-independent: moving the selection never moves the map (that's the
 /// camera's job, and only at the edge).

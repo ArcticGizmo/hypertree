@@ -226,17 +226,14 @@ internal sealed class OverlayStage
     }
 
     // The board to paint behind a card. By default it's the live spatial map, so the backdrop matches what
-    // you'd see on the map. A card can override: a spatial scene (the jump palette highlighting its target),
-    // or a NavMap (a snapshot / template's would-be layout) — the latter is a deliberate row depiction of a
-    // concrete other layout, so it's kept as-is.
+    // you'd see on the map. A card can override with a spatial scene of its own (the jump palette
+    // highlighting its target, a snapshot's would-be layout).
     private Control? RenderBackdrop(IStageContent content)
     {
         double w = HostWidth > 0 ? HostWidth : 1280, h = HostHeight > 0 ? HostHeight : 800;
 
         if (content.BackdropScene() is { } scene)
             return SpatialPainter.Render(scene, w, h, MapZoom, new MapCamera(), style: MapStyle);
-        if (content.BackdropBoard() is { } previewMap)
-            return MapSurface.Render(previewMap, w, h, MapStyle, MapZoom);
         if (SpatialProvider is { } spatial)
         {
             (SpatialSource source, SpatialState state) = spatial();
@@ -389,13 +386,9 @@ internal interface IStageContent
     /// has no durable frame, completing an action dismisses the stage.</summary>
     bool Durable => false;
 
-    /// <summary>The board to paint behind this card, or null to use the stage's live map. Full-surface
-    /// content ignores this (it draws its own board).</summary>
-    NavMap? BackdropBoard() => null;
-
-    /// <summary>The spatial scene to paint behind this card while the user is in the spatial model, or null
-    /// to fall back to <see cref="BackdropBoard"/> / the live spatial scene. Lets a card highlight its
-    /// target spatially (the jump palette) instead of only on the row map.</summary>
+    /// <summary>The spatial scene to paint behind this card, or null to use the stage's live map. Lets a
+    /// card highlight its own target spatially (the jump palette, a snapshot's layout). Full-surface content
+    /// ignores this (it draws its own board).</summary>
     SpatialScene? BackdropScene() => null;
 
     /// <summary>Called after the view is hosted and the host is foregrounded — take focus, start timers,

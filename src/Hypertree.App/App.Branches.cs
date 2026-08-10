@@ -105,7 +105,7 @@ public sealed partial class App
             BranchTemplate t = template; // capture per iteration
             items.Add(new PaletteItem(t.Name, string.Join(" · ", t.Labels), "🗑",
                 () => ConfirmDeleteTemplate(t),          // Enter deletes (pushes a confirm card over this palette)…
-                Preview: () => TemplatePreview(t),        // show the branch this template would stand up
+                SpatialPreview: () => TemplatePreview(t), // show the branch this template would stand up
                 OnDelete: () => ConfirmDeleteTemplate(t))); // …and Del does the same on the highlighted row
         }
 
@@ -150,17 +150,17 @@ public sealed partial class App
         }, confirmLabel: "Delete"));
     }
 
-    // Preview board for a template: the single branch it would add (its desktops), sitting below a stub
-    // main timeline — so the manager shows, at a glance, exactly what picking this template stands up.
-    private static NavMap TemplatePreview(BranchTemplate t)
+    // Preview scene for a template: the single group it would add (its desktops as rooms), sitting below a
+    // stub main row — so the manager shows, at a glance, exactly what picking this template stands up. Built
+    // from a synthetic source with placeholder ids and an empty state, so the rooms fall back to the default
+    // row layout (main on top, the template's group below).
+    private static SpatialScene TemplatePreview(BranchTemplate t)
     {
-        var tiles = t.Labels.Select(l => new NavMapTile(l, IsCurrent: false)).ToList();
-        var branch = new NavMapBranch(0, t.Name, tiles, IsCurrentLevel: true, Cursor: 0);
-        return new NavMap(
-            TopRow: new[] { new NavMapTile("main", IsCurrent: false) },
-            TopCursor: 0, OnTop: true,
-            Branches: new[] { branch },
-            TopPosition: 0);
+        SpatialDesktop Room(string label) => new(new DesktopId(Guid.NewGuid()), label, Selected: false, Here: false, WindowCount: 0);
+
+        var main = new SpatialGroupSource(Guid.Empty, "main", IsMain: true, new[] { Room("main") });
+        var branch = new SpatialGroupSource(Guid.NewGuid(), t.Name, IsMain: false, t.Labels.Select(Room).ToList());
+        return SpatialScene.From(new SpatialSource(new[] { main, branch }), new SpatialState());
     }
 
     private void RemoveBranch(int index)
@@ -199,14 +199,14 @@ public sealed partial class App
 
         // Name the branch in the prompt: a label like "api" says nothing about which branch it sits in, and
         // the same label commonly repeats across branches (that's the point of templates).
-        NavMapBranch g = _model.BuildMap().Branches[branchIndex];
+        string branchName = _model.BranchNameAt(branchIndex) ?? "";
         // Taking a branch's only desktop takes the branch with it (see DetachBranchDesktop), which is a
         // bigger deal than the prompt would otherwise let on.
-        string consequence = g.Desktops.Count == 1
-            ? $"It’s the only desktop in “{g.Name}”, so the branch goes too. Any windows on it move to another desktop."
+        string consequence = _model.BranchDesktopCount(branchIndex) == 1
+            ? $"It’s the only desktop in “{branchName}”, so the branch goes too. Any windows on it move to another desktop."
             : "Any windows on it move to another desktop.";
 
-        Confirm($"Delete desktop “{peek.Value.label}” from branch “{g.Name}”?\n{consequence}", () =>
+        Confirm($"Delete desktop “{peek.Value.label}” from branch “{branchName}”?\n{consequence}", () =>
         {
             DesktopId fallback = Fallback(peek.Value.id);
             DesktopId? id = _model.DetachBranchDesktop(branchIndex, desktopIndex);

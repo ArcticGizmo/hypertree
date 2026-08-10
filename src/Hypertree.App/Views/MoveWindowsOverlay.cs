@@ -3,44 +3,45 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Hypertree.App.Views.Scene;
+using Hypertree.Desktops;
+using Hypertree.Layout;
 using Hypertree.Scopes;
 using Hypertree.Settings;
+using Hypertree.Spatial;
 
 namespace Hypertree.App.Views;
 
 /// <summary>
 /// The two-phase "move windows" flow. Phase 1 is the shared <see cref="WindowPickerContent"/> grid — the
-/// current desktop's windows, multi-select, now with a search box. Phase 2 (this class's own) reuses
-/// <see cref="MapSurface"/> to show the map while the user navigates to a destination, then drops the
-/// selected windows there.
+/// current desktop's windows, multi-select, with a search box. Phase 2 (this class's own) shows the
+/// <b>spatial map</b> and lets the user drive a blue selection cursor to a destination room (arrow keys pick
+/// the nearest room in that direction, sharing the map's own resolver), then drops the selected windows onto
+/// it with Enter.
 ///
-/// It holds no model: navigation and the move itself are raised as events for <c>App</c> (which owns the
-/// <see cref="NavigationModel"/> and desktop controller); the board is pulled via <see cref="BoardProvider"/>.
+/// Unlike the old row-map phase, navigating never switches desktops: the origin stays current and the cursor
+/// just roams the stationary map, so cancelling has nothing to undo. It holds no model — the destination and
+/// the drop are raised as events for <c>App</c> (which owns the <see cref="NavigationModel"/> and desktop
+/// controller); the scene is pulled live via <see cref="SceneProvider"/>.
 /// </summary>
 internal sealed class MoveContent : WindowPickerContent
 {
     private bool _targeting;
-    private bool _completed; // a successful drop — so OnRemoved doesn't fire the cancel path
+    private DesktopId? _cursor; // the blue selection over the map; homed onto the origin on entry
 
-    /// <summary>Supplies the board for phase 2 (App: the live map centred on the move's origin).</summary>
-    public Func<NavMap>? BoardProvider;
-    /// <summary>A phase-2 arrow — App applies it to the model; we then re-pull the board.</summary>
-    public event Action<NavAction>? NavigateRequested;
-    /// <summary>Phase-2 Enter — App moves these windows onto the current desktop.</summary>
-    public event Action<IReadOnlyList<nint>>? MoveRequested;
-    /// <summary>Dismissed without dropping (Esc / Backspace / click-away) — App restores the origin.</summary>
-    public event Action? Cancelled;
+    /// <summary>Supplies the live spatial scene for phase 2 (App: the current source + persisted state).</summary>
+    public Func<(SpatialSource Source, SpatialState State)>? SceneProvider;
+    /// <summary>Phase-2 Enter — App moves these windows onto the chosen destination room.</summary>
+    public event Action<DesktopId, IReadOnlyList<nint>>? MoveRequested;
 
     public MoveContent(WindowMoveSession session, double initialZoom = 1.0) : base(session, initialZoom) { }
 
     protected override string PickerHint => "←→↑↓ move · Space tick · Enter choose destination · Esc cancel";
     protected override string EmptyHint => "No windows to move on this desktop · Esc to close";
 
-    public override void OnRemoved()
-    {
-        base.OnRemoved(); // dispose thumbnails
-        if (!_completed) Cancelled?.Invoke(); // Esc / click-away / re-press → restore the origin
-    }
+    // Nothing to restore on a cancel — phase 2 never leaves the origin — so teardown is just the base's
+    // thumbnail disposal.
+    public override void OnRemoved() => base.OnRemoved();
 
     // Phase 1 Enter (with a selection) advances to picking a destination on the map.
     protected override void ConfirmSelection() => EnterTargeting();
@@ -57,45 +58,69 @@ internal sealed class MoveContent : WindowPickerContent
         switch (e.Key)
         {
             case Key.Escape or Key.Back: Stage?.Back(); e.Handled = true; break; // cancel → back to the map (or hide)
-            case Key.Left: Navigate(NavAction.MoveLeft); e.Handled = true; break;
-            case Key.Right: Navigate(NavAction.MoveRight); e.Handled = true; break;
-            case Key.Up: Navigate(NavAction.Surface); e.Handled = true; break;
-            case Key.Down: Navigate(NavAction.Dive); e.Handled = true; break;
+            case Key.Left: Nudge(-1, 0); e.Handled = true; break;
+            case Key.Right: Nudge(1, 0); e.Handled = true; break;
+            case Key.Up: Nudge(0, -1); e.Handled = true; break;
+            case Key.Down: Nudge(0, 1); e.Handled = true; break;
             case Key.Enter:
-                _completed = true;
-                MoveRequested?.Invoke(Session.SelectedHwnds);
-                Stage?.CompleteToBase(); // unwind to the map if we opened over it, else dismiss to the desktop
+                if (_cursor is { } target)
+                {
+                    MoveRequested?.Invoke(target, Session.SelectedHwnds);
+                    Stage?.CompleteToBase(); // unwind to the map if we opened over it, else dismiss to the desktop
+                }
                 e.Handled = true;
                 break;
         }
     }
 
-    // Apply the navigation through App (which owns the model), then redraw from the fresh board.
-    private void Navigate(NavAction a)
-    {
-        NavigateRequested?.Invoke(a);
-        RenderTargeting();
-    }
-
-    // ── Phase 2: the map board ──────────────────────────────────────────────────────
+    // ── Phase 2: the spatial map ────────────────────────────────────────────────────
 
     private void EnterTargeting()
     {
         _targeting = true;
-        LeavePicker(); // no live previews / search box behind the board
+        LeavePicker();   // no live previews / search box behind the board
+        _cursor = null;  // home onto the origin on the first render
+        RenderTargeting();
+    }
+
+    // Step the blue cursor to the nearest room in the pressed direction, sharing the map's own resolver so
+    // move and the interactive map agree on where each arrow lands.
+    private void Nudge(int dx, int dy)
+    {
+        if (SceneProvider?.Invoke() is not { } sp) return;
+        SpatialScene scene = SpatialScene.From(sp.Source, sp.State);
+        if (scene.Rooms.Count == 0) return;
+        DesktopId cur = _cursor ?? scene.Rooms[0].Id;
+        if (SpatialNavigation.NextInDirection(scene, cur, dx, dy) is { } next) _cursor = next;
         RenderTargeting();
     }
 
     private void RenderTargeting()
     {
-        NavMap? map = BoardProvider?.Invoke();
-        if (map is null) return;
+        if (SceneProvider?.Invoke() is not { } sp) return;
+        (SpatialSource source, SpatialState state) = sp;
+
+        // Home the cursor onto the desktop you're on (the source's selected room) the first time in, and
+        // recover if the room it sat on vanished (an external delete since we entered).
+        SpatialScene probe = SpatialScene.From(source, state);
+        if (_cursor is null || probe.Rooms.All(r => r.Id != _cursor))
+            _cursor = probe.Rooms.FirstOrDefault(r => r.Here)?.Id
+                   ?? probe.Rooms.FirstOrDefault(r => r.Selected)?.Id
+                   ?? probe.Rooms.FirstOrDefault()?.Id;
+
+        // With the cursor injected, it is the blue selection and the desktop you're on becomes the green
+        // "here" — so origin and target read apart exactly as they do on the interactive map.
+        SpatialScene display = _cursor is { } c ? SpatialScene.From(source, state, c) : probe;
 
         double width = Stage?.HostWidth ?? 1280, height = Stage?.HostHeight ?? 800;
-        Control board = MapSurface.Render(map, width, height, Stage?.MapStyle ?? MapStyle.Board, Stage?.MapZoom ?? 1.0);
+        Control board = SpatialPainter.Render(display, width, height, Stage?.MapZoom ?? 1.0, new MapCamera(),
+                                              style: Stage?.MapStyle ?? MapStyle.Board);
 
         int n = Session.SelectedCount;
-        Border banner = HintBar($"Moving {n} window{(n == 1 ? "" : "s")} · ←→↑↓ navigate · Enter to drop here · Esc/Backspace cancel");
+        string dest = _cursor is { } cur && display.Rooms.FirstOrDefault(r => r.Id == cur) is { } room
+            ? room.Label : "…";
+        Border banner = HintBar($"Moving {n} window{(n == 1 ? "" : "s")} → “{dest}” · " +
+                                "←→↑↓ pick a room · Enter to move here · Esc/Backspace cancel");
         banner.VerticalAlignment = VerticalAlignment.Top;
         banner.Margin = new Thickness(0, 24, 0, 0);
 
@@ -103,8 +128,7 @@ internal sealed class MoveContent : WindowPickerContent
         Root.Children.Add(board);
         Root.Children.Add(banner);
 
-        // Navigating switched desktops, which can surface that desktop's foreground window above the
-        // pinned host — re-lift so the board stays visible (mirrors SpatialOverlay.Render).
+        // Re-lift so the board stays visible above the pinned host (mirrors SpatialOverlay.Render).
         Stage?.BringToFront();
     }
 }

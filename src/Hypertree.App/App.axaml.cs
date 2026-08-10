@@ -64,7 +64,6 @@ public sealed partial class App : Application
     // framed where the map opens, and the two never disagree about where the map sits. Reframed on a theme
     // switch (metrics change). See docs/design/scene-camera.md.
     private readonly MapCamera _mapCamera = new();
-    private DesktopId? _moveOrigin; // where the current move flow started, for cancel/restore
     private TaskbarLabel? _taskbarLabel;
     private SwitcherWindow? _switcher;
     private TrayIcon? _tray;

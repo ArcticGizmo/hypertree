@@ -9,6 +9,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.5.2] - 2026-08-10
+
+### Changed
+
+- `m` — the move-windows destination picker now shows the spatial map; arrow a cursor to any room and `Enter` drops the windows there.
+- Picking a destination no longer switches desktops as you navigate — you stay on the origin until the windows land.
+
+---
+
 ## [v0.5.1] - 2026-08-10
 
 ### Changed

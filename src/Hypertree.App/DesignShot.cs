@@ -25,83 +25,22 @@ internal static class DesignShot
     {
         Directory.CreateDirectory(outDir);
 
-        // Window counts vary per tile (with one empty desktop, "Notes"=0) so the shot exercises the
-        // at-a-glance count badges and the dimmed-empty styling. `here` marks the "came from" desktop
-        // with the green outline shown while navigating.
-        List<NavMapTile> Top(int current, int here = -1) => new()
-        {
-            new("Home", current == 0, here == 0, 4), new("Comms", current == 1, here == 1, 2),
-            new("Web", current == 2, here == 2, 7), new("Notes", current == 3, here == 3, 0),
-        };
-        NavMapBranch Feat(bool live, int cur) => new(0, "FEAT-123", new List<NavMapTile>
-        {
-            new("SPA", live && cur == 0, WindowCount: 3), new("API", live && cur == 1, WindowCount: 1),
-            new("Mobile", live && cur == 2, WindowCount: 0),
-        }, live, cur);
-        NavMapBranch Hotfix() => new(1, "hotfix", new List<NavMapTile>
-            { new("db", false, WindowCount: 1), new("api", false, WindowCount: 0) }, false, 0);
-
-        // Stable pivot: FEAT-123 sits above main, hotfix below (main slot 1). On the main timeline,
-        // Web (cursor 2) is current and main renders between the two branches.
-        Save(new NavMap(Top(2), 2, true, new List<NavMapBranch> { Feat(false, 1), Hotfix() }, 1),
-             Path.Combine(outDir, "board-top-row.png"));
-
-        // Same fixed layout, now with the cursor inside FEAT-123 (on API=cursor 1) — the branch above
-        // main. Main keeps its slot; it does not move. We dived from Web, so it wears the green
-        // "came from" outline.
-        Save(new NavMap(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1),
-             Path.Combine(outDir, "board-dived.png"));
-
-        // The drag geometry: the same board with the BoardLayout it reported drawn back over it. The map's
-        // drag hit-tests that layout rather than the visual tree, so this is how we check the two agree —
-        // every outline should sit exactly on the tile (or branch box) it claims, and each caret in the
-        // middle of the gap it inserts at.
-        SaveLayoutCheck(new NavMap(Top(2), 2, true, new List<NavMapBranch> { Feat(false, 1), Hotfix() }, 1),
-                        Path.Combine(outDir, "board-drag-layout.png"));
-
-        // The metro-map view of the same two states, so it can be compared tile-for-station against the board.
-        SaveMetro(new NavMap(Top(2), 2, true, new List<NavMapBranch> { Feat(false, 1), Hotfix() }, 1),
-                  Path.Combine(outDir, "metro-top-row.png"));
-        SaveMetro(new NavMap(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1),
-                  Path.Combine(outDir, "metro-dived.png"));
-
-        // A busier board: four branches (two above main, two below) exercise the line-colour cycle and the
-        // vertical stack, and a one-desktop branch checks the single-station stub route.
-        var busy = new List<NavMapBranch>
-        {
-            new(0, "FEAT-123", new List<NavMapTile> { new("SPA", false, WindowCount: 3), new("API", false, WindowCount: 1), new("Mobile", false, WindowCount: 0) }, false, 1),
-            new(1, "release-4.2", new List<NavMapTile> { new("build", false, WindowCount: 2), new("test", false, WindowCount: 5), new("docs", false, WindowCount: 1), new("ship", false, WindowCount: 0) }, false, 0),
-            new(2, "hotfix", new List<NavMapTile> { new("db", false, WindowCount: 1), new("api", false, WindowCount: 0) }, false, 0),
-            new(3, "spike", new List<NavMapTile> { new("scratch", false, WindowCount: 2) }, false, 0),
-        };
-        SaveMetro(new NavMap(Top(2), 2, true, busy, 2), Path.Combine(outDir, "metro-busy.png"));
-
-        // The ASCII terminal theme of the same states, so it can be compared card-for-tile against the others.
-        SaveAscii(new NavMap(Top(2), 2, true, new List<NavMapBranch> { Feat(false, 1), Hotfix() }, 1),
-                  Path.Combine(outDir, "ascii-top-row.png"));
-        SaveAscii(new NavMap(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1),
-                  Path.Combine(outDir, "ascii-dived.png"));
-        SaveAscii(new NavMap(Top(2), 2, true, busy, 2), Path.Combine(outDir, "ascii-busy.png"));
-        SaveMetroLayoutCheck(new NavMap(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1),
-                             Path.Combine(outDir, "metro-drag-layout.png"));
-
-        // Metro over a bright, busy fake desktop — the flat dim vs. the shipped centre-weighted vignette, so
-        // the contrast gain under the coloured lines is visible side by side.
-        NavMap backdropMap = new(Top(2, here: 2), 2, false, new List<NavMapBranch> { Feat(true, 1), Hotfix() }, 1);
-        SaveMetroBackdrop(backdropMap, Path.Combine(outDir, "metro-backdrop-flat.png"), vignette: false);
-        SaveMetroBackdrop(backdropMap, Path.Combine(outDir, "metro-backdrop-vignette.png"), vignette: true);
-
-        // The spatial map: the same desktops as the busy board, but placed freely in 2-D as rooms inside
-        // group hulls. "top" is a tidy hand-arrangement; "fragmented" flings half of release-4.2 away so a
-        // group splits into two hulls (the ⚡-fragments state Tidy will later reunite).
+        // The spatial map: desktops placed freely in 2-D as rooms inside group hulls. "top" is a tidy
+        // hand-arrangement; "fragmented" flings half of release-4.2 away so a group splits into two hulls
+        // (the ⚡-fragments state Tidy will later reunite).
         SaveSpatial(Path.Combine(outDir, "spatial-top.png"), fragmented: false);
         SaveSpatial(Path.Combine(outDir, "spatial-fragmented.png"), fragmented: true);
         SaveSpatial(Path.Combine(outDir, "spatial-group.png"), fragmented: false, selectedGroup: 2); // release-4.2 selected
         SaveSpatial(Path.Combine(outDir, "spatial-tidied.png"), fragmented: true, tidied: true);      // the fragmented board after Tidy
-        // The same spatial layout rendered in each Map style, so room glyphs can be checked to match the row model.
+        // The same spatial layout rendered in each Map style, so room glyphs can be checked across themes.
         SaveSpatial(Path.Combine(outDir, "spatial-ascii.png"), fragmented: false, style: MapStyle.Ascii);
         SaveSpatial(Path.Combine(outDir, "spatial-metro.png"), fragmented: false, style: MapStyle.Metro);
         SaveSpatial(Path.Combine(outDir, "spatial-overlap.png"), fragmented: false, overlap: true); // two rooms on one cell
+
+        // The map over a bright, busy fake desktop — the flat dim vs. the shipped centre-weighted vignette,
+        // so the contrast gain under the coloured rooms is visible side by side.
+        SaveSpatialBackdrop(Path.Combine(outDir, "spatial-backdrop-flat.png"), vignette: false);
+        SaveSpatialBackdrop(Path.Combine(outDir, "spatial-backdrop-vignette.png"), vignette: true);
 
         SaveCards(outDir);
         SaveLauncher(outDir);
@@ -115,8 +54,21 @@ internal static class DesignShot
     private static void SaveSpatial(string path, bool fragmented, int? selectedGroup = null, bool tidied = false,
                                     MapStyle style = MapStyle.Board, bool overlap = false)
     {
+        (SpatialSource source, SpatialState state) = SampleScene(fragmented, overlap, tidied);
+        Guid? sel = selectedGroup is { } sg ? SampleGid(sg) : null;
+        Save(SpatialPainter.Render(SpatialScene.From(source, state), ScreenW, ScreenH, 1.0, new MapCamera(),
+                                   selectedGroup: sel, style: style), path);
+    }
+
+    // Stable group id for the sample data, so a group can be referenced (e.g. the selected one) by number.
+    private static Guid SampleGid(int n) => new($"{n:D8}-aaaa-0000-0000-000000000000");
+
+    // The hand-built sample: five groups (main + four branches) placed at explicit grid positions, so the
+    // room tiles, group hulls, name badges, and the selected/here/empty states can be eyeballed without the
+    // tray. Shared by the plain map shots and the backdrop-contrast shot.
+    private static (SpatialSource Source, SpatialState State) SampleScene(bool fragmented, bool overlap, bool tidied)
+    {
         DesktopId D(int n) => new(new Guid($"{n:D8}-0000-0000-0000-000000000000"));
-        Guid Gid(int n) => new($"{n:D8}-aaaa-0000-0000-000000000000");
         SpatialDesktop Desk(int id, string label, int win, bool sel = false, bool here = false)
             => new(D(id), label, sel, here, win);
 
@@ -124,13 +76,13 @@ internal static class DesignShot
         {
             new SpatialGroupSource(Guid.Empty, "main", IsMain: true, new[]
                 { Desk(0, "Home", 4), Desk(1, "Comms", 2), Desk(2, "Web", 7, sel: true, here: true), Desk(3, "Notes", 0) }),
-            new SpatialGroupSource(Gid(1), "FEAT-123", IsMain: false, new[]
+            new SpatialGroupSource(SampleGid(1), "FEAT-123", IsMain: false, new[]
                 { Desk(10, "SPA", 3), Desk(11, "API", 1), Desk(12, "Mobile", 0) }),
-            new SpatialGroupSource(Gid(2), "release-4.2", IsMain: false, new[]
+            new SpatialGroupSource(SampleGid(2), "release-4.2", IsMain: false, new[]
                 { Desk(20, "build", 2), Desk(21, "test", 5), Desk(22, "docs", 1), Desk(23, "ship", 0) }),
-            new SpatialGroupSource(Gid(3), "hotfix", IsMain: false, new[]
+            new SpatialGroupSource(SampleGid(3), "hotfix", IsMain: false, new[]
                 { Desk(30, "db", 1), Desk(31, "api", 0) }),
-            new SpatialGroupSource(Gid(4), "spike", IsMain: false, new[] { Desk(40, "scratch", 2) }),
+            new SpatialGroupSource(SampleGid(4), "spike", IsMain: false, new[] { Desk(40, "scratch", 2) }),
         });
 
         var state = new SpatialState();
@@ -148,9 +100,57 @@ internal static class DesignShot
             foreach (KeyValuePair<DesktopId, GridPos> kv in SpatialTidy.All(SpatialScene.From(source, state)))
                 state.SetPosition(kv.Key.Value, kv.Value);
 
-        Guid? sel = selectedGroup is { } sg ? Gid(sg) : null;
-        Save(SpatialPainter.Render(SpatialScene.From(source, state), ScreenW, ScreenH, 1.0, new MapCamera(),
-                                   selectedGroup: sel, style: style), path);
+        return (source, state);
+    }
+
+    // The spatial map over a bright, busy fake desktop, laid under the real stage dim — either the flat slab
+    // or the shipped centre-weighted vignette — so the contrast gain under the coloured rooms can be
+    // eyeballed without the tray. The only way to check that contrast offscreen.
+    private static void SaveSpatialBackdrop(string path, bool vignette)
+    {
+        var desktop = new Panel { Width = ScreenW, Height = ScreenH };
+        desktop.Children.Add(new Border
+        {
+            Width = ScreenW, Height = ScreenH,
+            Background = new LinearGradientBrush
+            {
+                StartPoint = RelativePoint.TopLeft, EndPoint = RelativePoint.BottomRight,
+                GradientStops =
+                {
+                    new GradientStop(Color.Parse("#BFD6EE"), 0), new GradientStop(Color.Parse("#F4F7FB"), 0.5),
+                    new GradientStop(Color.Parse("#DAE2EC"), 1),
+                },
+            },
+        });
+        // A scatter of bright "windows", so the board is judged against varied high-luminance content.
+        (double x, double y, double w, double h, string c)[] wins =
+        {
+            (120, 90, 520, 360, "#FFFFFF"), (900, 120, 380, 300, "#EAF2FF"),
+            (300, 520, 560, 300, "#FFF6E6"), (980, 520, 340, 280, "#F0FFF4"),
+            (60, 470, 200, 360, "#FDE8EF"),
+        };
+        var winCanvas = new Canvas { Width = ScreenW, Height = ScreenH };
+        foreach ((double x, double y, double w, double h, string c) in wins)
+        {
+            var win = new Border
+            {
+                Width = w, Height = h, Background = new SolidColorBrush(Color.Parse(c)),
+                CornerRadius = new CornerRadius(8),
+            };
+            Canvas.SetLeft(win, x);
+            Canvas.SetTop(win, y);
+            winCanvas.Children.Add(win);
+        }
+        desktop.Children.Add(winCanvas);
+
+        var dim = new Border
+        {
+            Width = ScreenW, Height = ScreenH,
+            Background = vignette ? StageWindow.BuildDim() : new SolidColorBrush(Color.FromArgb(0x9E, 0x0E, 0x0E, 0x12)),
+        };
+        (SpatialSource source, SpatialState state) = SampleScene(fragmented: false, overlap: false, tidied: false);
+        Control board = SpatialPainter.Render(SpatialScene.From(source, state), ScreenW, ScreenH, 1.0, new MapCamera());
+        Save(new Panel { Children = { desktop, dim, board } }, path);
     }
 
     /// <summary>
@@ -288,137 +288,6 @@ internal static class DesignShot
     // A representative primary-monitor size, so the shot shows the real full-screen, centred layout
     // (F1/F3) rather than a size-to-content card.
     private const int ScreenW = 1440, ScreenH = 900;
-
-    // Render the board, then draw the layout it reported on top: a box per tile, a box per row band, and a
-    // caret at every insertion point of every row.
-    private static void SaveLayoutCheck(NavMap map, string path)
-    {
-        var layout = new BoardLayout();
-        Control board = SceneRenderer.Render(new BoardPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera(), layout: layout);
-        SaveWithLayoutMarks(board, layout, path);
-    }
-
-    // The same verification for the metro view: prove the station cells, line bands, carets and boundaries
-    // MetroView reports sit on the diagram, so the interactive map's click/drag hit-testing lines up there
-    // exactly as it does on the board.
-    private static void SaveMetroLayoutCheck(NavMap map, string path)
-    {
-        var layout = new BoardLayout();
-        Control board = SceneRenderer.Render(new MetroPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera(), layout: layout);
-        SaveWithLayoutMarks(board, layout, path);
-    }
-
-    private static void SaveWithLayoutMarks(Control board, BoardLayout layout, string path)
-    {
-        var marks = new Canvas { Width = ScreenW, Height = ScreenH };
-        void Outline(Rect r, Color c, double thickness)
-        {
-            var b = new Border
-            {
-                Width = r.Width, Height = r.Height,
-                BorderBrush = new SolidColorBrush(c), BorderThickness = new Thickness(thickness),
-            };
-            Canvas.SetLeft(b, r.X);
-            Canvas.SetTop(b, r.Y);
-            marks.Children.Add(b);
-        }
-
-        foreach (BoardRow row in layout.Rows)
-        {
-            Outline(row.Bounds, Color.Parse("#38BDF8"), 1); // row band — what a branch drag grabs
-            // Every insertion point, drawn as the map's own drop caret is (a filled bar, not an outline).
-            for (int i = 0; i <= row.DesktopCount; i++)
-            {
-                var caret = new Avalonia.Controls.Shapes.Rectangle
-                {
-                    Width = 3, Height = row.TileHeight + 8, RadiusX = 2, RadiusY = 2,
-                    Fill = new SolidColorBrush(Color.Parse("#F472B6")),
-                };
-                Canvas.SetLeft(caret, row.BoundaryX(i) - 1.5);
-                Canvas.SetTop(caret, row.TileTop - 4);
-                marks.Children.Add(caret);
-            }
-        }
-        // Every row boundary, drawn as the map's branch-drop separator is: across both rows it splits.
-        for (int b = 0; b < layout.BoundaryCount; b++)
-        {
-            (double left, double right) = layout.BoundarySpan(b);
-            var sep = new Avalonia.Controls.Shapes.Rectangle
-            {
-                Width = right - left, Height = 3, RadiusX = 2, RadiusY = 2,
-                Fill = new SolidColorBrush(Color.Parse("#FBBF24")),
-            };
-            Canvas.SetLeft(sep, left);
-            Canvas.SetTop(sep, layout.BoundaryY(b) - 1.5);
-            marks.Children.Add(sep);
-        }
-
-        foreach (BoardTile tile in layout.Tiles)
-            Outline(tile.Bounds, Color.Parse("#34D399"), 1); // tile hit rects
-
-        Save(new Panel { Children = { board, marks } }, path);
-    }
-
-    // Render the metro-map view of a board to PNG, over the same dark ground the real overlay uses.
-    private static void SaveMetro(NavMap map, string path)
-        => Save(SceneRenderer.Render(new MetroPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera()), path);
-
-    private static void SaveAscii(NavMap map, string path)
-        => Save(SceneRenderer.Render(new AsciiPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera()), path);
-
-    // The overlay is semi-transparent over the live desktop, so how the board reads depends on the screen
-    // behind it. This shot fakes a bright, busy desktop, lays the real stage dim (the centre-weighted
-    // vignette) over it, then the metro board — the only way to eyeball that contrast without the tray.
-    private static void SaveMetroBackdrop(NavMap map, string path, bool vignette)
-    {
-        var desktop = new Panel { Width = ScreenW, Height = ScreenH };
-        desktop.Children.Add(new Border
-        {
-            Width = ScreenW, Height = ScreenH,
-            Background = new LinearGradientBrush
-            {
-                StartPoint = RelativePoint.TopLeft, EndPoint = RelativePoint.BottomRight,
-                GradientStops =
-                {
-                    new GradientStop(Color.Parse("#BFD6EE"), 0), new GradientStop(Color.Parse("#F4F7FB"), 0.5),
-                    new GradientStop(Color.Parse("#DAE2EC"), 1),
-                },
-            },
-        });
-        // A scatter of bright "windows", so the board is judged against varied high-luminance content.
-        (double x, double y, double w, double h, string c)[] wins =
-        {
-            (120, 90, 520, 360, "#FFFFFF"), (900, 120, 380, 300, "#EAF2FF"),
-            (300, 520, 560, 300, "#FFF6E6"), (980, 520, 340, 280, "#F0FFF4"),
-            (60, 470, 200, 360, "#FDE8EF"),
-        };
-        var winCanvas = new Canvas { Width = ScreenW, Height = ScreenH };
-        foreach ((double x, double y, double w, double h, string c) in wins)
-        {
-            var win = new Border
-            {
-                Width = w, Height = h, Background = new SolidColorBrush(Color.Parse(c)),
-                CornerRadius = new CornerRadius(8),
-            };
-            Canvas.SetLeft(win, x);
-            Canvas.SetTop(win, y);
-            winCanvas.Children.Add(win);
-        }
-        desktop.Children.Add(winCanvas);
-
-        var dim = new Border
-        {
-            Width = ScreenW, Height = ScreenH,
-            Background = vignette ? StageWindow.BuildDim() : new SolidColorBrush(Color.FromArgb(0x9E, 0x0E, 0x0E, 0x12)),
-        };
-        Control board = SceneRenderer.Render(new MetroPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera());
-        Save(new Panel { Children = { desktop, dim, board } }, path);
-    }
-
-    private static void Save(NavMap map, string path)
-        // Pass delete callbacks so the × badges render in the verification shot.
-        => Save(SceneRenderer.Render(new BoardPainter(), map, ScreenW, ScreenH, 1.0, new MapCamera(),
-                                     onTopDelete: _ => { }, onBranchDelete: (_, _) => { }), path);
 
     private static void Save(Control content, string path)
     {

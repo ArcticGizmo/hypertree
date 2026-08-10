@@ -1,5 +1,6 @@
+using Hypertree.Desktops;
 using Hypertree.Layout;
-using Hypertree.Scopes;
+using Hypertree.Spatial;
 using Xunit;
 
 namespace Hypertree.Tests;
@@ -104,36 +105,50 @@ public class MapCameraTests
 
     // ── Integration through Update on a real overflowing layout ────────────────────────
 
-    private static NavMapTile T(string label, bool current = false) => new(label, current, false, 1);
-
-    // A tall stack: main plus five branches below it, so the vertical axis overflows a short viewport.
-    private static NavMap TallMap(int currentBranch, int currentCol)
-    {
-        var branches = new List<NavMapBranch>();
-        for (int i = 0; i < 5; i++)
-        {
-            var desks = new[] { T("d0", currentBranch == i && currentCol == 0), T("d1", currentBranch == i && currentCol == 1) };
-            branches.Add(new NavMapBranch(i, $"b{i}", desks, IsCurrentLevel: currentBranch == i, Cursor: currentCol));
-        }
-        return new NavMap(new[] { T("a"), T("b") }, TopCursor: 0, OnTop: false, branches, TopPosition: 0);
-    }
-
     private static readonly SceneMetrics Tall = new(CellStride: 100, CellWidth: 80, CellHeight: 60, RowPitch: 120, RowHeight: 90);
+
+    private static DesktopId D(int n) => new(new Guid($"{n:D8}-0000-0000-0000-000000000000"));
+
+    // A tall stack laid on the grid: a 2-room main row on top, then five 2-room branch rows below it, so the
+    // vertical axis overflows a short viewport while the two columns fit a wide one. currentBranch/currentCol
+    // pick the selected room. The spatial layout is an ICameraLayout, so it drives the same camera the map does.
+    private static SpatialLayout TallLayout(int currentBranch, int currentCol)
+    {
+        SpatialDesktop Room(int id, string label, bool sel) => new(D(id), label, sel, Here: false, WindowCount: 1);
+
+        var groups = new List<SpatialGroupSource>
+        {
+            new(Guid.Empty, "main", IsMain: true, new[] { Room(0, "a", false), Room(1, "b", false) }),
+        };
+        for (int i = 0; i < 5; i++)
+            groups.Add(new SpatialGroupSource(Guid.NewGuid(), $"b{i}", IsMain: false, new[]
+            {
+                Room(10 + i * 2, "d0", currentBranch == i && currentCol == 0),
+                Room(11 + i * 2, "d1", currentBranch == i && currentCol == 1),
+            }));
+
+        var state = new SpatialState();
+        void P(int id, int x, int y) => state.SetPosition(D(id).Value, new GridPos(x, y));
+        P(0, 0, 0); P(1, 1, 0);                                  // main row on top
+        for (int i = 0; i < 5; i++) { P(10 + i * 2, 0, i + 1); P(11 + i * 2, 1, i + 1); } // branch rows below
+
+        return new SpatialLayout(SpatialScene.From(new SpatialSource(groups), state), Tall);
+    }
 
     [Fact]
     public void Update_centres_a_fitting_axis_and_follows_an_overflowing_one()
     {
         var cam = new MapCamera();
         // Wide viewport (X fits) but short (Y overflows the 6-row stack).
-        var layout = new SceneLayout(Scene.From(TallMap(currentBranch: 0, currentCol: 0)), Tall);
+        SpatialLayout layout = TallLayout(currentBranch: 0, currentCol: 0);
         cam.Update(layout, viewW: 2000, viewH: 300);
 
-        // X fits: two columns span [-40, 140] (width 180) → centred in 2000.
+        // X fits: two columns span a width far under 2000 → centred.
         (double xLo, double xHi) = layout.WorldX();
         double expectX = (2000 - (xHi - xLo)) / 2 - xLo;
         Assert.Equal(expectX, cam.OffsetX, precision: 6);
 
-        // The selected row (main-relative row 1, the first branch) must be within the 300-tall viewport.
+        // The selected room must be within the 300-tall viewport.
         LayoutRect sel = layout.SelectionRect;
         double top = sel.Top + cam.OffsetY, bottom = sel.Bottom + cam.OffsetY;
         Assert.True(top >= 0 && bottom <= 300, $"selection off screen: [{top},{bottom}]");
@@ -143,12 +158,12 @@ public class MapCameraTests
     public void Update_holds_still_when_the_selection_stays_on_screen()
     {
         var cam = new MapCamera();
-        var near = new SceneLayout(Scene.From(TallMap(currentBranch: 0, currentCol: 0)), Tall);
+        SpatialLayout near = TallLayout(currentBranch: 0, currentCol: 0);
         cam.Update(near, viewW: 2000, viewH: 300);
         double firstY = cam.OffsetY;
 
         // Move the selection one column along the same row (still on screen) — the map should not budge.
-        var moved = new SceneLayout(Scene.From(TallMap(currentBranch: 0, currentCol: 1)), Tall);
+        SpatialLayout moved = TallLayout(currentBranch: 0, currentCol: 1);
         cam.Update(moved, viewW: 2000, viewH: 300);
         Assert.Equal(firstY, cam.OffsetY, precision: 6);
     }

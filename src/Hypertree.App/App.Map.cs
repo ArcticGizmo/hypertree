@@ -145,47 +145,33 @@ public sealed partial class App
         if (_stage.Current is MoveContent) { _stage.Back(); return; } // re-press cancels (via OnRemoved)
 
         _model.Reconcile();
-        _moveOrigin = _desktops.Current;
-        var session = new WindowMoveSession(_desktops.WindowsOn(_moveOrigin.Value));
+        var session = new WindowMoveSession(_desktops.WindowsOn(_desktops.Current));
 
-        // Presenting the move content on the stage swaps out any open map/palette in place. Navigation
-        // and the move are serviced here; the board is pulled live from the model, centred on the origin.
-        var content = new MoveContent(session, _settings.PickerZoom) { BoardProvider = () => _model!.BuildMap(_moveOrigin) };
-        content.NavigateRequested += a => _model!.Apply(a);
+        // Presenting the move content on the stage swaps out any open map/palette in place. The drop is
+        // serviced here; phase 2 pulls the live spatial scene and roams a cursor over it without switching.
+        var content = new MoveContent(session, _settings.PickerZoom)
+        {
+            SceneProvider = () => (_model!.BuildSpatialSource(), _spatial),
+        };
         content.MoveRequested += MoveSelectedWindows;
-        content.Cancelled += CancelMove;
         content.ZoomChanged += PersistPickerZoom; // Ctrl+/Ctrl− — remember the thumbnail size
         // Launched from the map → push over it so completing/cancelling unwinds back to the map (its durable
-        // base). Otherwise (hotkey / tray, no map open) it's a fresh root that dismisses to the desktop —
-        // Back/CompleteToBase then behave exactly like the old Dismiss.
+        // base). Otherwise (hotkey / tray, no map open) it's a fresh root that dismisses to the desktop.
         if (_spatialOverlay?.IsOpen == true) _stage.Present(content);
         else _stage.Summon(content);
     }
 
-    // Phase 2 commit: we've navigated to the destination (it's the current desktop), so move each
-    // selected window there. The content dismisses the stage itself; we stay on the destination.
-    private void MoveSelectedWindows(IReadOnlyList<nint> hwnds)
+    // Phase 2 commit: move each selected window onto the destination room the user picked on the map. We
+    // never left the origin (mirrors pull, which also stays put), so afterwards we just refresh the map (if
+    // open) or flash the origin with its now-reduced window counts.
+    private void MoveSelectedWindows(DesktopId dest, IReadOnlyList<nint> hwnds)
     {
         if (_desktops is null) return;
-        DesktopId dest = _desktops.Current;
         foreach (nint h in hwnds)
         {
             try { _desktops.MoveWindowToDesktop(h, dest); } catch { /* window may have closed — best-effort */ }
         }
-        _moveOrigin = null;
-        RefreshOrFlash(); // flash the destination with its now-updated window counts
-    }
-
-    // Cancel (Esc / Backspace / click-away / re-press) — raised from the move content's OnRemoved as the
-    // stage dismisses it: return to where the move started (phase 2 may have navigated us away) and
-    // re-anchor the model there.
-    private void CancelMove()
-    {
-        if (_desktops is not null && _moveOrigin is { } origin && _desktops.Current != origin)
-            _desktops.SwitchTo(origin);
-        _moveOrigin = null;
-        _model?.Resync();
-        RefreshOverlay(); // if we opened over the map, it's about to be re-presented — give it a fresh board
+        RefreshOrFlash();
     }
 
     // ── Pull windows from other desktops onto this one (Shift+m on the map) ─────────
@@ -286,10 +272,9 @@ public sealed partial class App
     private void ConfirmRemoveBranch(int index)
     {
         if (_model is null) return;
-        var map = _model.BuildMap();
-        if (index < 0 || index >= map.Branches.Count) return;
-        NavMapBranch g = map.Branches[index];
-        Confirm($"Delete branch “{g.Name}”?\nIts {g.Desktops.Count} desktop{(g.Desktops.Count == 1 ? "" : "s")} " +
+        if (_model.BranchNameAt(index) is not { } name) return;
+        int count = _model.BranchDesktopCount(index);
+        Confirm($"Delete branch “{name}”?\nIts {count} desktop{(count == 1 ? "" : "s")} " +
                 "are removed and any windows on them move to another desktop.", () => RemoveBranch(index));
     }
 
@@ -351,7 +336,7 @@ public sealed partial class App
         if (_model is null) return;
 
         _model.Reconcile(); // drop any desktops deleted out from under us before offering jumps
-        NavMap map = _model.BuildMap();
+        SpatialSource src = _model.BuildSpatialSource();
         var items = new List<PaletteItem>();
         int lastIndex = -1; // the last-visited row, to float to the top
 
@@ -360,32 +345,20 @@ public sealed partial class App
         string Detail(string ctx, bool last) => last ? $"{ctx} · (last)" : ctx;
         string Icon(bool last) => last ? "↩" : "→";
 
-        // Every main-timeline desktop, then every branch's desktops (branch name in the detail so
-        // typing a branch name filters to its desktops). Each carries a Preview board that highlights
-        // where the jump would land, shown in the middle of the palette as you move the selection.
-        for (int i = 0; i < map.TopRow.Count; i++)
+        // Every main-timeline desktop first, then every branch's desktops (group name in the detail so
+        // typing a branch name filters to its desktops). Each carries a spatial preview that highlights
+        // where the jump would land, shown behind the palette as you move the selection. Jumping resolves
+        // the room's id to its position, so no index bookkeeping is needed here.
+        foreach (SpatialGroupSource g in src.Groups.Where(g => g.IsMain).Concat(src.Groups.Where(g => !g.IsMain)))
         {
-            int idx = i;
-            DesktopId? tid = _model.PeekTopDesktop(i)?.id;
-            bool last = IsLast(tid);
-            items.Add(new PaletteItem(map.TopRow[i].Label, Detail("main", last), Icon(last),
-                () => Jump(() => _model!.GoToTop(idx)), // no flash — the preview already showed it
-                Preview: () => PreviewMap(onMain: true, topIndex: idx, branchIndex: -1, desktopIndex: -1),
-                SpatialPreview: tid is { } t ? () => SpatialPreviewScene(t) : null));
-            if (last) lastIndex = items.Count - 1;
-        }
-        foreach (NavMapBranch g in map.Branches)
-        {
-            int gi = g.Index;
-            for (int j = 0; j < g.Desktops.Count; j++)
+            string ctx = g.IsMain ? "main" : g.Name;
+            foreach (SpatialDesktop d in g.Desktops)
             {
-                int dj = j;
-                DesktopId? tid = _model.PeekBranchDesktop(gi, dj)?.id;
-                bool last = IsLast(tid);
-                items.Add(new PaletteItem(g.Desktops[j].Label, Detail(g.Name, last), Icon(last),
-                    () => Jump(() => _model!.GoToBranchDesktop(gi, dj)),
-                    Preview: () => PreviewMap(onMain: false, topIndex: -1, branchIndex: gi, desktopIndex: dj),
-                    SpatialPreview: tid is { } t ? () => SpatialPreviewScene(t) : null));
+                DesktopId id = d.Id;
+                bool last = IsLast(id);
+                items.Add(new PaletteItem(d.Label, Detail(ctx, last), Icon(last),
+                    () => Jump(() => JumpToId(id)), // no flash — the preview already showed it
+                    SpatialPreview: () => SpatialPreviewScene(id)));
                 if (last) lastIndex = items.Count - 1;
             }
         }
@@ -404,45 +377,11 @@ public sealed partial class App
                 () => CreateAndGoToDesktop(query))); // no target tile yet — the stage shows the live board
     }
 
-    // The spatial twin of PreviewMap: the current scene with the jump's target as the blue selection (and
-    // the desktop you're on staying the green "here"), so the jump palette highlights where you'd land as a
-    // room while the user is in the spatial model.
+    // The jump palette's preview: the current spatial scene with the jump's target as the blue selection
+    // (and the desktop you're on staying the green "here"), so the palette highlights where you'd land as a
+    // room, centred on where you are — the direction/distance of the jump reads at a glance.
     private SpatialScene SpatialPreviewScene(DesktopId target)
         => SpatialScene.From(_model!.BuildSpatialSource(), _spatial, target);
-
-    // Build a board snapshot that marks a specific desktop as current (for the jump palette's preview),
-    // without moving the model. Rebuilds the tiles from the live map with the target highlighted and
-    // centred on its own row.
-    // Build a preview board for the jump palette. IsCurrent (blue) marks where you ARE now; IsHere
-    // (green) marks the selected target (which defaults to the last-visited desktop). The board is
-    // centred on your current position, so the green target shows the direction/distance of the jump.
-    // (onMain/topIndex/branchIndex/desktopIndex describe the target row.)
-    private NavMap PreviewMap(bool onMain, int topIndex, int branchIndex, int desktopIndex)
-    {
-        NavMap b = _model!.BuildMap();
-
-        bool hereMain = _model.OnTop;
-        int hereTop = _model.CurrentTopIndex;
-        (int hereBranch, int hereDesktop) = _model.CurrentBranchDesktop ?? (-1, -1);
-
-        var top = b.TopRow.Select((t, i) => new NavMapTile(
-            t.Label,
-            hereMain && i == hereTop,      // IsCurrent (blue) = you are here
-            onMain && i == topIndex,       // IsHere (green) = the target
-            t.WindowCount)).ToList();      // keep the at-a-glance count on the preview board
-        var branches = b.Branches.Select(g => new NavMapBranch(
-            g.Index, g.Name,
-            g.Desktops.Select((d, j) => new NavMapTile(
-                d.Label,
-                !hereMain && g.Index == hereBranch && j == hereDesktop,   // blue = current
-                !onMain && g.Index == branchIndex && j == desktopIndex,   // green = target
-                d.WindowCount)).ToList(),
-            // Keep both the current branch and the target branch bright (undimmed).
-            (!hereMain && g.Index == hereBranch) || (!onMain && g.Index == branchIndex),
-            g.Index == hereBranch ? hereDesktop : g.Index == branchIndex ? desktopIndex : g.Cursor)).ToList();
-        int topCursor = hereMain ? hereTop : b.TopCursor;
-        return new NavMap(top, topCursor, hereMain, branches, b.TopPosition);
-    }
 
     // Create a new unbranched desktop named the query and jump straight to it.
     private void CreateAndGoToDesktop(string name)

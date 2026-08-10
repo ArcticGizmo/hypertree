@@ -66,7 +66,7 @@ public class RearrangeTests
         return (m, c);
     }
 
-    private static IEnumerable<string> Names(NavigationModel m) => m.BuildMap().Branches.Select(g => g.Name);
+    private static IEnumerable<string> Names(NavigationModel m) => m.Map().Branches.Select(g => g.Name);
 
     // ── Re-slotting a branch ──────────────────────────────────────────────────────
 
@@ -77,7 +77,7 @@ public class RearrangeTests
         Assert.Equal(1, m.MoveBranchToRow(0, 2));
 
         Assert.Equal(new[] { "B", "A", "C" }, Names(m));
-        Assert.Equal(0, m.BuildMap().TopPosition); // main stays on top
+        Assert.Equal(0, m.Map().TopPosition); // main stays on top
         Assert.Empty(c.Switches);                  // rearranging never switches desktop
     }
 
@@ -87,7 +87,7 @@ public class RearrangeTests
         var (m, _) = Stack(); // main / A / B / C
         Assert.Equal(0, m.MoveBranchToRow(0, 0)); // A takes main's row
 
-        NavMap map = m.BuildMap();
+        var map =m.Map();
         Assert.Equal(new[] { "A", "B", "C" }, map.Branches.Select(g => g.Name)); // order untouched…
         Assert.Equal(1, map.TopPosition);                                        // …but A now renders above main
     }
@@ -98,7 +98,7 @@ public class RearrangeTests
         var (m, _, _) = Pivot(); // feat-1 / main / feat-2 (mainSlot 1)
         Assert.Equal(0, m.MoveBranchToRow(0, 1)); // feat-1 onto main's row
 
-        NavMap map = m.BuildMap();
+        var map =m.Map();
         Assert.Equal(new[] { "feat-1", "feat-2" }, map.Branches.Select(g => g.Name));
         Assert.Equal(0, map.TopPosition); // nothing above main any more
     }
@@ -142,7 +142,7 @@ public class RearrangeTests
         var (m, c) = Stack(); // main / A / B / C — main at row 0
         Assert.Equal(1, m.MoveMainToRow(1)); // main steps past A
 
-        NavMap map = m.BuildMap();
+        var map =m.Map();
         Assert.Equal(new[] { "A", "B", "C" }, map.Branches.Select(g => g.Name)); // branches untouched
         Assert.Equal(1, map.TopPosition);                                        // A now renders above main
         Assert.Empty(c.Switches);                                                // re-slotting never switches
@@ -154,7 +154,7 @@ public class RearrangeTests
         var (m, _, _) = Pivot(); // feat-1 / main / feat-2 (mainSlot 1)
         Assert.Equal(0, m.MoveMainToRow(0)); // main to the top of the stack
 
-        NavMap map = m.BuildMap();
+        var map =m.Map();
         Assert.Equal(new[] { "feat-1", "feat-2" }, map.Branches.Select(g => g.Name));
         Assert.Equal(0, map.TopPosition); // nothing above main any more
     }
@@ -186,7 +186,7 @@ public class RearrangeTests
         // "a" past "b": the insertion point counts the desktop itself, so index 2 is one place right.
         Assert.Equal(new DesktopAddress(false, 0, 1), m.MoveDesktop(new(false, 0, 0), new(false, 0, 2)));
 
-        Assert.Equal(new[] { "b", "a", "c" }, m.BuildMap().Branches[0].Desktops.Select(d => d.Label));
+        Assert.Equal(new[] { "b", "a", "c" }, m.Map().Branches[0].Desktops.Select(d => d.Label));
         Assert.Empty(c.Switches);
     }
 
@@ -196,7 +196,7 @@ public class RearrangeTests
         var (m, _, _) = Pivot();
         Assert.Equal(new DesktopAddress(false, 1, 1), m.MoveDesktop(new(false, 0, 1), new(false, 1, 1))); // feat-1's "b" between x and y
 
-        NavMap map = m.BuildMap();
+        var map =m.Map();
         Assert.Equal(new[] { "a", "c" }, map.Branches[0].Desktops.Select(d => d.Label));
         Assert.Equal(new[] { "x", "b", "y" }, map.Branches[1].Desktops.Select(d => d.Label));
     }
@@ -209,7 +209,7 @@ public class RearrangeTests
         Assert.Equal(new DesktopAddress(true, -1, 1), m.MoveDesktop(new(false, 0, 1), new(true, -1, 1)));
 
         Assert.Equal(new[] { T0, D(11), T1, T2 }, MainIds(m));
-        Assert.Equal(new[] { "a", "c" }, m.BuildMap().Branches[0].Desktops.Select(d => d.Label));
+        Assert.Equal(new[] { "a", "c" }, m.Map().Branches[0].Desktops.Select(d => d.Label));
         Assert.Equal((D(11), 1), c.Reorders.Single()); // main is the OS order, so the OS had to reorder
         Assert.Empty(c.Switches);
     }
@@ -221,7 +221,7 @@ public class RearrangeTests
         Assert.Equal(new DesktopAddress(false, 1, 2), m.MoveDesktop(new(true, -1, 1), new(false, 1, 2))); // T1 onto the end of feat-2
 
         Assert.Equal(new[] { T0, T2 }, MainIds(m));
-        Assert.Equal(new[] { "x", "y", "d1" }, m.BuildMap().Branches[1].Desktops.Select(d => d.Label));
+        Assert.Equal(new[] { "x", "y", "d1" }, m.Map().Branches[1].Desktops.Select(d => d.Label));
     }
 
     [Fact]
@@ -253,7 +253,7 @@ public class RearrangeTests
         // A's only desktop into C: A dissolves, so C's index shifts up under the move.
         Assert.Equal(new DesktopAddress(false, 1, 1), m.MoveDesktop(new(false, 0, 0), new(false, 2, 1)));
 
-        NavMap map = m.BuildMap();
+        var map =m.Map();
         Assert.Equal(new[] { "B", "C" }, map.Branches.Select(g => g.Name));
         Assert.Equal(new[] { "p", "a" }, map.Branches[1].Desktops.Select(d => d.Label));
     }
@@ -264,7 +264,7 @@ public class RearrangeTests
         var (m, _, _) = Pivot(firstBranchCursor: 2); // feat-1 resumes on "c"
         m.MoveDesktop(new(true, -1, 1), new(false, 0, 0));     // T1 in front of "a"
 
-        NavMapBranch feat1 = m.BuildMap().Branches[0];
+        var feat1 =m.Map().Branches[0];
         Assert.Equal(4, feat1.Desktops.Count);
         Assert.Equal(3, feat1.Cursor); // still "c", now one place along
     }
@@ -286,7 +286,7 @@ public class RearrangeTests
         c.Remove(D(11), T0); // deleted from Task View — the open map is still drawing a tile for it
 
         Assert.Null(m.MoveDesktop(new(false, 0, 1), new(true, -1, 0)));
-        Assert.Equal(3, m.BuildMap().Branches[0].Desktops.Count); // refused outright, branch untouched
+        Assert.Equal(3, m.Map().Branches[0].Desktops.Count); // refused outright, branch untouched
         Assert.Empty(c.Reorders);
     }
 
@@ -300,7 +300,7 @@ public class RearrangeTests
     }
 
     private static DesktopId[] MainIds(NavigationModel m)
-        => Enumerable.Range(0, m.BuildMap().TopRow.Count)
+        => Enumerable.Range(0, m.Map().TopRow.Count)
                      .Select(i => m.PeekTopDesktop(i)!.Value.id)
                      .ToArray();
 }

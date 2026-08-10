@@ -51,13 +51,11 @@ public sealed partial class App
 
         _model.Reconcile(); // drop any externally-deleted desktops so the context board is accurate
 
-        // Show the live map behind each command ("blue = you are here") — the stage draws it in the user's
-        // current model (rows or spatial). Commands with a distinct target supply their own board that
-        // highlights what they'll act on (green); a null preview falls back to the stage's live board.
+        // Show the live spatial map behind each command ("blue = you are here") — the stage draws the
+        // current scene as an ambient backdrop.
         var items = BuildCommands()
             .Select(c => new PaletteItem(c.Name, c.DisabledReason,
                                          c.DisabledReason is null ? "▸" : null, c.Run,
-                                         Preview: c.Preview,
                                          DisabledReason: c.DisabledReason))
             .ToList();
         var palette = new PaletteContent("Run a command…",

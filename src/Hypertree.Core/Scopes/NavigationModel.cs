@@ -114,24 +114,14 @@ public sealed class NavigationModel
         _topRow, _branches, _onMain, _currentBranch, _topIndex,
         Math.Clamp(_mainSlot, 0, _branches.Count), RowOrder(), CurrentRow());
 
-    /// <summary>Render-ready snapshot: main timeline + branches in their fixed stack order, split around
-    /// main at its fixed slot (branches before the slot render above main, the rest below).
-    /// <paramref name="cameFrom"/>, when supplied, marks that desktop with the green "here" outline —
-    /// used during navigation to show where the current move started from (mirrors the jump preview).</summary>
-    public NavMap BuildMap(DesktopId? cameFrom = null)
-    {
-        IReadOnlyDictionary<DesktopId, int> counts = _desktops.WindowCounts();
-        return NavProjection.Map(Layout(), id => counts.TryGetValue(id, out int n) ? n : 0, cameFrom);
-    }
-
     /// <summary>
-    /// The id-carrying structural snapshot the <b>spatial</b> map is built from — the spatial twin of
-    /// <see cref="BuildMap"/>. Same selection/here/window-count facts, but it keeps the <see cref="Branch.Id"/>
-    /// and <see cref="DesktopId"/> that spatial state is keyed by (colour per group, position per desktop),
-    /// which <see cref="NavMap"/> deliberately drops. Groups are emitted in the same draw order the rows use
-    /// — branches above main, main (as the <see cref="Guid.Empty"/> "ungrouped" bucket), branches below — so
-    /// the default spatial layout mirrors the row stack. Like <see cref="BuildMap"/>, it walks window counts,
-    /// so it's a summon-time build, not a per-keystroke one.
+    /// The id-carrying structural snapshot the <b>spatial</b> map is built from — the render-ready view of
+    /// the whole layout. It keeps the <see cref="Branch.Id"/> and <see cref="DesktopId"/> that spatial state
+    /// is keyed by (colour per group, position per desktop). Groups are emitted in the draw order the stack
+    /// uses — branches above main, main (as the <see cref="Guid.Empty"/> "ungrouped" bucket), branches below
+    /// — so the default spatial layout mirrors that order. It walks window counts, so it's a summon-time
+    /// build, not a per-keystroke one. <paramref name="cameFrom"/>, when supplied, marks that desktop with
+    /// the green "here" outline — used during navigation to show where the current move started from.
     /// </summary>
     public SpatialSource BuildSpatialSource(DesktopId? cameFrom = null)
     {
@@ -144,10 +134,10 @@ public sealed class NavigationModel
     /// rows top-to-bottom with main in its slot, plus where the cursor actually is.
     /// </summary>
     /// <remarks>
-    /// Deliberately not built on <see cref="BuildMap"/>. That call walks every top-level window through the
-    /// documented desktop API to produce per-tile window counts — fine once, when a human summons the map,
-    /// but this runs on every navigation, and nothing downstream of the status file wants the counts. So
-    /// this reads only what it publishes.
+    /// Deliberately not built on <see cref="BuildSpatialSource"/>. That call walks every top-level window
+    /// through the documented desktop API to produce per-desktop window counts — fine once, when a human
+    /// summons the map, but this runs on every navigation, and nothing downstream of the status file wants
+    /// the counts. So this reads only what it publishes.
     /// </remarks>
     public StatusSnapshot BuildStatus() => NavProjection.Status(Layout());
 
@@ -623,6 +613,11 @@ public sealed class NavigationModel
     /// <summary>The name of the branch at <paramref name="index"/>, or null when there's no such branch.</summary>
     public string? BranchNameAt(int index)
         => index >= 0 && index < _branches.Count ? _branches[index].Name : null;
+
+    /// <summary>How many desktops the branch at <paramref name="index"/> holds (0 when off-range) — for
+    /// confirm prompts that say how much a branch/desktop delete takes with it.</summary>
+    public int BranchDesktopCount(int index)
+        => index >= 0 && index < _branches.Count ? _branches[index].Count : 0;
 
     /// <summary>Rename the branch at <paramref name="index"/>, persisting and notifying. No-op off-range.</summary>
     public void RenameBranch(int index, string name)
