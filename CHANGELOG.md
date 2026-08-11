@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.5.3] - 2026-08-11
+
+### Changed
+
+- Empty desktops (no windows) dim further on the spatial map, so populated rooms carry the eye.
+
+---
+
 ## [v0.5.2] - 2026-08-10
 
 ### Changed

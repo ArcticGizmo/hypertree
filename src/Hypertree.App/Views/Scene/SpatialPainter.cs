@@ -50,6 +50,10 @@ internal static class SpatialPainter
     // full strength; its groupmates in the same live group sit a notch down so the focus stands out within
     // the group; every room in a group you're not in is dimmer still, so the map isn't colour-washed.
     private const double RoomFocusedOpacity = 1.0, RoomGroupmateOpacity = 0.75, RoomRestOpacity = 0.5;
+    // An empty desktop (no windows) recedes further still, so populated rooms carry the eye. Applied on top
+    // of the focus tiers as a multiplier — but only when the room isn't the focused one, so the room you're
+    // acting on always reads at full strength even when it holds nothing.
+    private const double RoomEmptyFactor = 0.55;
 
     /// <summary>The spatial metrics — a near-square grid, unlike the tall row pitch, since 2-D placement
     /// wants comparable breathing room on both axes.</summary>
@@ -111,13 +115,15 @@ internal static class SpatialPainter
             // Brightness by focus, not just by group: the focused room (blue selection/cursor or green
             // "here") reads at full strength; its groupmates in the same live group sit a notch down so the
             // focus stands out within the group rather than the whole group blazing at once; every room in a
-            // group you're not in is dimmer still. This is the de-emphasis 0-window rooms used to carry, now
-            // repurposed to mean "not the room/group you're on" — so a room reads the same whether or not it
-            // holds windows.
+            // group you're not in is dimmer still. On top of that, an empty (0-window) room recedes further —
+            // it has nothing to hold, so it should stand out less — unless it's the focused room, which always
+            // reads at full strength.
             bool focused = placed.Room.Selected || placed.Room.Here;
-            host.Opacity = focused ? RoomFocusedOpacity
-                         : activeGroups.Contains(placed.Room.GroupId) ? RoomGroupmateOpacity
-                         : RoomRestOpacity;
+            double opacity = focused ? RoomFocusedOpacity
+                           : activeGroups.Contains(placed.Room.GroupId) ? RoomGroupmateOpacity
+                           : RoomRestOpacity;
+            if (!focused && placed.Room.WindowCount == 0) opacity *= RoomEmptyFactor;
+            host.Opacity = opacity;
 
             // Topmost within the host, so it catches the press for every style.
             ScenePaint.HitCell(host, local,
