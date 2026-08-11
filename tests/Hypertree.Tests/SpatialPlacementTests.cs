@@ -63,4 +63,36 @@ public class SpatialPlacementTests
         // Nearest free cells are the orthogonals at distance 2; right wins.
         Assert.Equal(new GridPos(2, 0), moved);
     }
+
+    // ── Runs (a whole branch, laid out horizontally) ─────────────────────────────
+
+    private static GridPos Run(GridPos anchor, int count, params GridPos[] occupied)
+        => SpatialPlacement.NearestEmptyRun(anchor, count, new HashSet<GridPos>(occupied));
+
+    [Fact]
+    public void A_single_cell_run_matches_NearestEmpty()
+    {
+        var anchor = new GridPos(0, 0);
+        Assert.Equal(Nearest(anchor, anchor), Run(anchor, 1, anchor));
+    }
+
+    [Fact]
+    public void A_run_starts_to_the_right_of_an_occupied_anchor()
+    {
+        // Anchor taken (it's the selected room), right side clear: the run begins at (1,0) and extends right.
+        Assert.Equal(new GridPos(1, 0), Run(new GridPos(0, 0), 3, new GridPos(0, 0)));
+    }
+
+    [Fact]
+    public void A_run_skips_a_start_whose_body_would_overlap()
+    {
+        // Start-right at (1,0) is free but (2,0) is taken, so a width-2 run can't sit there; the next-nearest
+        // clear pair of cells is the bottom row, beginning at (0,1).
+        var moved = Run(new GridPos(0, 0), 2, new GridPos(0, 0), new GridPos(2, 0));
+        Assert.Equal(new GridPos(0, 1), moved);
+    }
+
+    [Fact]
+    public void A_free_anchor_seats_the_run_from_the_anchor()
+        => Assert.Equal(new GridPos(3, 4), Run(new GridPos(3, 4), 3));
 }

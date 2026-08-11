@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Hypertree.Desktops;
 
 namespace Hypertree.App.Views;
 
@@ -19,11 +20,17 @@ namespace Hypertree.App.Views;
 internal sealed class ConfirmContent : CardContent
 {
     private readonly Action _onConfirm;
+    private readonly IReadOnlyCollection<DesktopId>? _spotlight;
 
-    public ConfirmContent(string message, Action onConfirm, string confirmLabel = "Delete")
+    /// <param name="spotlight">Desktops to pick out on the map behind the card — everything else dims hard, so
+    /// a destructive confirm makes plain exactly what it will remove. Null leaves the backdrop at full
+    /// brightness (non-map confirms: templates, layouts, custom commands).</param>
+    public ConfirmContent(string message, Action onConfirm, string confirmLabel = "Delete",
+                          IReadOnlyCollection<DesktopId>? spotlight = null)
         : base(confirmLabel)
     {
         _onConfirm = onConfirm;
+        _spotlight = spotlight;
 
         var body = new StackPanel
         {
@@ -43,4 +50,6 @@ internal sealed class ConfirmContent : CardContent
 
     protected override void FocusInitial() => CancelButton.Focus(); // safe default: Cancel on a destructive prompt
     protected override bool TryApply() { _onConfirm(); return true; } // no validation — always runs
+
+    public override IReadOnlyCollection<DesktopId>? BackdropSpotlight() => _spotlight;
 }

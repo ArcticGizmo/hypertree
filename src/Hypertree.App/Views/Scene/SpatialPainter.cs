@@ -54,6 +54,10 @@ internal static class SpatialPainter
     // of the focus tiers as a multiplier — but only when the room isn't the focused one, so the room you're
     // acting on always reads at full strength even when it holds nothing.
     private const double RoomEmptyFactor = 0.55;
+    // When a spotlight set is supplied (a delete confirm reading behind its card), every room, hull and badge
+    // outside it drops to this near-invisible floor so what's about to be destroyed is unmistakable; the
+    // spotlit rooms override every other tier to full strength.
+    private const double SpotlightDimOpacity = 0.1;
 
     /// <summary>The spatial metrics — a near-square grid, unlike the tall row pitch, since 2-D placement
     /// wants comparable breathing room on both axes.</summary>
@@ -65,13 +69,26 @@ internal static class SpatialPainter
                                  Action<DesktopId>? onClick = null, Action<DesktopId>? onActivate = null,
                                  IList<(DesktopId Id, Rect Rect)>? hits = null, Guid? selectedGroup = null,
                                  MapStyle style = MapStyle.Board, IDictionary<DesktopId, Control>? roomHosts = null,
-                                 Guid? hoverGroup = null)
+                                 Guid? hoverGroup = null, IReadOnlyCollection<DesktopId>? spotlight = null)
     {
         var layout = new SpatialLayout(scene, Metrics(s));
         camera.Update(layout, screenW, screenH);
         double ox = camera.OffsetX, oy = camera.OffsetY;
 
         var canvas = new Canvas { Width = screenW, Height = screenH, ClipToBounds = true, Background = Brushes.Transparent };
+
+        // A spotlight (a pending delete) picks out the rooms about to go: everything else is dimmed hard so the
+        // target is obvious. Resolve it to the set of rooms and the groups those rooms live in, so hulls/badges
+        // dim with their rooms.
+        HashSet<DesktopId>? spot = spotlight is null ? null
+            : spotlight as HashSet<DesktopId> ?? new HashSet<DesktopId>(spotlight);
+        HashSet<Guid>? spotGroups = null;
+        if (spot is not null)
+        {
+            spotGroups = new HashSet<Guid>();
+            foreach (PlacedRoom pr in layout.Rooms)
+                if (spot.Contains(pr.Room.Id)) spotGroups.Add(pr.Room.GroupId);
+        }
 
         // A group hull only lifts to its bright fill when it's "live": the blue selection sits in it, it's
         // where we currently are (the green "here"), the mouse is hovering it, or the whole group is picked up.
@@ -87,7 +104,8 @@ internal static class SpatialPainter
         foreach (GroupHull hull in layout.Hulls(BaseHullPad * s, BaseHullPad * s))
             PaintHull(canvas, hull, ox, oy, s,
                       active: activeGroups.Contains(hull.Group.Id),
-                      selected: selectedGroup is { } sg && hull.Group.Id == sg);
+                      selected: selectedGroup is { } sg && hull.Group.Id == sg,
+                      dim: spotGroups is null || spotGroups.Contains(hull.Group.Id) ? 1.0 : SpotlightDimOpacity);
 
         // Cells holding more than one room — flagged so a stack shows a warning instead of hiding silently.
         var overlapping = layout.Rooms.GroupBy(r => r.Room.Pos).Where(g => g.Count() > 1)
@@ -123,6 +141,9 @@ internal static class SpatialPainter
                            : activeGroups.Contains(placed.Room.GroupId) ? RoomGroupmateOpacity
                            : RoomRestOpacity;
             if (!focused && placed.Room.WindowCount == 0) opacity *= RoomEmptyFactor;
+            // A spotlight overrides every tier: the rooms being deleted read at full strength, all others fall
+            // to the dim floor — so the confirm's target is unmistakable.
+            if (spot is not null) opacity = spot.Contains(id) ? 1.0 : SpotlightDimOpacity;
             host.Opacity = opacity;
 
             // Topmost within the host, so it catches the press for every style.
@@ -137,7 +158,7 @@ internal static class SpatialPainter
             hits?.Add((id, cell));
         }
 
-        PaintOffscreenMarkers(canvas, layout, scene, ox, oy, screenW, screenH, s);
+        PaintOffscreenMarkers(canvas, layout, scene, ox, oy, screenW, screenH, s, spot);
         return canvas;
     }
 
@@ -146,9 +167,13 @@ internal static class SpatialPainter
     // arrow (in that room's group colour) with a soft colour bleed behind it. The geometry is pure — see
     // OffscreenMarkers — so here we only turn each marker into pixels, on top of the map.
     private static void PaintOffscreenMarkers(Canvas canvas, SpatialLayout layout, SpatialScene scene,
-                                              double ox, double oy, double screenW, double screenH, double s)
+                                              double ox, double oy, double screenW, double screenH, double s,
+                                              HashSet<DesktopId>? spot = null)
     {
         IReadOnlyList<EdgeMarker> markers = OffscreenMarkers.Compute(layout, ox, oy, screenW, screenH, 3 * s);
+        // Under a spotlight only the target rooms' markers matter — the rest would be dim-floor noise pointing
+        // at things that aren't being deleted.
+        if (spot is not null) markers = markers.Where(m => spot.Contains(m.Room)).ToList();
         if (markers.Count == 0) return;
 
         // room → its group colour, looked up once for the frame.
@@ -243,7 +268,7 @@ internal static class SpatialPainter
         return (m.CellStride, m.RowPitch);
     }
 
-    private static void PaintHull(Canvas canvas, GroupHull hull, double ox, double oy, double s, bool active, bool selected)
+    private static void PaintHull(Canvas canvas, GroupHull hull, double ox, double oy, double s, bool active, bool selected, double dim = 1.0)
     {
         Color c = Color.Parse(hull.Group.Color);
         bool main = hull.Group.IsMain; // the ungrouped bucket: barely-there, dashed, no deliberate grouping
@@ -259,10 +284,11 @@ internal static class SpatialPainter
         {
             Data = HullGeometry(hull.Loops, ox, oy, 18 * s),
             Fill = new SolidColorBrush(c, bright ? 0.11 : main ? 0.005 : 0.012),
+            Opacity = dim, // a spotlight fades every off-target group's hull toward invisibility
         };
         canvas.Children.Add(path);
 
-        PaintBadge(canvas, hull.Group, c, main, bright, r.Left + ox, r.Top + oy, s);
+        PaintBadge(canvas, hull.Group, c, main, bright, r.Left + ox, r.Top + oy, s, dim);
     }
 
     // Turn the hull's rectilinear rings into a filled path with rounded corners: each corner is cut back by
@@ -312,7 +338,7 @@ internal static class SpatialPainter
         return new Point(from.X + (to.X - from.X) * t, from.Y + (to.Y - from.Y) * t);
     }
 
-    private static void PaintBadge(Canvas canvas, SpatialGroup group, Color c, bool main, bool bright, double x, double y, double s)
+    private static void PaintBadge(Canvas canvas, SpatialGroup group, Color c, bool main, bool bright, double x, double y, double s, double dim = 1.0)
     {
         var dot = new Ellipse { Width = 7 * s, Height = 7 * s, Fill = new SolidColorBrush(c), VerticalAlignment = VerticalAlignment.Center };
         var text = new TextBlock
@@ -328,7 +354,7 @@ internal static class SpatialPainter
             CornerRadius = new CornerRadius(999), Padding = new Thickness(8 * s, 3 * s, 9 * s, 3 * s),
             Child = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 * s, Children = { dot, text } },
         };
-        badge.Opacity = bright ? 1.0 : 0.4; // labels dim with their group; only the live one reads at full strength
+        badge.Opacity = (bright ? 1.0 : 0.4) * dim; // labels dim with their group; a spotlight fades off-target ones out too
         Canvas.SetLeft(badge, x + 2 * s);
         Canvas.SetTop(badge, y - 11 * s); // ride the hull's top edge, like the metro route badge
         canvas.Children.Add(badge);

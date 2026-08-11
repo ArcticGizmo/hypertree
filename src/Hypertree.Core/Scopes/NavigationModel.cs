@@ -619,6 +619,13 @@ public sealed class NavigationModel
     public int BranchDesktopCount(int index)
         => index >= 0 && index < _branches.Count ? _branches[index].Count : 0;
 
+    /// <summary>The OS ids of every desktop in the branch at <paramref name="index"/> (empty when off-range)
+    /// — so a delete confirm can spotlight the whole branch on the map behind it.</summary>
+    public IReadOnlyList<DesktopId> BranchDesktopIdsAt(int index)
+        => index >= 0 && index < _branches.Count
+            ? _branches[index].Desktops.Select(d => d.Id).ToList()
+            : Array.Empty<DesktopId>();
+
     /// <summary>Rename the branch at <paramref name="index"/>, persisting and notifying. No-op off-range.</summary>
     public void RenameBranch(int index, string name)
     {

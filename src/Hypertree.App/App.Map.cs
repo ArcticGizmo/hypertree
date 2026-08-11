@@ -275,7 +275,8 @@ public sealed partial class App
         if (_model.BranchNameAt(index) is not { } name) return;
         int count = _model.BranchDesktopCount(index);
         Confirm($"Delete branch “{name}”?\nIts {count} desktop{(count == 1 ? "" : "s")} " +
-                "are removed and any windows on them move to another desktop.", () => RemoveBranch(index));
+                "are removed and any windows on them move to another desktop.", () => RemoveBranch(index),
+                spotlight: _model.BranchDesktopIdsAt(index));
     }
 
     // n on the map: prompt for a name, create a new desktop at the end of the selected row (no switch — the

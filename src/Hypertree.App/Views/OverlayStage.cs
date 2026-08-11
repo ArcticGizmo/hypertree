@@ -232,12 +232,13 @@ internal sealed class OverlayStage
     {
         double w = HostWidth > 0 ? HostWidth : 1280, h = HostHeight > 0 ? HostHeight : 800;
 
+        IReadOnlyCollection<DesktopId>? spotlight = content.BackdropSpotlight();
         if (content.BackdropScene() is { } scene)
-            return SpatialPainter.Render(scene, w, h, MapZoom, new MapCamera(), style: MapStyle);
+            return SpatialPainter.Render(scene, w, h, MapZoom, new MapCamera(), style: MapStyle, spotlight: spotlight);
         if (SpatialProvider is { } spatial)
         {
             (SpatialSource source, SpatialState state) = spatial();
-            return SpatialPainter.Render(SpatialScene.From(source, state), w, h, MapZoom, new MapCamera(), style: MapStyle);
+            return SpatialPainter.Render(SpatialScene.From(source, state), w, h, MapZoom, new MapCamera(), style: MapStyle, spotlight: spotlight);
         }
         return null;
     }
@@ -390,6 +391,11 @@ internal interface IStageContent
     /// card highlight its own target spatially (the jump palette, a snapshot's layout). Full-surface content
     /// ignores this (it draws its own board).</summary>
     SpatialScene? BackdropScene() => null;
+
+    /// <summary>The desktops to spotlight behind this card: those rooms read at full strength while every
+    /// other room, hull and badge is dimmed hard — how a delete confirm makes its target unmistakable. Null
+    /// (the default) leaves the backdrop at its normal brightness. Composes with <see cref="BackdropScene"/>.</summary>
+    IReadOnlyCollection<DesktopId>? BackdropSpotlight() => null;
 
     /// <summary>Called after the view is hosted and the host is foregrounded — take focus, start timers,
     /// register DWM thumbnails, etc. The stage is passed for host handle / focus helpers.</summary>

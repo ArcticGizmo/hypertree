@@ -181,6 +181,34 @@ internal sealed class SpatialOverlay : IStageContent
         if (IsOpen) Render();
     }
 
+    /// <summary>Point the blue selection at a freshly created <b>branch</b>: place its (still unplaced)
+    /// desktops as a horizontal run in the free space nearest the room it was created from, then home the
+    /// cursor on the first. The whole-branch analogue of <see cref="SelectRoom"/> — without it the new group
+    /// would fall to its row-layout default (bottom of the stack, in draw order), ignoring the arrangement.</summary>
+    public void SelectNewBranch(IReadOnlyList<DesktopId> ids)
+    {
+        if (ids.Count == 0) return;
+
+        // Same preconditions as SelectRoom: a last-rendered scene, an anchor room in it, and every new desktop
+        // still unplaced. Placing a run near the anchor keeps the branch beside its origin rather than at a
+        // row-layout default that may overlap or scatter across an arranged map.
+        if (_displayed is { } scene && _cursor is { } anchorId
+            && scene.Rooms.FirstOrDefault(r => r.Id == anchorId) is { } anchor
+            && ids.All(id => _state.Position(id.Value) is null))
+        {
+            var newIds = ids.Select(i => i.Value).ToHashSet();
+            var occupied = scene.Rooms.Where(r => !newIds.Contains(r.Id.Value)).Select(r => r.Pos).ToHashSet();
+            GridPos start = SpatialPlacement.NearestEmptyRun(anchor.Pos, ids.Count, occupied);
+            for (int i = 0; i < ids.Count; i++) _state.SetPosition(ids[i].Value, start.Offset(i, 0));
+            SpatialStateChanged?.Invoke(); // persist the placement to spatial.json
+        }
+
+        _cursor = ids[0];
+        _selectedGroup = null;
+        _initialised = true; // keep this selection — don't let InitCursor override it on re-present
+        if (IsOpen) Render();
+    }
+
     public void Close()
     {
         if (IsOpen) _stage.Back();

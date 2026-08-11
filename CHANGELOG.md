@@ -9,6 +9,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.5.4] - 2026-08-11
+
+### Changed
+
+- `b` — a new branch made from the map lands in the free space beside the current room as a horizontal strip, with the selection on its first desktop.
+- `Del` / `Shift+Del` — the map dims every other room while a delete confirm is open, so what's being removed is unmistakable.
+
+---
+
 ## [v0.5.3] - 2026-08-11
 
 ### Changed

@@ -72,13 +72,22 @@ public sealed partial class App
 
         var branch = new Branch(spec.Name, refs);
         // Created over the map (the branch prompt sits on top of it): attach the branch below the highlighted
-        // room's group, not below main. Tray / command-palette creation has no map in the chain, so it falls
-        // back to below main.
+        // room's group, not below main, then place its desktops as a horizontal run in the free space beside
+        // that room and home the cursor onto the first — so a new branch appears where you're looking rather
+        // than falling to its row-layout default at the bottom of the stack. Tray / command-palette creation
+        // has no map in the chain, so it falls back to below main with no spatial placement.
         if (_stage is { HasDurableBase: true } && _spatialOverlay?.SelectedRoom is { } room
             && _model.Locate(room) is { } at)
+        {
             _model.AddBranchBelow(at.OnMain, at.BranchIndex, branch);
-        else _model.AddBranch(branch);
-        RefreshOrFlash();
+            RefreshOrFlash();
+            _spatialOverlay.SelectNewBranch(refs.Select(r => r.Id).ToList());
+        }
+        else
+        {
+            _model.AddBranch(branch);
+            RefreshOrFlash();
+        }
     }
 
     // ── Branch templates (reusable desktop recipes for new branches) ─────────────────
@@ -188,7 +197,7 @@ public sealed partial class App
             _created.Remove(peek.Value.id.Value);
             _model.Resync();
             RefreshOrFlash();
-        });
+        }, spotlight: new[] { peek.Value.id });
     }
 
     private void DeleteBranchDesktop(int branchIndex, int desktopIndex)
@@ -217,7 +226,7 @@ public sealed partial class App
             }
             _model.Resync();
             RefreshOrFlash();
-        });
+        }, spotlight: new[] { peek.Value.id });
     }
 
     // Any live desktop other than the one being deleted (prefer the current view).
@@ -230,9 +239,10 @@ public sealed partial class App
     }
 
     // A confirm card pushed over the current surface (the map, when a Del/Shift+Del came from it). Esc pops
-    // back; confirming runs the action then unwinds to where the chain started.
-    private void Confirm(string message, Action onConfirm)
-        => _stage?.Present(new ConfirmContent(message, onConfirm));
+    // back; confirming runs the action then unwinds to where the chain started. `spotlight` picks out the
+    // desktops the action will delete, so the map behind the card dims everything else to make the target plain.
+    private void Confirm(string message, Action onConfirm, IReadOnlyCollection<DesktopId>? spotlight = null)
+        => _stage?.Present(new ConfirmContent(message, onConfirm, spotlight: spotlight));
 
     // Remove a branch's desktops — but ONLY ones Hypertree created, never the user's own desktops.
     private void TearDownBranch(Branch? branch)

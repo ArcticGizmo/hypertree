@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Hypertree.Desktops;
 
 namespace Hypertree.App.Views;
 
@@ -92,6 +93,10 @@ internal abstract class CardContent : IStageContent
 
     public Control View => _root!;
     public StageLayer Layer => StageLayer.Card;
+
+    /// <summary>Rooms to spotlight behind this card (see <see cref="IStageContent.BackdropSpotlight"/>). None
+    /// by default; a destructive confirm overrides this to pick out what it's about to delete.</summary>
+    public virtual IReadOnlyCollection<DesktopId>? BackdropSpotlight() => null;
     public bool DismissOnDeactivate => false; // a focus loss must never silently confirm, cancel, or drop input
     public bool DismissOnClickAway => false;  // nor a stray background click
 
