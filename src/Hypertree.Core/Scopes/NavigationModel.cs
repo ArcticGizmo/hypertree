@@ -45,6 +45,11 @@ public sealed class NavigationModel
     private DesktopId _target;      // desktop the model last switched to
     private bool _backfilledIds;    // a restored branch predated ids, so the minted ones need writing back
 
+    // Resume points snapshotted at the start of a navigation gesture (null when no gesture is in flight),
+    // so rows merely passed through can be rewound on release. See BeginGesture/EndGesture.
+    private Dictionary<Branch, int>? _restingMarks;
+    private int _restingTop;         // main's resume point (_topIndex) at gesture start
+
     public event Action? Changed;
 
     public NavigationModel(IDesktopController desktops, IStateStore? store = null)
@@ -151,6 +156,49 @@ public sealed class NavigationModel
         NavAction.Surface => SetRow(CurrentRow() - 1), // Up = one row higher
         _ => false,
     };
+
+    // ── Gesture resume-marker preservation ─────────────────────────────────────────
+    // A branch's LastUsedIndex — and, for the main timeline, _topIndex — doubles as both the live cursor
+    // and the "resume point" a group-name click (Perch's strip, the switcher, `htree goto <group>`) returns
+    // to. A single Ctrl+Alt gesture can step THROUGH a group on its way somewhere else, and each keystroke
+    // leaves that group's cursor on a desktop merely passed through, not one the user came to rest on. So we
+    // snapshot every row's resume point when a gesture begins and, on release, restore all of them except the
+    // row the cursor finally rests in — whose marker is, correctly, where the gesture ended. The App layer's
+    // gesture poll (App.Navigation) drives the begin/end pair around each held Ctrl+Alt gesture.
+
+    /// <summary>Snapshot every row's resume point at the start of a navigation gesture, so rows the gesture
+    /// only passes through can be rewound when it ends. Idempotent within a gesture — call once, at its start.</summary>
+    public void BeginGesture()
+    {
+        _restingMarks = _branches.ToDictionary(g => g, g => g.LastUsedIndex);
+        _restingTop = _topIndex;
+    }
+
+    /// <summary>End a navigation gesture: restore the resume point of every row the cursor merely stepped
+    /// through, keeping only the row it came to rest in (its marker is where the gesture ended). A no-op when
+    /// no gesture is in flight.</summary>
+    public void EndGesture()
+    {
+        if (_restingMarks is null) return;
+
+        Branch? resting = _onMain ? null : _branches[_currentBranch];
+        bool changed = false;
+        foreach ((Branch g, int mark) in _restingMarks)
+        {
+            if (ReferenceEquals(g, resting)) continue;         // the row we ended on keeps its new cursor
+            int restored = Math.Clamp(mark, 0, g.Count - 1);   // guard in case the branch shrank mid-gesture
+            if (g.LastUsedIndex != restored) { g.LastUsedIndex = restored; changed = true; }
+        }
+        // We only left main's cursor behind if we ended somewhere else; ending on main means it's our rest.
+        if (!_onMain && _topRow.Count > 0)
+        {
+            int restored = Math.Clamp(_restingTop, 0, _topRow.Count - 1);
+            if (_topIndex != restored) { _topIndex = restored; changed = true; }
+        }
+
+        _restingMarks = null;
+        if (changed) SaveAndNotify();
+    }
 
     // ── Row order & cursor⇄row mapping ──────────────────────────────────────────────
     // The stack drawn top-to-bottom is branches[0..slot-1] / MAIN / branches[slot..]. Every projection (map,

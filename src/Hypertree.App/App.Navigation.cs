@@ -40,8 +40,12 @@ public sealed partial class App
         _model.AnchorToCurrent();
         // Start of a gesture: remember where we came from (and which modifiers to watch), so releasing
         // them can record it as "last visited". A poll watches for the release (flashing or in the map).
+        // On that first keystroke we also snapshot every group's resume point, so groups this gesture only
+        // steps through can be rewound on release (a passed-through desktop isn't a resting one).
+        bool gestureStart = _gestureFrom is null;
         _gestureFrom ??= _desktops.Current;
         _gestureMods = mods;
+        if (gestureStart) _model.BeginGesture();
 
         bool softMotion = WindowFx.SystemAnimationsEnabled();
         bool animate = _settings.AnimateNavigation && softMotion;
@@ -136,6 +140,9 @@ public sealed partial class App
     private void CompleteGesture()
     {
         _gesturePoll?.Stop();
+        // Fold each passed-through group's resume point back to where it rested before the gesture — only
+        // the group we came to rest in keeps the cursor this gesture left on it (its new "last visited").
+        _model?.EndGesture();
         if (_gestureFrom is { } from) RecordVisit(from);
         _gestureFrom = null;
     }

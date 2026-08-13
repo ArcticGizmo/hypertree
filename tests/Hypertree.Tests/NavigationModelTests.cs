@@ -155,6 +155,71 @@ public class NavigationModelTests
         Assert.Equal(D(11), c.Current); // resumed at b, not a
     }
 
+    // ── Gesture resume-marker preservation (a held Ctrl+Alt gesture rewinds passed-through groups) ──
+
+    // The resume point (cursor) a group-name click would return to, read the way the switcher/CLI read it.
+    private static int ResumeOf(NavigationModel m, string branch)
+        => m.BuildStatus().Rows.First(r => !r.IsMain && r.Name == branch).Cursor;
+    private static int MainResume(NavigationModel m)
+        => m.BuildStatus().Rows.First(r => r.IsMain).Cursor;
+
+    [Fact]
+    public void Ending_a_gesture_in_a_group_updates_its_resume_point()
+    {
+        var (m, _) = New();
+        ThreeBranches(m); // MAIN / A / B / C
+        m.BeginGesture();
+        m.Apply(NavAction.Dive);       // into A → a
+        m.Apply(NavAction.MoveRight);  // A → b
+        m.EndGesture();                // came to rest in A on b
+        Assert.Equal(1, ResumeOf(m, "A"));
+    }
+
+    [Fact]
+    public void A_group_only_passed_through_keeps_its_resume_point()
+    {
+        var (m, _) = New();
+        ThreeBranches(m); // MAIN / A / B / C
+        // Rest in A on its third desktop (c).
+        m.BeginGesture();
+        m.Apply(NavAction.Dive);       // A → a
+        m.Apply(NavAction.MoveRight);  // A → b
+        m.Apply(NavAction.MoveRight);  // A → c
+        m.EndGesture();
+        Assert.Equal(2, ResumeOf(m, "A"));
+
+        // One held gesture steps back through A and dives on into B, coming to rest there.
+        m.BeginGesture();
+        m.Apply(NavAction.MoveLeft);   // A → b  (passing through)
+        m.Apply(NavAction.MoveLeft);   // A → a  (passing through)
+        m.Apply(NavAction.Dive);       // into B
+        m.EndGesture();
+
+        Assert.Equal(2, ResumeOf(m, "A")); // rewound to the desktop we last rested on, not the one we left A on
+        Assert.Equal(0, ResumeOf(m, "B")); // B is where the gesture came to rest
+    }
+
+    [Fact]
+    public void The_main_timeline_only_passed_through_keeps_its_resume_point()
+    {
+        var (m, _) = New(current: 0);
+        ThreeBranches(m); // MAIN(T0,T1,T2) / A / B / C
+        // Rest on main's third desktop (T2).
+        m.BeginGesture();
+        m.Apply(NavAction.MoveRight);  // main → T1
+        m.Apply(NavAction.MoveRight);  // main → T2
+        m.EndGesture();
+        Assert.Equal(2, MainResume(m));
+
+        // One held gesture steps back across main and dives into a branch, resting in the branch.
+        m.BeginGesture();
+        m.Apply(NavAction.MoveLeft);   // main → T1 (passing through)
+        m.Apply(NavAction.Dive);       // into A
+        m.EndGesture();
+
+        Assert.Equal(2, MainResume(m)); // rewound to T2, not the desktop we crossed main on
+    }
+
     // ── The ladder across a fixed [A, B, C] stack below main ─────────────────────
 
     [Fact]

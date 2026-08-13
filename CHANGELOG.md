@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.5.5] - 2026-08-13
+
+### Fixed
+
+- Clicking a group name lands on the desktop you last settled on there — `Ctrl+Alt+Arrow` passing through a group on the way elsewhere no longer moves its resume point.
+
+---
+
 ## [v0.5.4] - 2026-08-11
 
 ### Changed
