@@ -9,6 +9,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.5.6] - 2026-08-24
+
+### Added
+
+- Restore my window layout automatically — an opt-in setting (Settings → Monitors) that puts windows back in place on redock instead of raising the "Restore your window layout?" notification.
+
+### Fixed
+
+- Switching desktops no longer flashes unrelated windows' taskbar buttons — activation is granted outright rather than demoted to a "needs attention" flash.
+
+---
+
 ## [v0.5.5] - 2026-08-13
 
 ### Fixed

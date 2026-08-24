@@ -110,6 +110,12 @@ public sealed record AppSettings
     /// default. See <c>CustomCommand</c>.</summary>
     public List<CustomCommand> CustomCommands { get; set; } = new();
 
+    /// <summary>When true, redocking to a monitor set Hypertree has a saved arrangement for restores the
+    /// window layout automatically, instead of raising the clickable "Restore your window layout?"
+    /// notification and waiting for a click. Off by default — restore stays opt-in per event. Either way the
+    /// silent "Layout restored" confirmation still appears. See <c>MonitorLayoutController</c>.</summary>
+    public bool AutoRestoreMonitorLayout { get; set; } = false;
+
     /// <summary>When true, the first launch after the version changes pops a "what's new" window listing
     /// only the changelog entries newer than <see cref="LastSeenVersion"/>. On by default; the window's
     /// "Don't show changelogs again" button (and the Settings toggle) flip it off. See <c>ChangelogWindow</c>

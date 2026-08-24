@@ -135,6 +135,16 @@ public class SettingsPersistenceTests
     }
 
     [Fact]
+    public void AutoRestoreMonitorLayout_defaults_off_and_round_trips()
+    {
+        Assert.False(new AppSettings().AutoRestoreMonitorLayout);
+
+        var store = StoreInTempDir();
+        store.Save(new AppSettings { AutoRestoreMonitorLayout = true });
+        Assert.True(store.Load().AutoRestoreMonitorLayout);
+    }
+
+    [Fact]
     public void Custom_commands_round_trip_including_optional_fields()
     {
         var store = StoreInTempDir();

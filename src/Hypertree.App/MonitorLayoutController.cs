@@ -31,16 +31,21 @@ public sealed class MonitorLayoutController : IDisposable
     private readonly IDesktopController _desktops;
     private readonly IForegroundActivator _activator;
     private readonly Func<INotifier?> _notifier;
+    private readonly Func<bool> _autoRestore;
 
     private MonitorLayoutService? _layout;
     private DispatcherTimer? _layoutTimer;
     private MonitorDebugWindow? _debugWindow;
 
-    public MonitorLayoutController(IDesktopController desktops, IForegroundActivator activator, Func<INotifier?> notifier)
+    // The auto-restore accessor is read live (like the notifier) so toggling the setting takes effect without
+    // restarting tracking. When it returns true, a redock restores straight away instead of prompting.
+    public MonitorLayoutController(IDesktopController desktops, IForegroundActivator activator,
+                                   Func<INotifier?> notifier, Func<bool> autoRestore)
     {
         _desktops = desktops;
         _activator = activator;
         _notifier = notifier;
+        _autoRestore = autoRestore;
     }
 
     /// <summary>True once monitor tracking is running (the platform provided a window-layout controller).</summary>
@@ -74,14 +79,21 @@ public sealed class MonitorLayoutController : IDisposable
         _layoutTimer.Start();
     }
 
-    // Redock to a set we have a capture for. The service already debounced; we surface an offer the user
-    // clicks to apply directly (restore is opt-in per event, never an automatic teleport). Only prompt when
-    // windows are actually out of place, and say how many will move — not the raw snapshot size.
+    // Redock to a set we have a capture for. The service already debounced; by default we surface an offer the
+    // user clicks to apply (restore is opt-in per event, never an automatic teleport). Only prompt when windows
+    // are actually out of place, and say how many will move — not the raw snapshot size. When the
+    // auto-restore setting is on, skip the prompt and put the windows back straight away instead.
     private void OnRestoreAvailable(MonitorLayoutSnapshot snapshot) => OnUi(() =>
     {
         if (_layout is null) return;
         int toMove = _layout.PlanRestore(snapshot).ToMove;
         if (toMove == 0) return; // everything already where it belongs — nothing to offer
+
+        if (_autoRestore())
+        {
+            DoRestoreMonitorLayout(snapshot); // ApplyRestore still shows the silent "Layout restored" confirmation
+            return;
+        }
 
         _notifier()?.Show(
             "Restore your window layout?",

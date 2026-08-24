@@ -58,6 +58,7 @@ internal sealed class SettingsWindow : Window
     private readonly ToggleSwitch _displayBeforeMoving;
     private readonly ToggleSwitch _animateNavigation;
     private readonly ToggleSwitch _sweepFromLeadingEdge;
+    private readonly ToggleSwitch _autoRestoreMonitorLayout;
     private readonly ToggleSwitch _showChangelog;
 
     // The working set of chords, edited in place by the rebind capture; committed to overrides on Save.
@@ -105,6 +106,7 @@ internal sealed class SettingsWindow : Window
         _displayBeforeMoving = Toggle(settings.DisplayBeforeMoving);
         _animateNavigation = Toggle(settings.AnimateNavigation);
         _sweepFromLeadingEdge = Toggle(settings.SweepFromLeadingEdge);
+        _autoRestoreMonitorLayout = Toggle(settings.AutoRestoreMonitorLayout);
         _showChangelog = Toggle(settings.ShowChangelogOnUpdate);
         _hotkeyHint = new TextBlock
         {
@@ -129,7 +131,7 @@ internal sealed class SettingsWindow : Window
         // No Save/Cancel — each control applies (and persists) the moment it changes; see ApplyLive.
         foreach (ToggleSwitch t in new[]
                  { _startOnLogin, _showSwitcher, _displayBeforeMoving,
-                   _animateNavigation, _sweepFromLeadingEdge, _showChangelog })
+                   _animateNavigation, _sweepFromLeadingEdge, _autoRestoreMonitorLayout, _showChangelog })
             t.IsCheckedChanged += (_, _) => ApplyLive();
         _mapStyle.SelectionChanged += (_, _) => ApplyLive();
         _taskbarLabelPlacement.SelectionChanged += (_, _) => ApplyLive();
@@ -177,6 +179,13 @@ internal sealed class SettingsWindow : Window
                     ToggleRow("Sweep from the leading edge", _sweepFromLeadingEdge),
                     Hint("The wipe begins on the side you move toward and sweeps away across the screen. "
                          + "Turn off to have it begin on the opposite side and sweep toward where you're heading."),
+
+                    Divider(),
+                    Title2("Monitors"),
+                    ToggleRow("Restore my window layout automatically", _autoRestoreMonitorLayout),
+                    Hint("When you reconnect a monitor setup Hypertree has seen before, it puts your windows "
+                         + "back where they were without asking. Leave off to get a notification you click to "
+                         + "restore instead."),
 
                     Divider(),
                     Title2("Hotkeys"),
@@ -249,6 +258,7 @@ internal sealed class SettingsWindow : Window
             DisplayBeforeMoving = _displayBeforeMoving.IsChecked ?? true,
             AnimateNavigation = _animateNavigation.IsChecked ?? true,
             SweepFromLeadingEdge = _sweepFromLeadingEdge.IsChecked ?? true,
+            AutoRestoreMonitorLayout = _autoRestoreMonitorLayout.IsChecked ?? false,
             ShowChangelogOnUpdate = _showChangelog.IsChecked ?? true,
             HotkeyBindings = overrides,
         };

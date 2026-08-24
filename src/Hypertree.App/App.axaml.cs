@@ -213,7 +213,8 @@ public sealed partial class App : Application
         StartWatchingDesktops();
         // The notifier is built later in Startup (BuildNotifier), so the controller reads it through an
         // accessor rather than a captured value — matching the original "_notifier?.Show at call time".
-        _monitorLayout = new MonitorLayoutController(_desktops, _activator, () => _notifier);
+        _monitorLayout = new MonitorLayoutController(_desktops, _activator, () => _notifier,
+            () => _settings.AutoRestoreMonitorLayout);
         _monitorLayout.Start();
         StartPublishingStatus();
         StartControlServer();
