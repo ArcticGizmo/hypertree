@@ -171,6 +171,25 @@ internal sealed class Commands
         return ExitCode.Ok;
     }
 
+    // ── map ──────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Open the map on the tray, framed on where you are.</summary>
+    /// <remarks>
+    /// Goes straight to the pipe with no status read first: there's no target to resolve, and a missing
+    /// pipe already <em>is</em> the "no tray running" answer. An older tray that predates this command
+    /// answers BadUsage, which passes through as exit 3 — the caller's cue to fall back.
+    /// </remarks>
+    public int Map(Args args)
+    {
+        ControlResponse response = _control.Send(new ControlRequest { Command = ControlRequest.CommandMap });
+        if (!response.Ok)
+        {
+            _out.Error(response.Error ?? "Couldn't open the map.");
+            return response.Code;
+        }
+        return ExitCode.Ok;
+    }
+
     // ── watch ────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>

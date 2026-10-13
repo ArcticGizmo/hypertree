@@ -83,6 +83,9 @@ public sealed class ControlRequest
 
     public const string CommandGoto = "goto";
     public const string CommandPing = "ping";
+
+    /// <summary>Open the map, framed on where you are. Carries no payload; an already-open map stays open.</summary>
+    public const string CommandMap = "map";
 }
 
 /// <summary>Jump to a row's resume desktop, or to a specific desktop on it.</summary>

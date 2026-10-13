@@ -113,15 +113,19 @@ public sealed partial class App
         FlashBoard(null, mods, move: null, animate: false, fade: WindowFx.SystemAnimationsEnabled());
     }
 
-    // A double-click / arrow-driven jump from the map: switch to the chosen desktop, record where we
-    // came from, then re-home the selection onto it (green + blue rejoin), keeping the map open.
-    private void JumpFromMap(Func<bool> doJump)
+    // A double-click / Enter jump from the map: switch to the chosen desktop, record where we came from,
+    // then close the map — picking a room is decisive, like creating one (CreateAndGoToDesktop). Picking the
+    // room you're already on closes it too (nothing to switch, but the choice is made). A jump that didn't
+    // land (the room vanished) keeps the map up, re-homed, so the pick can be made again.
+    // (The Ctrl+Alt+arrow chord moves for real inside the map but keeps it open; that's Navigate.)
+    private void JumpFromMap(DesktopId target)
     {
         if (_desktops is null || _model is null) return;
         DesktopId from = _desktops.Current;
-        doJump();
+        JumpToId(target);
         RecordVisit(from);
-        SyncOpenMapToCurrent();
+        if (_desktops.Current == target) _stage?.Dismiss();
+        else SyncOpenMapToCurrent();
     }
 
     private void StartGesturePoll()

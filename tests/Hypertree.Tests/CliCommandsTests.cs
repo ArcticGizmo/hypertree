@@ -146,4 +146,32 @@ public sealed class CliCommandsTests
         Assert.Equal(ExitCode.Failed, failCode);
         Assert.Contains("nope", Assert.Single(failOut.Errors));
     }
+
+    [Fact]
+    public void Map_sends_a_map_request_without_reading_status()
+    {
+        // No status published: map has no target to resolve, so it goes straight to the pipe and lets the
+        // tray's (or the transport's) answer stand.
+        (Commands cmd, RecordingOutput output, FakeTransport transport) = Make(null);
+
+        int code = cmd.Map(Args.Parse(new[] { "map" }));
+
+        Assert.Equal(ExitCode.Ok, code);
+        Assert.Equal(ControlRequest.CommandMap, transport.Sent?.Command);
+        Assert.Empty(output.Lines); // quiet on success, like goto
+        Assert.Empty(output.Errors);
+    }
+
+    [Fact]
+    public void Map_passes_an_old_trays_refusal_through_as_bad_usage()
+    {
+        // A tray that predates the command answers "Unknown command" — callers key their fallback off exit 3.
+        (Commands cmd, RecordingOutput output, FakeTransport transport) = Make(TwoRows());
+        transport.Response = ControlResponse.Failure(ExitCode.BadUsage, "Unknown command 'map'.");
+
+        int code = cmd.Map(Args.Parse(new[] { "map" }));
+
+        Assert.Equal(ExitCode.BadUsage, code);
+        Assert.Contains("Unknown command", Assert.Single(output.Errors));
+    }
 }

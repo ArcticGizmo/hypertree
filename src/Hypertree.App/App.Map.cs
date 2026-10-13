@@ -414,7 +414,7 @@ public sealed partial class App
     private void WireSpatialOverlay()
     {
         _spatialOverlay = new SpatialOverlay(_stage!, _mapCamera, _settings.MapZoom, _settings.ShowMapLegend);
-        _spatialOverlay.JumpRoomRequested += id => JumpFromMap(() => JumpToId(id));
+        _spatialOverlay.JumpRoomRequested += JumpFromMap;
         _spatialOverlay.ViewStyleToggleRequested += ToggleMapStyle; // v — cycle board ↔ metro ↔ ascii (app-wide)
         _spatialOverlay.SpatialStateChanged += () => _spatialStore?.Save(_spatial); // a move or recolour is written to spatial.json
         _spatialOverlay.ZoomChanged += zoom =>                      // +/− — persist the map zoom and mirror it to

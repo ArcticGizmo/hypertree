@@ -333,8 +333,23 @@ public sealed partial class App : Application
     {
         ControlRequest.CommandPing => ControlResponse.Success(),
         ControlRequest.CommandGoto => HandleGoto(request.Goto),
+        ControlRequest.CommandMap => HandleMap(),
         _ => ControlResponse.Failure(ExitCode.BadUsage, $"Unknown command '{request.Command}'."),
     };
+
+    // Open, never toggle: a caller asking for the map (a click in another app) means "show it", and closing
+    // a map the user already has up would read as the click doing nothing. The stage takes the foreground
+    // itself, so the map is keyboard-ready even though the request came from a background process.
+    private ControlResponse HandleMap()
+    {
+        if (_model is null || _spatialOverlay is null)
+            return ControlResponse.Failure(ExitCode.Failed, "Hypertree is still starting up.");
+        if (_spatialOverlay.IsOpen) return ControlResponse.Success();
+
+        _model.Reconcile(); // drop any externally-deleted desktops before showing the map, as ToggleMap does
+        OpenMap();
+        return ControlResponse.Success();
+    }
 
     private ControlResponse HandleGoto(GotoRequest? go)
     {
