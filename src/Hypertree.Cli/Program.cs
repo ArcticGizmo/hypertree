@@ -8,7 +8,7 @@ namespace Hypertree.Cli;
 /// </summary>
 /// <remarks>
 /// <para>Reads are served straight from <c>%APPDATA%\hypertree\status.json</c>, which the tray keeps
-/// current; only <c>goto</c> needs the tray itself, over the control pipe. That split is what makes
+/// current; only <c>goto</c> and <c>map</c> need the tray itself, over the control pipe. That split is what makes
 /// <c>status</c> cheap enough to put in a shell prompt: it opens one small file and exits, with no IPC
 /// round trip and nothing to wake up.</para>
 ///
@@ -46,6 +46,7 @@ internal static class Program
             "list" or "ls" => new[] { "--json", "--all", "-a" },
             "goto" or "go" => new[] { "--id", "--verbose", "-v" },
             "watch" => new[] { "--json" },
+            "map" => Array.Empty<string>(),
             _ => null,
         };
         if (known is not null)
@@ -62,6 +63,7 @@ internal static class Program
             "list" or "ls" => commands.List(args),
             "goto" or "go" => commands.Goto(args),
             "watch" => commands.Watch(args),
+            "map" => commands.Map(args),
             "help" => Ok(Help.Print),
             _ => Unknown(args.Command),
         };

@@ -133,6 +133,7 @@ htree list --all        # …expanded to every desktop
 htree goto perch        # jump to a branch, at its resume desktop
 htree goto perch/docs   # …or to a named desktop on it
 htree watch             # stream your position as it changes
+htree map               # open the map, framed on where you are
 ```
 
 - `status` is cheap enough to sit in a **shell prompt** — it reads one small file and exits, with no
@@ -142,7 +143,7 @@ htree watch             # stream your position as it changes
 - Branch names match exactly, then case-insensitively, then by unique prefix — so `htree goto pe` works.
   An **ambiguous** name is refused rather than guessed at, and lists the ids to pick from.
 - Reads come from `%APPDATA%\hypertree\status.json`, which the tray keeps current — **including switches
-  made outside Hypertree**. Only `goto` talks to the tray, over a per-session named pipe.
+  made outside Hypertree**. Only `goto` and `map` talk to the tray, over a per-session named pipe.
 - Installing adds the install directory to your **per-user PATH**, so `htree` and `hypertree` both resolve
   anywhere; uninstalling removes it again. No elevation needed, and terminals already open need
   restarting to see it.

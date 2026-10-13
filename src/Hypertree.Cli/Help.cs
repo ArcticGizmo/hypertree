@@ -24,6 +24,7 @@ internal static class Help
         Output.Line("  list, ls            The stack, top to bottom, main in its slot");
         Output.Line("  goto, go <target>   Jump to a branch, or a desktop on it");
         Output.Line("  watch               Stream position changes until interrupted");
+        Output.Line("  map                 Open the map, framed on where you are");
         Output.Line("  help                This text");
         Output.Line();
         Output.Line(b("TARGETS"));
@@ -65,6 +66,6 @@ internal static class Help
         Output.Line(b("NOTES"));
         Output.Line($"  Reads come from {d(StatusFile.FilePath)}");
         Output.Line("  which the tray keeps current — including switches made outside Hypertree");
-        Output.Line("  (Win+Ctrl+Arrow, Task View). Only 'goto' talks to the tray.");
+        Output.Line("  (Win+Ctrl+Arrow, Task View). Only 'goto' and 'map' talk to the tray.");
     }
 }
