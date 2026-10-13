@@ -9,6 +9,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.5.7] - 2026-10-13
+
+### Added
+
+- `htree map` opens the map framed on the current desktop, so other tools can summon it.
+
+### Changed
+
+- `Enter` or double-click on a room jumps there and closes the map; picking the room you're on closes it too.
+
+---
+
 ## [v0.5.6] - 2026-08-24
 
 ### Added
