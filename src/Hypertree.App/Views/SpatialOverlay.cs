@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Threading;
 using Hypertree.App.Views.Scene;
 using Hypertree.Desktops;
 using Hypertree.Layout;
@@ -61,6 +62,20 @@ internal sealed class SpatialOverlay : IStageContent
     // The pointer-drag gesture engine (press → drag → drop). It owns the drag state; the overlay owns the
     // model edits it commits and the root's pointer wiring it's fed from.
     private readonly RoomDragController _drag;
+
+    // The hyperbolic view (h): the same map on the {4,5} tiling in the Poincaré disk. Tiles glide between
+    // layouts on a timer so recentring reads as a hyperbolic motion rather than a jump. The anchor is the room
+    // the disk is centred on; it follows the keyboard cursor but not a click, so the room under the pointer
+    // stays put for the second half of a double-click.
+    private bool _hyper;
+    private readonly HyperbolicMotion _motion = new();
+    private double _spinTarget;
+    private bool _snapPose;
+    private DesktopId? _hyperAnchor;
+    private bool _anchorPinned;
+    private DispatcherTimer? _glideTimer;
+    private DateTime _lastGlideTick;
+    private static readonly double QuarterTurn = Math.PI / 2, FineSpinStep = Math.PI / 12;
 
     /// <summary>Switch to a room (Enter / double-click) — App resolves the id to a jump.</summary>
     public event Action<DesktopId>? JumpRoomRequested;
@@ -134,6 +149,8 @@ internal sealed class SpatialOverlay : IStageContent
         _source = source;
         _state = state;
         _initialised = false;
+        _anchorPinned = false;
+        _snapPose = true;
         _stage.Summon(this);
     }
 
@@ -152,6 +169,7 @@ internal sealed class SpatialOverlay : IStageContent
         _source = source;
         _state = state;
         _initialised = false;
+        _anchorPinned = false;
         Render();
     }
 
@@ -177,6 +195,7 @@ internal sealed class SpatialOverlay : IStageContent
 
         _cursor = id;
         _selectedGroup = null;
+        _anchorPinned = false;
         _initialised = true; // keep this selection — don't let InitCursor override it on re-present
         if (IsOpen) Render();
     }
@@ -205,6 +224,7 @@ internal sealed class SpatialOverlay : IStageContent
 
         _cursor = ids[0];
         _selectedGroup = null;
+        _anchorPinned = false;
         _initialised = true; // keep this selection — don't let InitCursor override it on re-present
         if (IsOpen) Render();
     }
@@ -223,7 +243,11 @@ internal sealed class SpatialOverlay : IStageContent
     public bool DismissOnClickAway => false;
 
     public void OnPresented(OverlayStage stage) => Render();
-    public void OnRemoved() => _initialised = false;
+    public void OnRemoved()
+    {
+        _initialised = false;
+        _glideTimer?.Stop();
+    }
 
     public void OnKey(KeyEventArgs e)
     {
@@ -240,6 +264,16 @@ internal sealed class SpatialOverlay : IStageContent
             case Key.Up when e.KeyModifiers == KeyModifiers.Control: MoveActive(0, -1); e.Handled = true; return;
             case Key.Down when e.KeyModifiers == KeyModifiers.Control: MoveActive(0, 1); e.Handled = true; return;
             case Key.Z when e.KeyModifiers == KeyModifiers.Control: Undo(); e.Handled = true; return;
+        }
+
+        if (_hyper)
+        {
+            bool fine = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+            switch (e.Key)
+            {
+                case Key.Q: Spin(fine ? -FineSpinStep : -QuarterTurn); e.Handled = true; return;
+                case Key.E: Spin(fine ? FineSpinStep : QuarterTurn); e.Handled = true; return;
+            }
         }
 
         switch (e.Key)
@@ -261,6 +295,7 @@ internal sealed class SpatialOverlay : IStageContent
             case Key.P: CommandPaletteRequested?.Invoke(); e.Handled = true; break;
             case Key.O: AppLauncherRequested?.Invoke(); e.Handled = true; break;
             case Key.L: ToggleLegend(); e.Handled = true; break;
+            case Key.H: ToggleHyperbolic(); e.Handled = true; break;
             // Zoom. + is usually Shift+= (OemPlus), so accept OemPlus/Add either way; likewise OemMinus/Subtract.
             case Key.Add: case Key.OemPlus: Zoom(ZoomStep); e.Handled = true; break;
             case Key.Subtract: case Key.OemMinus: Zoom(1 / ZoomStep); e.Handled = true; break;
@@ -303,9 +338,13 @@ internal sealed class SpatialOverlay : IStageContent
         SpatialScene scene = Scene();
         if (scene.Rooms.Count == 0) return;
         DesktopId curId = _cursor ?? scene.Rooms[0].Id;
-        if (SpatialNavigation.NextInDirection(scene, curId, dx, dy) is { } next)
+        // On the disk an arrow means "that way on screen", so turn it back through the spin first.
+        (int gx, int gy) = _hyper ? HyperbolicTiling.GridStep(_spinTarget, dx, dy) : (dx, dy);
+        DesktopId? next = SpatialNavigation.NextInDirection(scene, curId, gx, gy);
+        _anchorPinned = false;
+        if (next is { } n)
         {
-            _cursor = next;
+            _cursor = n;
             _selectedGroup = null; // plain navigation exits group mode: the room is the active unit again
             Render();
         }
@@ -379,6 +418,65 @@ internal sealed class SpatialOverlay : IStageContent
         _camera.Reframe();
         Render();
         ZoomChanged?.Invoke(_scale);
+    }
+
+    // ── Hyperbolic disk (h, q/e spin) ─────────────────────────────────────────────
+
+    private void ToggleHyperbolic()
+    {
+        _hyper = !_hyper;
+        _anchorPinned = false;
+        if (_hyper)
+        {
+            _snapPose = true;
+            _spinTarget = 0;
+        }
+        else
+        {
+            _glideTimer?.Stop();
+            _camera.Reframe(); // the cursor may have wandered far while the disk was up
+        }
+        Render();
+    }
+
+    private void Spin(double by)
+    {
+        _spinTarget += by;
+        Render();
+    }
+
+    // Lay the rooms out from the anchor room, then either jump there (on entering the view) or glide.
+    private void AimHyperbolic(SpatialScene display)
+    {
+        if (!_anchorPinned || _hyperAnchor is null || display.Rooms.All(r => r.Id != _hyperAnchor)) _hyperAnchor = _cursor;
+        IReadOnlyDictionary<DesktopId, Mobius> layout = _hyperAnchor is { } a
+            ? HyperbolicTiling.Layout(display, a)
+            : new Dictionary<DesktopId, Mobius>();
+
+        if (_snapPose)
+        {
+            _motion.Snap(layout, _spinTarget);
+            _snapPose = false;
+            return;
+        }
+
+        _motion.Retarget(layout, _hyperAnchor, _spinTarget);
+        if (_motion.Moving && _glideTimer?.IsEnabled != true)
+        {
+            _glideTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(15), DispatcherPriority.Render, (_, _) => Glide());
+            _lastGlideTick = DateTime.UtcNow;
+            _glideTimer.Start();
+        }
+    }
+
+    private void Glide()
+    {
+        if (!IsOpen || !_hyper) { _glideTimer?.Stop(); return; }
+        DateTime now = DateTime.UtcNow;
+        _motion.Step(Math.Clamp((now - _lastGlideTick).TotalSeconds, 0, 0.1));
+        _lastGlideTick = now;
+        if (!_motion.Moving) _glideTimer?.Stop();
+        Render(lift: false);
     }
 
     // ── Legend (l) ───────────────────────────────────────────────────────────────
@@ -516,7 +614,7 @@ internal sealed class SpatialOverlay : IStageContent
     // its contiguous block on ⇧-drag, else just the room. Null when the room no longer resolves (not draggable).
     private IReadOnlyList<SpatialRoom>? DragSetOf(DesktopId id, bool shift)
     {
-        if (RoomOf(id) is not { } room) return null;
+        if (_hyper || RoomOf(id) is not { } room) return null;
         if (_selectedGroup is { } g && room.GroupId == g) return GroupRooms(g);
         if (shift) return Fragment(id);
         return new[] { room };
@@ -554,7 +652,8 @@ internal sealed class SpatialOverlay : IStageContent
 
     // ── Render ───────────────────────────────────────────────────────────────────
 
-    private void Render()
+    // Glide frames pass lift: false — re-asserting the windows' z-order sixty times a second buys nothing.
+    private void Render(bool lift = true)
     {
         if (!_initialised) { InitCursor(); _initialised = true; }
 
@@ -579,18 +678,30 @@ internal sealed class SpatialOverlay : IStageContent
 
         _roomHosts.Clear();
         _hits.Clear();
-        Control board = SpatialPainter.Render(display, width, height, _scale, _camera,
-            onClick: id => { _cursor = id; _selectedGroup = null; _drag.NoteTilePressed(); Render(); },
-            onActivate: id => JumpRoomRequested?.Invoke(id),
-            hits: _hits, selectedGroup: _selectedGroup, style: _stage.MapStyle, roomHosts: _roomHosts,
-            hoverGroup: _hoverGroup);
+        Control board;
+        if (_hyper)
+        {
+            AimHyperbolic(display);
+            board = PoincareDiskPainter.Render(display, width, height, _motion,
+                onClick: id => { _cursor = id; _selectedGroup = null; _anchorPinned = true; Render(); },
+                onActivate: id => JumpRoomRequested?.Invoke(id),
+                selectedGroup: _selectedGroup, style: _stage.MapStyle);
+        }
+        else
+        {
+            board = SpatialPainter.Render(display, width, height, _scale, _camera,
+                onClick: id => { _cursor = id; _selectedGroup = null; _drag.NoteTilePressed(); Render(); },
+                onActivate: id => JumpRoomRequested?.Invoke(id),
+                hits: _hits, selectedGroup: _selectedGroup, style: _stage.MapStyle, roomHosts: _roomHosts,
+                hoverGroup: _hoverGroup);
+        }
 
         _root.Children.Clear();
         _root.Children.Add(board);
-        _root.Children.Add(_legend ? SpatialOverlayChrome.Legend(_stage.MapStyle) : SpatialOverlayChrome.LegendHint());
+        _root.Children.Add(_legend ? SpatialOverlayChrome.Legend(_stage.MapStyle, _hyper) : SpatialOverlayChrome.LegendHint());
         if (_groupsPanel) _root.Children.Add(SpatialOverlayChrome.GroupsPanel(display, _selectedGroup, _paletteFor, GroupsCallbacks()));
 
-        _stage.BringToFront();
+        if (lift) _stage.BringToFront();
     }
 
     // The groups-panel's state transitions, handed to the chrome builder so it can wire them onto the rows it

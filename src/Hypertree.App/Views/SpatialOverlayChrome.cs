@@ -33,16 +33,16 @@ internal static class SpatialOverlayChrome
 
     /// <summary>The key legend (top-left). The "v" row's label follows the current <paramref name="style"/>
     /// (it names the style a press of <c>v</c> switches to next).</summary>
-    public static Control Legend(MapStyle style)
+    public static Control Legend(MapStyle style, bool hyperbolic = false)
     {
         var rows = new StackPanel { Spacing = 7 };
         rows.Children.Add(new TextBlock
         {
-            Text = "Spatial map", FontSize = 13, FontWeight = FontWeight.SemiBold, Foreground = Fg,
+            Text = hyperbolic ? "Spatial map · hyperbolic" : "Spatial map", FontSize = 13, FontWeight = FontWeight.SemiBold, Foreground = Fg,
             Margin = new Thickness(0, 0, 0, 4),
         });
 
-        foreach ((string key, string desc) in LegendRows(style))
+        foreach ((string key, string desc) in LegendRows(style, hyperbolic))
             rows.Children.Add(LegendRow(key, desc));
 
         rows.Children.Add(new TextBlock
@@ -52,7 +52,7 @@ internal static class SpatialOverlayChrome
         });
         rows.Children.Add(new TextBlock
         {
-            Text = "drag a room · ⇧-drag its block", FontSize = 11, Foreground = FgDim,
+            Text = hyperbolic ? "drag rooms on the flat map (h)" : "drag a room · ⇧-drag its block", FontSize = 11, Foreground = FgDim,
         });
 
         var legend = new Border
@@ -67,8 +67,19 @@ internal static class SpatialOverlayChrome
     }
 
     // The legend body as a (keycap, description) table, rendered in a loop rather than 20-odd imperative Adds.
-    // The "v" row is the one dynamic entry — it names the style v switches to next.
-    private static (string Key, string Desc)[] LegendRows(MapStyle style) => new[]
+    // The "v" row names the style v switches to next; the hyperbolic view adds its spin keys while it's up.
+    private static IEnumerable<(string Key, string Desc)> LegendRows(MapStyle style, bool hyperbolic)
+    {
+        IEnumerable<(string, string)> rows = BaseLegendRows(style);
+        if (!hyperbolic) return rows.Append(("h", "hyperbolic view"));
+        return new[]
+        {
+            ("h", "back to the flat map"),
+            ("q / e", "quarter-turn · ⇧ for a nudge"),
+        }.Concat(rows);
+    }
+
+    private static (string Key, string Desc)[] BaseLegendRows(MapStyle style) => new[]
     {
         ("←→↑↓", "select the nearest room"),
         ("Enter/Space", "switch to selected"),

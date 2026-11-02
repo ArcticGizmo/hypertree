@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `h` on the map lays your desktops on the {4,5} tiling of the hyperbolic plane, drawn in the Poincaré disk — every room a curved square tile, shrinking toward the rim. `q`/`e` quarter-turn the disk (hold `⇧` for a nudge), every label and window turns with its tile, and the arrow keys follow the turn so ↑ always means up the screen.
+
 ---
 
 ## [v0.5.7] - 2026-10-13

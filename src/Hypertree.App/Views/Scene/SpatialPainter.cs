@@ -24,11 +24,11 @@ namespace Hypertree.App.Views.Scene;
 /// </summary>
 internal static class SpatialPainter
 {
-    private static readonly Color TileBg = Color.Parse("#1F2836");
-    private static readonly Color CapBg = Color.Parse("#161C27");
+    internal static readonly Color TileBg = Color.Parse("#1F2836");
+    internal static readonly Color CapBg = Color.Parse("#161C27");
     private static readonly Color Ink = Palette.Ink, InkSoft = Palette.Muted;
     private static readonly Color Focus = Palette.Accent, Here = Palette.Here;
-    private static readonly Color WinBase = Color.Parse("#374357");
+    internal static readonly Color WinBase = Color.Parse("#374357");
     private static readonly FontFamily Mono = new("Cascadia Code,Consolas,monospace");
     // ASCII / Metro room styling, matching AsciiPainter and MetroPainter so a room reads the same in either model.
     private static readonly Color AsciiGround = Color.Parse("#0C0F16");
@@ -118,38 +118,16 @@ internal static class SpatialPainter
             var cell = new Rect(placed.Rect.Left + ox, placed.Rect.Top + oy, placed.Rect.Width, placed.Rect.Height);
 
             // Each room lives in its own host canvas positioned at its cell, so a drag can move the host
-            // without re-rendering the board (a re-render mid-drag would drop the pointer capture). The glyph
-            // is drawn in the host's local coordinates.
-            var host = new Canvas { Width = cell.Width, Height = cell.Height };
-            var local = new Rect(0, 0, cell.Width, cell.Height);
-            switch (style) // the room glyph follows the app's Map style, so List and Spatial read as one app
-            {
-                case MapStyle.Metro: DrawMetroRoom(host, placed.Room, groupColor, local, s); break;
-                case MapStyle.Ascii: DrawAsciiRoom(host, placed.Room, groupColor, local, s); break;
-                default: DrawBoardRoom(host, placed.Room, groupColor, local, s); break;
-            }
-            if (overlapping.Contains(id)) AddOverlapBadge(host, local, s);
+            // without re-rendering the board (a re-render mid-drag would drop the pointer capture).
+            Canvas host = RoomHost(placed.Room, groupColor, cell.Size, s, style, overlapping.Contains(id),
+                                   onClick is null ? null : () => onClick(id),
+                                   onActivate is null ? null : () => onActivate(id));
 
-            // Brightness by focus, not just by group: the focused room (blue selection/cursor or green
-            // "here") reads at full strength; its groupmates in the same live group sit a notch down so the
-            // focus stands out within the group rather than the whole group blazing at once; every room in a
-            // group you're not in is dimmer still. On top of that, an empty (0-window) room recedes further —
-            // it has nothing to hold, so it should stand out less — unless it's the focused room, which always
-            // reads at full strength.
-            bool focused = placed.Room.Selected || placed.Room.Here;
-            double opacity = focused ? RoomFocusedOpacity
-                           : activeGroups.Contains(placed.Room.GroupId) ? RoomGroupmateOpacity
-                           : RoomRestOpacity;
-            if (!focused && placed.Room.WindowCount == 0) opacity *= RoomEmptyFactor;
+            double opacity = RoomOpacity(placed.Room, activeGroups.Contains(placed.Room.GroupId));
             // A spotlight overrides every tier: the rooms being deleted read at full strength, all others fall
             // to the dim floor — so the confirm's target is unmistakable.
             if (spot is not null) opacity = spot.Contains(id) ? 1.0 : SpotlightDimOpacity;
             host.Opacity = opacity;
-
-            // Topmost within the host, so it catches the press for every style.
-            ScenePaint.HitCell(host, local,
-                               onClick is null ? null : () => onClick(id),
-                               onActivate is null ? null : () => onActivate(id));
 
             Canvas.SetLeft(host, cell.X);
             Canvas.SetTop(host, cell.Y);
@@ -160,6 +138,39 @@ internal static class SpatialPainter
 
         PaintOffscreenMarkers(canvas, layout, scene, ox, oy, screenW, screenH, s, spot);
         return canvas;
+    }
+
+    /// <summary>One room's glyph in its own canvas of <paramref name="size"/>, drawn in local coordinates in
+    /// the app's <paramref name="style"/>, with the click/double-click hit rect on top. Shared with the
+    /// Poincaré disk painter, which renders it to a texture and warps that onto a hyperbolic tile.</summary>
+    internal static Canvas RoomHost(SpatialRoom room, Color groupColor, Size size, double s, MapStyle style,
+                                    bool overlapping, Action? onClick, Action? onActivate)
+    {
+        var host = new Canvas { Width = size.Width, Height = size.Height };
+        var local = new Rect(size);
+        switch (style) // the room glyph follows the app's Map style, so List and Spatial read as one app
+        {
+            case MapStyle.Metro: DrawMetroRoom(host, room, groupColor, local, s); break;
+            case MapStyle.Ascii: DrawAsciiRoom(host, room, groupColor, local, s); break;
+            default: DrawBoardRoom(host, room, groupColor, local, s); break;
+        }
+        if (overlapping) AddOverlapBadge(host, local, s);
+
+        // Topmost within the host, so it catches the press for every style.
+        ScenePaint.HitCell(host, local, onClick, onActivate);
+        return host;
+    }
+
+    /// <summary>Brightness by focus, not just by group: the focused room (blue selection or green "here")
+    /// reads at full strength; its groupmates in a live group sit a notch down so the focus stands out within
+    /// the group; every room in a group you're not in is dimmer still. An empty room recedes further unless
+    /// it's the focused one — it has nothing to hold, so it shouldn't carry the eye.</summary>
+    internal static double RoomOpacity(SpatialRoom room, bool groupActive)
+    {
+        bool focused = room.Selected || room.Here;
+        double opacity = focused ? RoomFocusedOpacity : groupActive ? RoomGroupmateOpacity : RoomRestOpacity;
+        if (!focused && room.WindowCount == 0) opacity *= RoomEmptyFactor;
+        return opacity;
     }
 
     // Rooms that fell off the edge of the viewport get an arrow on the border pointing their way: draw a
@@ -338,7 +349,7 @@ internal static class SpatialPainter
         return new Point(from.X + (to.X - from.X) * t, from.Y + (to.Y - from.Y) * t);
     }
 
-    private static void PaintBadge(Canvas canvas, SpatialGroup group, Color c, bool main, bool bright, double x, double y, double s, double dim = 1.0)
+    internal static void PaintBadge(Canvas canvas, SpatialGroup group, Color c, bool main, bool bright, double x, double y, double s, double dim = 1.0)
     {
         var dot = new Ellipse { Width = 7 * s, Height = 7 * s, Fill = new SolidColorBrush(c), VerticalAlignment = VerticalAlignment.Center };
         var text = new TextBlock

@@ -37,6 +37,14 @@ internal static class DesignShot
         SaveSpatial(Path.Combine(outDir, "spatial-metro.png"), fragmented: false, style: MapStyle.Metro);
         SaveSpatial(Path.Combine(outDir, "spatial-overlap.png"), fragmented: false, overlap: true); // two rooms on one cell
 
+        // The hyperbolic view: anchored on "Web", then a quarter-turn, then mid-glide toward "Comms" (one step
+        // left along the row), then in the metro glyphs.
+        SaveHyperbolic(Path.Combine(outDir, "hyperbolic.png"), spin: 0);
+        SaveHyperbolic(Path.Combine(outDir, "hyperbolic-spun.png"), spin: Math.PI / 2);
+        SaveHyperbolic(Path.Combine(outDir, "hyperbolic-gliding.png"), spin: 0, glideTo: 1);
+        SaveHyperbolic(Path.Combine(outDir, "hyperbolic-rehang.png"), spin: 0, glideTo: 11);
+        SaveHyperbolic(Path.Combine(outDir, "hyperbolic-metro.png"), spin: 0, style: MapStyle.Metro);
+
         // The map over a bright, busy fake desktop — the flat dim vs. the shipped centre-weighted vignette,
         // so the contrast gain under the coloured rooms is visible side by side.
         SaveSpatialBackdrop(Path.Combine(outDir, "spatial-backdrop-flat.png"), vignette: false);
@@ -58,6 +66,24 @@ internal static class DesignShot
         Guid? sel = selectedGroup is { } sg ? SampleGid(sg) : null;
         Save(SpatialPainter.Render(SpatialScene.From(source, state), ScreenW, ScreenH, 1.0, new MapCamera(),
                                    selectedGroup: sel, style: style), path);
+    }
+
+    // Anchored on the sample's selected room ("Web"); with glideTo, frozen halfway through the glide to that
+    // desktop (by sample id) so the in-between frame can be inspected.
+    private static void SaveHyperbolic(string path, double spin, int? glideTo = null, MapStyle style = MapStyle.Board)
+    {
+        (SpatialSource source, SpatialState state) = SampleScene(fragmented: false, overlap: false, tidied: false);
+        SpatialScene scene = SpatialScene.From(source, state);
+        DesktopId web = scene.Rooms.First(r => r.Selected).Id;
+        var motion = new HyperbolicMotion();
+        motion.Snap(HyperbolicTiling.Layout(scene, web), spin);
+        if (glideTo is { } n)
+        {
+            var to = new DesktopId(new Guid($"{n:D8}-0000-0000-0000-000000000000"));
+            motion.Retarget(HyperbolicTiling.Layout(scene, to), to, spin);
+            motion.Step(0.07);
+        }
+        Save(PoincareDiskPainter.Render(scene, ScreenW, ScreenH, motion, style: style), path);
     }
 
     // Stable group id for the sample data, so a group can be referenced (e.g. the selected one) by number.
