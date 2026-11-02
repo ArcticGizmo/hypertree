@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Threading;
 using Hypertree.App.Views.Scene;
 using Hypertree.Desktops;
 using Hypertree.Layout;
@@ -61,6 +62,17 @@ internal sealed class SpatialOverlay : IStageContent
     // The pointer-drag gesture engine (press → drag → drop). It owns the drag state; the overlay owns the
     // model edits it commits and the root's pointer wiring it's fed from.
     private readonly RoomDragController _drag;
+
+    // The view the map is drawn in (h cycles: flat, hyperbolic, vortex) lives on the stage, so cards and the
+    // move flow draw the same one. Animated views tick on a timer. The anchor is the room a curved view
+    // centres on; it follows the keyboard cursor but not a click, so the room under the pointer stays put for
+    // the second half of a double-click.
+    private DesktopId? _anchor;
+    private bool _anchorPinned;
+    private DispatcherTimer? _glideTimer;
+    private DateTime _lastGlideTick;
+
+    private IMapView MapView => _stage.MapViews.Current;
 
     /// <summary>Switch to a room (Enter / double-click) — App resolves the id to a jump.</summary>
     public event Action<DesktopId>? JumpRoomRequested;
@@ -134,6 +146,8 @@ internal sealed class SpatialOverlay : IStageContent
         _source = source;
         _state = state;
         _initialised = false;
+        _anchorPinned = false;
+        MapView.Snap();
         _stage.Summon(this);
     }
 
@@ -152,6 +166,7 @@ internal sealed class SpatialOverlay : IStageContent
         _source = source;
         _state = state;
         _initialised = false;
+        _anchorPinned = false;
         Render();
     }
 
@@ -177,6 +192,7 @@ internal sealed class SpatialOverlay : IStageContent
 
         _cursor = id;
         _selectedGroup = null;
+        _anchorPinned = false;
         _initialised = true; // keep this selection — don't let InitCursor override it on re-present
         if (IsOpen) Render();
     }
@@ -205,6 +221,7 @@ internal sealed class SpatialOverlay : IStageContent
 
         _cursor = ids[0];
         _selectedGroup = null;
+        _anchorPinned = false;
         _initialised = true; // keep this selection — don't let InitCursor override it on re-present
         if (IsOpen) Render();
     }
@@ -223,7 +240,11 @@ internal sealed class SpatialOverlay : IStageContent
     public bool DismissOnClickAway => false;
 
     public void OnPresented(OverlayStage stage) => Render();
-    public void OnRemoved() => _initialised = false;
+    public void OnRemoved()
+    {
+        _initialised = false;
+        _glideTimer?.Stop();
+    }
 
     public void OnKey(KeyEventArgs e)
     {
@@ -240,6 +261,13 @@ internal sealed class SpatialOverlay : IStageContent
             case Key.Up when e.KeyModifiers == KeyModifiers.Control: MoveActive(0, -1); e.Handled = true; return;
             case Key.Down when e.KeyModifiers == KeyModifiers.Control: MoveActive(0, 1); e.Handled = true; return;
             case Key.Z when e.KeyModifiers == KeyModifiers.Control: Undo(); e.Handled = true; return;
+        }
+
+        if (MapView.OnKey(e.Key, e.KeyModifiers))
+        {
+            Render();
+            e.Handled = true;
+            return;
         }
 
         switch (e.Key)
@@ -261,6 +289,7 @@ internal sealed class SpatialOverlay : IStageContent
             case Key.P: CommandPaletteRequested?.Invoke(); e.Handled = true; break;
             case Key.O: AppLauncherRequested?.Invoke(); e.Handled = true; break;
             case Key.L: ToggleLegend(); e.Handled = true; break;
+            case Key.H: NextView(); e.Handled = true; break;
             // Zoom. + is usually Shift+= (OemPlus), so accept OemPlus/Add either way; likewise OemMinus/Subtract.
             case Key.Add: case Key.OemPlus: Zoom(ZoomStep); e.Handled = true; break;
             case Key.Subtract: case Key.OemMinus: Zoom(1 / ZoomStep); e.Handled = true; break;
@@ -303,9 +332,13 @@ internal sealed class SpatialOverlay : IStageContent
         SpatialScene scene = Scene();
         if (scene.Rooms.Count == 0) return;
         DesktopId curId = _cursor ?? scene.Rooms[0].Id;
-        if (SpatialNavigation.NextInDirection(scene, curId, dx, dy) is { } next)
+        // An arrow means "that way on screen"; a turned view says which grid step that is.
+        (int gx, int gy) = MapView.Arrow(dx, dy);
+        DesktopId? next = SpatialNavigation.NextInDirection(scene, curId, gx, gy);
+        _anchorPinned = false;
+        if (next is { } n)
         {
-            _cursor = next;
+            _cursor = n;
             _selectedGroup = null; // plain navigation exits group mode: the room is the active unit again
             Render();
         }
@@ -379,6 +412,33 @@ internal sealed class SpatialOverlay : IStageContent
         _camera.Reframe();
         Render();
         ZoomChanged?.Invoke(_scale);
+    }
+
+    // ── Views (h) ─────────────────────────────────────────────────────────────────
+
+    private void NextView()
+    {
+        _glideTimer?.Stop();
+        _anchorPinned = false;
+        _stage.MapViews.Advance();
+        Render();
+    }
+
+    private void EnsureGlide()
+    {
+        if (!MapView.Animating || _glideTimer?.IsEnabled == true) return;
+        _glideTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(15), DispatcherPriority.Render, (_, _) => Glide());
+        _lastGlideTick = DateTime.UtcNow;
+        _glideTimer.Start();
+    }
+
+    private void Glide()
+    {
+        if (!IsOpen || !MapView.Animating) { _glideTimer?.Stop(); return; }
+        DateTime now = DateTime.UtcNow;
+        MapView.Step(Math.Clamp((now - _lastGlideTick).TotalSeconds, 0, 0.1));
+        _lastGlideTick = now;
+        Render(lift: false);
     }
 
     // ── Legend (l) ───────────────────────────────────────────────────────────────
@@ -516,7 +576,7 @@ internal sealed class SpatialOverlay : IStageContent
     // its contiguous block on ⇧-drag, else just the room. Null when the room no longer resolves (not draggable).
     private IReadOnlyList<SpatialRoom>? DragSetOf(DesktopId id, bool shift)
     {
-        if (RoomOf(id) is not { } room) return null;
+        if (!MapView.Draggable || RoomOf(id) is not { } room) return null;
         if (_selectedGroup is { } g && room.GroupId == g) return GroupRooms(g);
         if (shift) return Fragment(id);
         return new[] { room };
@@ -554,7 +614,8 @@ internal sealed class SpatialOverlay : IStageContent
 
     // ── Render ───────────────────────────────────────────────────────────────────
 
-    private void Render()
+    // Glide frames pass lift: false — re-asserting the windows' z-order sixty times a second buys nothing.
+    private void Render(bool lift = true)
     {
         if (!_initialised) { InitCursor(); _initialised = true; }
 
@@ -579,18 +640,28 @@ internal sealed class SpatialOverlay : IStageContent
 
         _roomHosts.Clear();
         _hits.Clear();
-        Control board = SpatialPainter.Render(display, width, height, _scale, _camera,
-            onClick: id => { _cursor = id; _selectedGroup = null; _drag.NoteTilePressed(); Render(); },
-            onActivate: id => JumpRoomRequested?.Invoke(id),
-            hits: _hits, selectedGroup: _selectedGroup, style: _stage.MapStyle, roomHosts: _roomHosts,
-            hoverGroup: _hoverGroup);
+        if (!_anchorPinned || _anchor is null || display.Rooms.All(r => r.Id != _anchor)) _anchor = _cursor;
+        IMapView view = MapView;
+        Control board = view.Render(new MapViewRequest(display, width, height, _scale, _stage.MapStyle,
+            Anchor: _anchor,
+            OnClick: id =>
+            {
+                _cursor = id;
+                _selectedGroup = null;
+                _anchorPinned = true; // a curved view holds still under the pointer for the double-click
+                _drag.NoteTilePressed();
+                Render();
+            },
+            OnActivate: id => JumpRoomRequested?.Invoke(id),
+            Hits: _hits, SelectedGroup: _selectedGroup, RoomHosts: _roomHosts, HoverGroup: _hoverGroup));
+        EnsureGlide();
 
         _root.Children.Clear();
         _root.Children.Add(board);
-        _root.Children.Add(_legend ? SpatialOverlayChrome.Legend(_stage.MapStyle) : SpatialOverlayChrome.LegendHint());
+        _root.Children.Add(_legend ? SpatialOverlayChrome.Legend(_stage.MapStyle, view, _stage.MapViews.NextView) : SpatialOverlayChrome.LegendHint());
         if (_groupsPanel) _root.Children.Add(SpatialOverlayChrome.GroupsPanel(display, _selectedGroup, _paletteFor, GroupsCallbacks()));
 
-        _stage.BringToFront();
+        if (lift) _stage.BringToFront();
     }
 
     // The groups-panel's state transitions, handed to the chrome builder so it can wire them onto the rows it

@@ -9,6 +9,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.5.8] - 2026-11-02
+
+### Map views
+
+- `h` on the map cycles its view: flat, hyperbolic, vortex, fisheye, Riemann sphere and ripple.
+- Hyperbolic lays rooms on the {4,5} tiling in a Poincaré disk, shrinking toward the rim.
+- Vortex turns rows into rings spiralling into the centre and columns into spokes.
+- Fisheye magnifies your room and squeezes the rest of the map into a lens.
+- Riemann sphere wraps the map onto a globe where every row and column meets at ∞; `w`/`s` swing ∞ toward or away.
+- Ripple shows the flat map under water, rippling from wherever you move.
+- `q`/`e` quarter-turn a curved view (`⇧` for a nudge); the arrows follow the turn and labels stay upright.
+- Cards opened from the map and the move-windows flow draw over the current view.
+
+---
+
 ## [v0.5.7] - 2026-10-13
 
 ### Added

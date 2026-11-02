@@ -91,7 +91,8 @@ internal sealed class MoveContent : WindowPickerContent
         SpatialScene scene = SpatialScene.From(sp.Source, sp.State);
         if (scene.Rooms.Count == 0) return;
         DesktopId cur = _cursor ?? scene.Rooms[0].Id;
-        if (SpatialNavigation.NextInDirection(scene, cur, dx, dy) is { } next) _cursor = next;
+        (int gx, int gy) = Stage?.MapViews.Current.Arrow(dx, dy) ?? (dx, dy); // arrows follow a turned view
+        if (SpatialNavigation.NextInDirection(scene, cur, gx, gy) is { } next) _cursor = next;
         RenderTargeting();
     }
 
@@ -113,8 +114,12 @@ internal sealed class MoveContent : WindowPickerContent
         SpatialScene display = _cursor is { } c ? SpatialScene.From(source, state, c) : probe;
 
         double width = Stage?.HostWidth ?? 1280, height = Stage?.HostHeight ?? 800;
-        Control board = SpatialPainter.Render(display, width, height, Stage?.MapZoom ?? 1.0, new MapCamera(),
-                                              style: Stage?.MapStyle ?? MapStyle.Board);
+        // Drawn in the map's current view, centred on the destination cursor where the view centres at all.
+        var request = new MapViewRequest(display, width, height, Stage?.MapZoom ?? 1.0, Stage?.MapStyle ?? MapStyle.Board,
+                                         Anchor: _cursor);
+        Control board = Stage is { } stage
+            ? stage.MapViews.Current.RenderStill(request)
+            : SpatialPainter.Render(display, width, height, 1.0, new MapCamera());
 
         int n = Session.SelectedCount;
         string dest = _cursor is { } cur && display.Rooms.FirstOrDefault(r => r.Id == cur) is { } room
