@@ -72,6 +72,11 @@ internal sealed class OverlayStage
     /// user set with <c>+</c>/<c>−</c>. See <c>SpatialOverlay</c>.</summary>
     public double MapZoom { get; set; } = 1.0;
 
+    /// <summary>The views the map can be drawn in and which is current (flat, hyperbolic, …). Held here so the
+    /// map, the card backdrops and the move flow all draw the one you picked. App replaces it with a set built
+    /// on the shared map camera.</summary>
+    public MapViewSet MapViews { get; set; } = new(new MapCamera());
+
     /// <summary>Raised when the stage becomes visible (first content shown) and when it hides (stack
     /// emptied). App uses these to park the taskbar pill while the overlay is up.</summary>
     public event Action? Shown;
@@ -225,22 +230,22 @@ internal sealed class OverlayStage
         if (firstShow) Shown?.Invoke();
     }
 
-    // The board to paint behind a card. By default it's the live spatial map, so the backdrop matches what
-    // you'd see on the map. A card can override with a spatial scene of its own (the jump palette
-    // highlighting its target, a snapshot's would-be layout).
+    // The board to paint behind a card, in the current map view. By default it's the live spatial map, so the
+    // backdrop matches what you'd see on the map. A card can override with a spatial scene of its own (the
+    // jump palette highlighting its target, a snapshot's would-be layout).
     private Control? RenderBackdrop(IStageContent content)
     {
         double w = HostWidth > 0 ? HostWidth : 1280, h = HostHeight > 0 ? HostHeight : 800;
 
         IReadOnlyCollection<DesktopId>? spotlight = content.BackdropSpotlight();
-        if (content.BackdropScene() is { } scene)
-            return SpatialPainter.Render(scene, w, h, MapZoom, new MapCamera(), style: MapStyle, spotlight: spotlight);
-        if (SpatialProvider is { } spatial)
+        SpatialScene? scene = content.BackdropScene();
+        if (scene is null && SpatialProvider is { } spatial)
         {
             (SpatialSource source, SpatialState state) = spatial();
-            return SpatialPainter.Render(SpatialScene.From(source, state), w, h, MapZoom, new MapCamera(), style: MapStyle, spotlight: spotlight);
+            scene = SpatialScene.From(source, state);
         }
-        return null;
+        return scene is null ? null
+            : MapViews.Current.RenderStill(new MapViewRequest(scene, w, h, MapZoom, MapStyle, Spotlight: spotlight));
     }
 
     /// <summary>Re-render the current card's backdrop board — after its selection moved (palette preview).</summary>

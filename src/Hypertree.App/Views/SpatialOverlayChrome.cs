@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Hypertree.App.Views.Scene;
 using Hypertree.Settings;
 using Hypertree.Spatial;
 
@@ -33,16 +34,17 @@ internal static class SpatialOverlayChrome
 
     /// <summary>The key legend (top-left). The "v" row's label follows the current <paramref name="style"/>
     /// (it names the style a press of <c>v</c> switches to next).</summary>
-    public static Control Legend(MapStyle style, bool hyperbolic = false)
+    public static Control Legend(MapStyle style, IMapView view, IMapView next)
     {
+        bool flat = view.Draggable;
         var rows = new StackPanel { Spacing = 7 };
         rows.Children.Add(new TextBlock
         {
-            Text = hyperbolic ? "Spatial map · hyperbolic" : "Spatial map", FontSize = 13, FontWeight = FontWeight.SemiBold, Foreground = Fg,
+            Text = flat ? "Spatial map" : $"Spatial map · {view.Name}", FontSize = 13, FontWeight = FontWeight.SemiBold, Foreground = Fg,
             Margin = new Thickness(0, 0, 0, 4),
         });
 
-        foreach ((string key, string desc) in LegendRows(style, hyperbolic))
+        foreach ((string key, string desc) in LegendRows(style, view, next))
             rows.Children.Add(LegendRow(key, desc));
 
         rows.Children.Add(new TextBlock
@@ -52,7 +54,7 @@ internal static class SpatialOverlayChrome
         });
         rows.Children.Add(new TextBlock
         {
-            Text = hyperbolic ? "drag rooms on the flat map (h)" : "drag a room · ⇧-drag its block", FontSize = 11, Foreground = FgDim,
+            Text = flat ? "drag a room · ⇧-drag its block" : "drag rooms on the flat map (h)", FontSize = 11, Foreground = FgDim,
         });
 
         var legend = new Border
@@ -67,16 +69,12 @@ internal static class SpatialOverlayChrome
     }
 
     // The legend body as a (keycap, description) table, rendered in a loop rather than 20-odd imperative Adds.
-    // The "v" row names the style v switches to next; the hyperbolic view adds its spin keys while it's up.
-    private static IEnumerable<(string Key, string Desc)> LegendRows(MapStyle style, bool hyperbolic)
+    // The "v" and "h" rows name what a press switches to next; a curved view adds its own keys up top.
+    private static IEnumerable<(string Key, string Desc)> LegendRows(MapStyle style, IMapView view, IMapView next)
     {
+        (string, string) h = ("h", $"{next.Name} view");
         IEnumerable<(string, string)> rows = BaseLegendRows(style);
-        if (!hyperbolic) return rows.Append(("h", "hyperbolic view"));
-        return new[]
-        {
-            ("h", "back to the flat map"),
-            ("q / e", "quarter-turn · ⇧ for a nudge"),
-        }.Concat(rows);
+        return view.Draggable ? rows.Append(h) : new[] { h }.Concat(view.Keys).Concat(rows);
     }
 
     private static (string Key, string Desc)[] BaseLegendRows(MapStyle style) => new[]

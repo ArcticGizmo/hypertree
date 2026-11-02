@@ -37,13 +37,23 @@ internal static class DesignShot
         SaveSpatial(Path.Combine(outDir, "spatial-metro.png"), fragmented: false, style: MapStyle.Metro);
         SaveSpatial(Path.Combine(outDir, "spatial-overlap.png"), fragmented: false, overlap: true); // two rooms on one cell
 
-        // The hyperbolic view: anchored on "Web", then a quarter-turn, then mid-glide toward "Comms" (one step
-        // left along the row), then in the metro glyphs.
-        SaveHyperbolic(Path.Combine(outDir, "hyperbolic.png"), spin: 0);
-        SaveHyperbolic(Path.Combine(outDir, "hyperbolic-spun.png"), spin: Math.PI / 2);
-        SaveHyperbolic(Path.Combine(outDir, "hyperbolic-gliding.png"), spin: 0, glideTo: 1);
-        SaveHyperbolic(Path.Combine(outDir, "hyperbolic-rehang.png"), spin: 0, glideTo: 11);
-        SaveHyperbolic(Path.Combine(outDir, "hyperbolic-metro.png"), spin: 0, style: MapStyle.Metro);
+        // The curved views, anchored on "Web": plain, turned (labels must stay upright), mid-glide, and in the
+        // other glyph styles. The hyperbolic "rehang" glides between rows, where the off-axis rooms swing.
+        SaveView(Path.Combine(outDir, "hyperbolic.png"), new HyperbolicMapView());
+        SaveView(Path.Combine(outDir, "hyperbolic-spun.png"), new HyperbolicMapView(), turns: 3);
+        SaveView(Path.Combine(outDir, "hyperbolic-rehang.png"), new HyperbolicMapView(), glideTo: 11);
+        SaveView(Path.Combine(outDir, "hyperbolic-metro.png"), new HyperbolicMapView(), style: MapStyle.Metro);
+        SaveView(Path.Combine(outDir, "vortex.png"), new VortexMapView());
+        SaveView(Path.Combine(outDir, "vortex-spun.png"), new VortexMapView(), turns: 1);
+        SaveView(Path.Combine(outDir, "vortex-gliding.png"), new VortexMapView(), glideTo: 11);
+        SaveView(Path.Combine(outDir, "vortex-ascii.png"), new VortexMapView(), style: MapStyle.Ascii);
+        SaveBackdrop(Path.Combine(outDir, "hyperbolic-backdrop-spotlight.png"), new HyperbolicMapView());
+        SaveView(Path.Combine(outDir, "fisheye.png"), new FisheyeMapView());
+        SaveView(Path.Combine(outDir, "fisheye-spun.png"), new FisheyeMapView(), turns: 1);
+        SaveView(Path.Combine(outDir, "globe.png"), new GlobeMapView());
+        SaveView(Path.Combine(outDir, "globe-spun.png"), new GlobeMapView(), turns: 1);
+        SaveView(Path.Combine(outDir, "ripple-splash.png"), new RippleMapView(), glideTo: 1, glideSeconds: 0.45);
+        SaveView(Path.Combine(outDir, "ripple-metro.png"), new RippleMapView(), style: MapStyle.Metro);
 
         // The map over a bright, busy fake desktop — the flat dim vs. the shipped centre-weighted vignette,
         // so the contrast gain under the coloured rooms is visible side by side.
@@ -68,22 +78,35 @@ internal static class DesignShot
                                    selectedGroup: sel, style: style), path);
     }
 
-    // Anchored on the sample's selected room ("Web"); with glideTo, frozen halfway through the glide to that
-    // desktop (by sample id) so the in-between frame can be inspected.
-    private static void SaveHyperbolic(string path, double spin, int? glideTo = null, MapStyle style = MapStyle.Board)
+    // What a card draws behind itself in a curved view: the still render, with a delete confirm's spotlight on
+    // "Comms" so everything else drops to the dim floor.
+    private static void SaveBackdrop(string path, IMapView view)
+    {
+        (SpatialSource source, SpatialState state) = SampleScene(fragmented: false, overlap: false, tidied: false);
+        SpatialScene scene = SpatialScene.From(source, state);
+        var comms = new DesktopId(new Guid("00000001-0000-0000-0000-000000000000"));
+        Save(view.RenderStill(new MapViewRequest(scene, ScreenW, ScreenH, 1.0, MapStyle.Board, Spotlight: new[] { comms })), path);
+    }
+
+    // A view anchored on the sample's selected room ("Web"), turned `turns` presses of e; with glideTo, frozen
+    // partway through the glide to that desktop (by sample id) so the in-between frame can be inspected.
+    private static void SaveView(string path, IMapView view, int turns = 0, int? glideTo = null, MapStyle style = MapStyle.Board,
+                                 double glideSeconds = 0.07)
     {
         (SpatialSource source, SpatialState state) = SampleScene(fragmented: false, overlap: false, tidied: false);
         SpatialScene scene = SpatialScene.From(source, state);
         DesktopId web = scene.Rooms.First(r => r.Selected).Id;
-        var motion = new HyperbolicMotion();
-        motion.Snap(HyperbolicTiling.Layout(scene, web), spin);
+        for (int i = 0; i < turns; i++) view.OnKey(Avalonia.Input.Key.E, turns == 3 && i == 2 ? Avalonia.Input.KeyModifiers.Shift : Avalonia.Input.KeyModifiers.None);
+        view.Snap();
+        var request = new MapViewRequest(scene, ScreenW, ScreenH, 1.0, style, Anchor: web);
+        Control board = view.Render(request);
         if (glideTo is { } n)
         {
-            var to = new DesktopId(new Guid($"{n:D8}-0000-0000-0000-000000000000"));
-            motion.Retarget(HyperbolicTiling.Layout(scene, to), to, spin);
-            motion.Step(0.07);
+            view.Render(request with { Anchor = new DesktopId(new Guid($"{n:D8}-0000-0000-0000-000000000000")) });
+            view.Step(glideSeconds);
+            board = view.Render(request with { Anchor = new DesktopId(new Guid($"{n:D8}-0000-0000-0000-000000000000")) });
         }
-        Save(PoincareDiskPainter.Render(scene, ScreenW, ScreenH, motion, style: style), path);
+        Save(board, path);
     }
 
     // Stable group id for the sample data, so a group can be referenced (e.g. the selected one) by number.

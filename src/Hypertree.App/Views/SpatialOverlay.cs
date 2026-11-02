@@ -63,19 +63,16 @@ internal sealed class SpatialOverlay : IStageContent
     // model edits it commits and the root's pointer wiring it's fed from.
     private readonly RoomDragController _drag;
 
-    // The hyperbolic view (h): the same map on the {4,5} tiling in the Poincaré disk. Tiles glide between
-    // layouts on a timer so recentring reads as a hyperbolic motion rather than a jump. The anchor is the room
-    // the disk is centred on; it follows the keyboard cursor but not a click, so the room under the pointer
-    // stays put for the second half of a double-click.
-    private bool _hyper;
-    private readonly HyperbolicMotion _motion = new();
-    private double _spinTarget;
-    private bool _snapPose;
-    private DesktopId? _hyperAnchor;
+    // The view the map is drawn in (h cycles: flat, hyperbolic, vortex) lives on the stage, so cards and the
+    // move flow draw the same one. Animated views tick on a timer. The anchor is the room a curved view
+    // centres on; it follows the keyboard cursor but not a click, so the room under the pointer stays put for
+    // the second half of a double-click.
+    private DesktopId? _anchor;
     private bool _anchorPinned;
     private DispatcherTimer? _glideTimer;
     private DateTime _lastGlideTick;
-    private static readonly double QuarterTurn = Math.PI / 2, FineSpinStep = Math.PI / 12;
+
+    private IMapView MapView => _stage.MapViews.Current;
 
     /// <summary>Switch to a room (Enter / double-click) — App resolves the id to a jump.</summary>
     public event Action<DesktopId>? JumpRoomRequested;
@@ -150,7 +147,7 @@ internal sealed class SpatialOverlay : IStageContent
         _state = state;
         _initialised = false;
         _anchorPinned = false;
-        _snapPose = true;
+        MapView.Snap();
         _stage.Summon(this);
     }
 
@@ -266,14 +263,11 @@ internal sealed class SpatialOverlay : IStageContent
             case Key.Z when e.KeyModifiers == KeyModifiers.Control: Undo(); e.Handled = true; return;
         }
 
-        if (_hyper)
+        if (MapView.OnKey(e.Key, e.KeyModifiers))
         {
-            bool fine = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
-            switch (e.Key)
-            {
-                case Key.Q: Spin(fine ? -FineSpinStep : -QuarterTurn); e.Handled = true; return;
-                case Key.E: Spin(fine ? FineSpinStep : QuarterTurn); e.Handled = true; return;
-            }
+            Render();
+            e.Handled = true;
+            return;
         }
 
         switch (e.Key)
@@ -295,7 +289,7 @@ internal sealed class SpatialOverlay : IStageContent
             case Key.P: CommandPaletteRequested?.Invoke(); e.Handled = true; break;
             case Key.O: AppLauncherRequested?.Invoke(); e.Handled = true; break;
             case Key.L: ToggleLegend(); e.Handled = true; break;
-            case Key.H: ToggleHyperbolic(); e.Handled = true; break;
+            case Key.H: NextView(); e.Handled = true; break;
             // Zoom. + is usually Shift+= (OemPlus), so accept OemPlus/Add either way; likewise OemMinus/Subtract.
             case Key.Add: case Key.OemPlus: Zoom(ZoomStep); e.Handled = true; break;
             case Key.Subtract: case Key.OemMinus: Zoom(1 / ZoomStep); e.Handled = true; break;
@@ -338,8 +332,8 @@ internal sealed class SpatialOverlay : IStageContent
         SpatialScene scene = Scene();
         if (scene.Rooms.Count == 0) return;
         DesktopId curId = _cursor ?? scene.Rooms[0].Id;
-        // On the disk an arrow means "that way on screen", so turn it back through the spin first.
-        (int gx, int gy) = _hyper ? HyperbolicTiling.GridStep(_spinTarget, dx, dy) : (dx, dy);
+        // An arrow means "that way on screen"; a turned view says which grid step that is.
+        (int gx, int gy) = MapView.Arrow(dx, dy);
         DesktopId? next = SpatialNavigation.NextInDirection(scene, curId, gx, gy);
         _anchorPinned = false;
         if (next is { } n)
@@ -420,62 +414,30 @@ internal sealed class SpatialOverlay : IStageContent
         ZoomChanged?.Invoke(_scale);
     }
 
-    // ── Hyperbolic disk (h, q/e spin) ─────────────────────────────────────────────
+    // ── Views (h) ─────────────────────────────────────────────────────────────────
 
-    private void ToggleHyperbolic()
+    private void NextView()
     {
-        _hyper = !_hyper;
+        _glideTimer?.Stop();
         _anchorPinned = false;
-        if (_hyper)
-        {
-            _snapPose = true;
-            _spinTarget = 0;
-        }
-        else
-        {
-            _glideTimer?.Stop();
-            _camera.Reframe(); // the cursor may have wandered far while the disk was up
-        }
+        _stage.MapViews.Advance();
         Render();
     }
 
-    private void Spin(double by)
+    private void EnsureGlide()
     {
-        _spinTarget += by;
-        Render();
-    }
-
-    // Lay the rooms out from the anchor room, then either jump there (on entering the view) or glide.
-    private void AimHyperbolic(SpatialScene display)
-    {
-        if (!_anchorPinned || _hyperAnchor is null || display.Rooms.All(r => r.Id != _hyperAnchor)) _hyperAnchor = _cursor;
-        IReadOnlyDictionary<DesktopId, Mobius> layout = _hyperAnchor is { } a
-            ? HyperbolicTiling.Layout(display, a)
-            : new Dictionary<DesktopId, Mobius>();
-
-        if (_snapPose)
-        {
-            _motion.Snap(layout, _spinTarget);
-            _snapPose = false;
-            return;
-        }
-
-        _motion.Retarget(layout, _hyperAnchor, _spinTarget);
-        if (_motion.Moving && _glideTimer?.IsEnabled != true)
-        {
-            _glideTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(15), DispatcherPriority.Render, (_, _) => Glide());
-            _lastGlideTick = DateTime.UtcNow;
-            _glideTimer.Start();
-        }
+        if (!MapView.Animating || _glideTimer?.IsEnabled == true) return;
+        _glideTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(15), DispatcherPriority.Render, (_, _) => Glide());
+        _lastGlideTick = DateTime.UtcNow;
+        _glideTimer.Start();
     }
 
     private void Glide()
     {
-        if (!IsOpen || !_hyper) { _glideTimer?.Stop(); return; }
+        if (!IsOpen || !MapView.Animating) { _glideTimer?.Stop(); return; }
         DateTime now = DateTime.UtcNow;
-        _motion.Step(Math.Clamp((now - _lastGlideTick).TotalSeconds, 0, 0.1));
+        MapView.Step(Math.Clamp((now - _lastGlideTick).TotalSeconds, 0, 0.1));
         _lastGlideTick = now;
-        if (!_motion.Moving) _glideTimer?.Stop();
         Render(lift: false);
     }
 
@@ -614,7 +576,7 @@ internal sealed class SpatialOverlay : IStageContent
     // its contiguous block on ⇧-drag, else just the room. Null when the room no longer resolves (not draggable).
     private IReadOnlyList<SpatialRoom>? DragSetOf(DesktopId id, bool shift)
     {
-        if (_hyper || RoomOf(id) is not { } room) return null;
+        if (!MapView.Draggable || RoomOf(id) is not { } room) return null;
         if (_selectedGroup is { } g && room.GroupId == g) return GroupRooms(g);
         if (shift) return Fragment(id);
         return new[] { room };
@@ -678,27 +640,25 @@ internal sealed class SpatialOverlay : IStageContent
 
         _roomHosts.Clear();
         _hits.Clear();
-        Control board;
-        if (_hyper)
-        {
-            AimHyperbolic(display);
-            board = PoincareDiskPainter.Render(display, width, height, _motion,
-                onClick: id => { _cursor = id; _selectedGroup = null; _anchorPinned = true; Render(); },
-                onActivate: id => JumpRoomRequested?.Invoke(id),
-                selectedGroup: _selectedGroup, style: _stage.MapStyle);
-        }
-        else
-        {
-            board = SpatialPainter.Render(display, width, height, _scale, _camera,
-                onClick: id => { _cursor = id; _selectedGroup = null; _drag.NoteTilePressed(); Render(); },
-                onActivate: id => JumpRoomRequested?.Invoke(id),
-                hits: _hits, selectedGroup: _selectedGroup, style: _stage.MapStyle, roomHosts: _roomHosts,
-                hoverGroup: _hoverGroup);
-        }
+        if (!_anchorPinned || _anchor is null || display.Rooms.All(r => r.Id != _anchor)) _anchor = _cursor;
+        IMapView view = MapView;
+        Control board = view.Render(new MapViewRequest(display, width, height, _scale, _stage.MapStyle,
+            Anchor: _anchor,
+            OnClick: id =>
+            {
+                _cursor = id;
+                _selectedGroup = null;
+                _anchorPinned = true; // a curved view holds still under the pointer for the double-click
+                _drag.NoteTilePressed();
+                Render();
+            },
+            OnActivate: id => JumpRoomRequested?.Invoke(id),
+            Hits: _hits, SelectedGroup: _selectedGroup, RoomHosts: _roomHosts, HoverGroup: _hoverGroup));
+        EnsureGlide();
 
         _root.Children.Clear();
         _root.Children.Add(board);
-        _root.Children.Add(_legend ? SpatialOverlayChrome.Legend(_stage.MapStyle, _hyper) : SpatialOverlayChrome.LegendHint());
+        _root.Children.Add(_legend ? SpatialOverlayChrome.Legend(_stage.MapStyle, view, _stage.MapViews.NextView) : SpatialOverlayChrome.LegendHint());
         if (_groupsPanel) _root.Children.Add(SpatialOverlayChrome.GroupsPanel(display, _selectedGroup, _paletteFor, GroupsCallbacks()));
 
         if (lift) _stage.BringToFront();

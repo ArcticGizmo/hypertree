@@ -7,6 +7,7 @@ using Hypertree.App.Ipc;
 using Hypertree.App.Status;
 using Hypertree.App.Updates;
 using Hypertree.App.Views;
+using Hypertree.App.Views.Scene;
 using Hypertree.Changelog;
 using Hypertree.Desktops;
 using Hypertree.Ipc;
@@ -228,6 +229,7 @@ public sealed partial class App : Application
             SpatialProvider = () => (_model!.BuildSpatialSource(), _spatial),
             MapStyle = _settings.MapStyle, // board vs. metro, applied to every surface the stage draws
             MapZoom = _settings.MapZoom,   // the map zoom, applied to the card backdrops and the move flow's board
+            MapViews = new MapViewSet(_mapCamera), // flat / hyperbolic / vortex, shared by map, cards and move flow
         };
         // Park the taskbar pill while the overlay is up (the map already shows where you are) — this also
         // removes the topmost-z fight that made the pill flash in/out when a dialog opened.
