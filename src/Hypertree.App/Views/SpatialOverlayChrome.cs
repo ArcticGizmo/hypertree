@@ -91,7 +91,7 @@ internal static class SpatialOverlayChrome
         ("n", "new desktop · b new branch"),
         ("m", "move windows"),
         ("Shift+m", "pull windows"),
-        ("f", "find · p palette · o apps"),
+        ("f", "find window · p palette · o apps"),
         ("t", "tidy up (reunite groups)"),
         ("+ / −", "zoom in / out · 0 reset"),
         ("v", style switch { MapStyle.Board => "metro view", MapStyle.Metro => "ascii view", _ => "board view" }),

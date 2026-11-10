@@ -21,7 +21,7 @@ So switching context stops meaning "hunt through a wall of lookalike windows."
 
 - **Dive and surface** — drop into a branch's desktops and climb back out with a keystroke; a flash of the map shows where you landed.
 - **A map of everything** — one overlay of every desktop and branch, with **blue** marking where you are and a live preview of what each action would do.
-- **Find or create in one box** — a finder to jump to any desktop, or make a new one named whatever you typed.
+- **Find any window** — type part of a window's title or app and jump straight to it, on whichever desktop it lives.
 - **Move windows across desktops** — pick up the windows on the current desktop, navigate to the destination, and drop them there.
 - **Reusable branches** — save a branch recipe as a template, or snapshot the whole arrangement as a layout you can restore later.
 - **Your desktops stay yours** — Hypertree only ever tears down desktops it created; the ones you made by hand are never touched.
@@ -108,8 +108,8 @@ reserves for its own desktop switch.)
 
 ### Finder & command palette
 
-- **`f`** or **`Ctrl+F`** (from the map) opens the finder: type to jump to any desktop, or create one named your query.
-- The command palette (`Ctrl+Alt+P`) gathers everything — jump to a desktop, open the map, manage templates and layouts, reach settings, or quit — each with the live map behind it.
+- **`f`** or **`Ctrl+F`** (from the map) opens the window finder: a grid of live thumbnails of every window on every desktop, each captioned with its app and the desktop/branch it's on. Type to filter by title, app or desktop, arrow to a window, and **`Enter`** (or a click) switches to that desktop and focuses the window, restoring it if minimised. **`Ctrl+`/`Ctrl−`** size the thumbnails, shared with move/pull windows.
+- The command palette (`Ctrl+Alt+P`) gathers everything — find a window, jump to (or create) a desktop, open the map, manage templates and layouts, reach settings, or quit — each with the live map behind it.
 - **`p`** opens it from the map, and `Ctrl+Alt+P` does the same while the map is up: the palette opens *over* the map, so `Esc` (or another `Ctrl+Alt+P`) pops back to the map rather than closing it.
 
 ### Move windows

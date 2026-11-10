@@ -42,6 +42,21 @@ public interface IDesktopController
     /// </summary>
     IReadOnlyList<WindowInfo> WindowsElsewhere();
 
+    /// <summary>
+    /// The application windows on every desktop, each carrying its desktop's id (<see cref="WindowInfo.Desktop"/>)
+    /// and name — the window finder, which switches to a window's desktop and focuses it. Same "countable"
+    /// windows as <see cref="WindowsOn"/>, in one walk. Best-effort; order is enumeration order (roughly
+    /// Z-order, so recently used windows come first).
+    /// </summary>
+    IReadOnlyList<WindowInfo> AllWindows();
+
+    /// <summary>
+    /// Bring <paramref name="hwnd"/> to the foreground with keyboard focus, restoring it first if it's
+    /// minimised. Doesn't switch desktops — switch to the window's desktop first. Best-effort: a window that
+    /// has since closed is ignored.
+    /// </summary>
+    void ActivateWindow(nint hwnd);
+
     /// <summary>Switch the whole monitor array to <paramref name="id"/>. No-op if already there. Also
     /// hands the foreground to a window on the destination, the way the OS's own switcher does — a bare
     /// desktop switch leaves the previous desktop's focused window as an unreachable, cloaked foreground

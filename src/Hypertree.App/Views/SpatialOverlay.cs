@@ -19,7 +19,7 @@ namespace Hypertree.App.Views;
 ///
 /// Every edit is raised as an event for <c>App</c> (which owns the <see cref="NavigationModel"/> and the
 /// desktop controller): navigate, jump, place/move rooms, groups &amp; colours, rename, new desktop/branch,
-/// delete, move/pull windows, and the finder/palette/launcher — the overlay never mutates model state.
+/// delete, move/pull windows, and the window finder/palette/launcher — the overlay never mutates model state.
 /// </summary>
 internal sealed class SpatialOverlay : IStageContent
 {
@@ -102,8 +102,8 @@ internal sealed class SpatialOverlay : IStageContent
     public event Action? MoveWindowsRequested;
     /// <summary>Shift+M — start the pull-windows flow (bring windows from other desktops onto this one).</summary>
     public event Action? PullWindowsRequested;
-    /// <summary>f — open the finder (jump/create spotlight) over the map; Esc pops back here.</summary>
-    public event Action? FinderRequested;
+    /// <summary>f / Ctrl+F — open the window finder over the map; Esc pops back here.</summary>
+    public event Action? WindowFinderRequested;
     /// <summary>p — open the command palette over the map; Esc pops back here.</summary>
     public event Action? CommandPaletteRequested;
     /// <summary>o — open the application launcher over the map; Esc pops back here.</summary>
@@ -285,7 +285,7 @@ internal sealed class SpatialOverlay : IStageContent
             case Key.B: NewBranchRequested?.Invoke(); e.Handled = true; break;
             case Key.M when e.KeyModifiers.HasFlag(KeyModifiers.Shift): PullWindowsRequested?.Invoke(); e.Handled = true; break;
             case Key.M: MoveWindowsRequested?.Invoke(); e.Handled = true; break;
-            case Key.F: FinderRequested?.Invoke(); e.Handled = true; break;
+            case Key.F: WindowFinderRequested?.Invoke(); e.Handled = true; break;
             case Key.P: CommandPaletteRequested?.Invoke(); e.Handled = true; break;
             case Key.O: AppLauncherRequested?.Invoke(); e.Handled = true; break;
             case Key.L: ToggleLegend(); e.Handled = true; break;
