@@ -104,8 +104,27 @@ public sealed class VirtualDesktopController : IDesktopController
         return result;
     }
 
+    public IReadOnlyList<WindowInfo> AllWindows()
+    {
+        var names = List().ToDictionary(d => d.Id.Value, d => d.Name);
+        var result = new List<WindowInfo>();
+        foreach ((nint hwnd, Guid g) in EnumAppWindows())
+            result.Add(new WindowInfo(hwnd, NativeWindows.TitleOf(hwnd), NativeWindows.ProcessOf(hwnd),
+                names.TryGetValue(g, out string? name) ? name : "", new DesktopId(g)));
+        return result;
+    }
+
+    // ForceForeground's SW_SHOW leaves a minimised window minimised, and activating an iconic window just
+    // focuses its taskbar button — so restore it first or the user lands on nothing.
+    public void ActivateWindow(nint hwnd)
+    {
+        if (hwnd == 0 || !IsWindow(hwnd)) return;
+        if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);
+        _foreground.ForceForeground(hwnd);
+    }
+
     // Walk every top-level window once, keeping only the "real" app windows (IsCountableWindow) that
-    // the documented API attributes to a concrete desktop. Shared by WindowCounts / WindowsOn / WindowsElsewhere.
+    // the documented API attributes to a concrete desktop. Shared by WindowCounts / WindowsOn / WindowsElsewhere / AllWindows.
     private List<(nint hwnd, Guid desktop)> EnumAppWindows()
     {
         var list = new List<(nint, Guid)>();
@@ -127,6 +146,9 @@ public sealed class VirtualDesktopController : IDesktopController
     private delegate bool EnumWindowsProc(nint hwnd, nint lparam);
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc cb, nint lparam);
     [DllImport("user32.dll")] private static extern bool IsIconic(nint hwnd);
+    [DllImport("user32.dll")] private static extern bool IsWindow(nint hwnd);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(nint hwnd, int nCmdShow);
+    private const int SW_RESTORE = 9;
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll")] private static extern nint GetShellWindow();
     [DllImport("kernel32.dll")] private static extern uint GetCurrentProcessId();

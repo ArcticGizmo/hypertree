@@ -207,8 +207,8 @@ public sealed partial class App
         RefreshOrFlash();
     }
 
-    // Both picker flows share one persisted thumbnail size (settings.PickerZoom), so a zoom set in "move"
-    // carries over to "pull" and survives a restart — mirrors how the map's zoom is remembered.
+    // Every picker flow (move, pull, the window finder) shares one persisted thumbnail size (settings.PickerZoom),
+    // so a zoom set in one carries over to the others and survives a restart — mirrors how the map's zoom is remembered.
     private void PersistPickerZoom(double zoom)
     {
         _settings.PickerZoom = zoom;
@@ -330,8 +330,8 @@ public sealed partial class App
 
     // ── Spotlight: jump to any existing desktop, or create one named the query ─────
 
-    // Pushed over whatever opened it (the map via Ctrl+F, or the command palette's "Jump to desktop…"
-    // row), so Esc always pops straight back there.
+    // Pushed over whatever opened it (the command palette's "Jump to desktop…" row), so Esc always pops
+    // straight back there.
     private void OpenSpotlight()
     {
         if (_model is null) return;
@@ -376,6 +376,61 @@ public sealed partial class App
             "↑↓ move · ↵ jump/create · Esc back · blue = you are here", items,
             query => new PaletteItem($"Create desktop “{query}”", "new · main", "+",
                 () => CreateAndGoToDesktop(query))); // no target tile yet — the stage shows the live board
+    }
+
+    // ── Window finder: jump to any window and focus it ─────────────────────────────
+
+    // The map already shows where every desktop is, so searching desktops adds little; searching windows
+    // answers "where did I leave X?". Shown as the move/pull thumbnail grid so windows are told apart by what
+    // they look like. Pushed over whatever opened it (the map's f / Ctrl+F, or the command palette's
+    // "Find window…" row), so Esc pops straight back there.
+    private void OpenWindowFinder()
+    {
+        if (_model is null || _desktops is null || _stage is null) return;
+
+        _model.Reconcile(); // drop any desktops deleted out from under us before offering jumps
+        SpatialSource src = _model.BuildSpatialSource();
+
+        // Name each window's desktop as the map does (group · room) rather than by the OS desktop name, which
+        // carries the branch prefix. It's the caption suffix and part of the search, so typing a branch or room
+        // filters to its windows.
+        DesktopId here = _desktops.Current;
+        var where = new Dictionary<DesktopId, string>();
+        foreach (SpatialGroupSource g in src.Groups)
+            foreach (SpatialDesktop d in g.Desktops)
+            {
+                string name = g.IsMain ? d.Label : $"{g.Name} · {d.Label}";
+                where[d.Id] = d.Id == here ? $"{name} (here)" : name;
+            }
+
+        // Enumeration is Z-order, so the most recently used windows lead the grid.
+        var windows = _desktops.AllWindows()
+            .Where(w => w.Desktop is not null)
+            .Select(w => where.TryGetValue(w.Desktop!.Value, out string? p) ? w with { DesktopName = p } : w)
+            .ToList();
+
+        var content = new FindWindowContent(new WindowMoveSession(windows), _settings.PickerZoom);
+        content.WindowChosen += w => FocusWindow(w.Desktop!.Value, w.Hwnd);
+        content.ZoomChanged += PersistPickerZoom; // one thumbnail size shared with move / pull
+        _stage.Present(content);
+    }
+
+    // Switch through the model (so the map, trail and pill follow), then focus the window. It's activated
+    // while the overlay still holds the foreground, so the plain activation is granted rather than demoted
+    // to a taskbar flash, and only then is the overlay hidden.
+    private void FocusWindow(DesktopId desktop, nint hwnd)
+    {
+        if (_model is null || _desktops is null) return;
+        DesktopId from = _desktops.Current;
+        if (desktop != from && !JumpToId(desktop) && _desktops.Current != desktop)
+        {
+            // The model doesn't know this desktop yet (created outside Hypertree since the last sync).
+            _desktops.SwitchTo(desktop);
+            _model.Resync();
+        }
+        RecordVisit(from);
+        _desktops.ActivateWindow(hwnd);
+        _stage?.Dismiss();
     }
 
     // The jump palette's preview: the current spatial scene with the jump's target as the blue selection
@@ -434,7 +489,7 @@ public sealed partial class App
         _spatialOverlay.NewBranchRequested += () => OpenNewBranchDialog(null);      // b — branch card over the map
         _spatialOverlay.MoveWindowsRequested += ToggleMoveWindows;                  // m — move this desktop's windows elsewhere
         _spatialOverlay.PullWindowsRequested += TogglePullWindows;                  // Shift+m — pull windows onto this desktop
-        _spatialOverlay.FinderRequested += OpenSpotlight;                           // f — finder over the map; Esc pops back
+        _spatialOverlay.WindowFinderRequested += OpenWindowFinder;                  // f / Ctrl+F — window finder over the map; Esc pops back
         _spatialOverlay.CommandPaletteRequested += () => ShowCommandPalette(overCurrent: true); // p — palette over the map
         _spatialOverlay.AppLauncherRequested += () => OpenAppLauncher(overCurrent: true);        // o — launcher over the map
     }

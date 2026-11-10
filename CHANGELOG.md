@@ -9,6 +9,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.5.9] - 2026-11-10
+
+### Window finder
+
+- `f` / `Ctrl+F` on the map finds a window: pick one to switch to its desktop and focus it, restored if minimised.
+- Windows show as live thumbnails captioned with their app, branch and desktop; type to filter by any of them.
+- "Find window…" in the command palette; "Jump to desktop…" stays there for desktops.
+
+---
+
 ## [v0.5.8] - 2026-11-02
 
 ### Map views

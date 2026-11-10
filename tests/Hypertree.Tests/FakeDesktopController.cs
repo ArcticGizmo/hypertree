@@ -41,6 +41,16 @@ internal sealed class FakeDesktopController : IDesktopController
                   .SelectMany(kv => kv.Value.Select(w => w with { DesktopName = GetName(kv.Key) }))
                   .ToList();
 
+    /// <summary>Windows on every seeded desktop, each stamped with its desktop's id and name — the window
+    /// finder's source list.</summary>
+    public IReadOnlyList<WindowInfo> AllWindows()
+        => Windows.SelectMany(kv => kv.Value.Select(w => w with { DesktopName = GetName(kv.Key), Desktop = kv.Key }))
+                  .ToList();
+
+    /// <summary>Every ActivateWindow call, in order — so the window finder's focus step is assertable.</summary>
+    public List<nint> Activations { get; } = new();
+    public void ActivateWindow(nint hwnd) => Activations.Add(hwnd);
+
     /// <summary>Every MoveWindowToDesktop call, in order — so the move flow's output is assertable.</summary>
     public List<(nint hwnd, DesktopId to)> Moves { get; } = new();
 

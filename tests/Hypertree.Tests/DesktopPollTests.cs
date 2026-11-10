@@ -130,6 +130,8 @@ public class DesktopPollTests
         public IReadOnlyDictionary<DesktopId, int> WindowCounts() => new Dictionary<DesktopId, int>();
         public IReadOnlyList<WindowInfo> WindowsOn(DesktopId id) => Array.Empty<WindowInfo>();
         public IReadOnlyList<WindowInfo> WindowsElsewhere() => Array.Empty<WindowInfo>();
+        public IReadOnlyList<WindowInfo> AllWindows() => Array.Empty<WindowInfo>();
+        public void ActivateWindow(nint hwnd) { }
         public void SwitchTo(DesktopId id) => Now = id;
         public DesktopId Create(string name) => throw new NotSupportedException();
         public void Rename(DesktopId id, string name) { }

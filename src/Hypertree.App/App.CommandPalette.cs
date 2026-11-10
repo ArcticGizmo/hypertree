@@ -79,6 +79,7 @@ public sealed partial class App
 
         var commands = new List<Command>
         {
+            new("Find window…", OpenWindowFinder),  // pushed over the command palette; Esc pops back to it
             new("Jump to desktop…", OpenSpotlight), // pushed over the command palette; Esc pops back to it
             new("Open map", ToggleMap),
             new("Settings", OpenSettings),

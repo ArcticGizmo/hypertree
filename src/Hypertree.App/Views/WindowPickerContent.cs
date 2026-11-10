@@ -12,7 +12,7 @@ using Hypertree.Scopes;
 namespace Hypertree.App.Views;
 
 /// <summary>
-/// The shared window-picker surface behind both "move windows" and "pull windows": a Task-View-style grid
+/// The shared window-picker surface behind "move windows", "pull windows" and the window finder: a Task-View-style grid
 /// of live DWM thumbnails with a type-to-filter search box and keyboard/mouse multi-select. It holds no
 /// model — selection lives in <see cref="WindowMoveSession"/>, and confirming the pick is deferred to the
 /// subclass via <see cref="ConfirmSelection"/> (move enters a destination-picking phase; pull drops the
@@ -85,7 +85,11 @@ internal abstract class WindowPickerContent : IStageContent
     protected abstract string EmptyHint { get; }
     /// <summary>Whether a card's caption names the desktop the window is on (pull spans desktops; move doesn't).</summary>
     protected virtual bool ShowSource => false;
-    /// <summary>Enter with ≥1 window ticked — the subclass commits or advances.</summary>
+    /// <summary>Whether windows are ticked (Space / click) and confirmed as a set. When false the picker is
+    /// single-choice: Enter or a click confirms the focused window straight away, and there are no ticks.</summary>
+    protected virtual bool MultiSelect => true;
+    /// <summary>Enter with ≥1 window ticked — the subclass commits or advances. Single-choice pickers read
+    /// <see cref="WindowMoveSession.Focused"/> instead.</summary>
     protected abstract void ConfirmSelection();
 
     /// <summary>Leave the picker for good (a subclass phase takes over): drop the thumbnails and stop the
@@ -135,7 +139,11 @@ internal abstract class WindowPickerContent : IStageContent
             case Key.Right: if (Session.MoveFocus(+1)) Highlight(); e.Handled = true; break;
             case Key.Up: if (Session.MoveFocus(-_columns)) Highlight(); e.Handled = true; break;
             case Key.Down: if (Session.MoveFocus(+_columns)) Highlight(); e.Handled = true; break;
-            case Key.Space: Session.ToggleSelected(); Highlight(); e.Handled = true; break;
+            case Key.Space when MultiSelect: Session.ToggleSelected(); Highlight(); e.Handled = true; break;
+            case Key.Enter when !MultiSelect:
+                if (Session.Focused is not null) ConfirmSelection();
+                e.Handled = true;
+                break;
             case Key.Enter:
                 if (Session.EnsureFocusedSelected()) { Highlight(); ConfirmSelection(); }
                 e.Handled = true;
@@ -317,14 +325,14 @@ internal abstract class WindowPickerContent : IStageContent
         var check = new TextBlock
         {
             Text = "○", FontSize = 15, FontFamily = Mono, Foreground = FgDim,
-            VerticalAlignment = VerticalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center, IsVisible = MultiSelect,
         };
         var procText = new TextBlock
         {
             Text = string.IsNullOrEmpty(w.ProcessName) ? w.Title : w.ProcessName,
             FontSize = 12, FontWeight = FontWeight.SemiBold, Foreground = Fg,
             VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis,
-            Margin = new Thickness(8, 0, 0, 0),
+            Margin = new Thickness(MultiSelect ? 8 : 0, 0, 0, 0),
         };
         var caption = new StackPanel
         {
@@ -351,8 +359,15 @@ internal abstract class WindowPickerContent : IStageContent
             Cursor = new Cursor(StandardCursorType.Hand),
             Child = new StackPanel { Children = { body, caption } },
         };
-        // Click focuses + toggles this card (mouse path mirrors keyboard Space).
-        outer.PointerPressed += (_, e) => { e.Handled = true; Session.MoveFocus(index - Session.Focus); Session.ToggleSelected(); Highlight(); };
+        // Click focuses this card, then mirrors the keyboard: toggles it (Space), or picks it (Enter) when single-choice.
+        outer.PointerPressed += (_, e) =>
+        {
+            e.Handled = true;
+            Session.MoveFocus(index - Session.Focus);
+            if (!MultiSelect) { ConfirmSelection(); return; }
+            Session.ToggleSelected();
+            Highlight();
+        };
 
         _cards.Add(new Card(outer, body, check, null));
         return outer;
