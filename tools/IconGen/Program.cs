@@ -6,8 +6,9 @@ using Svg;
 // Generates every raster icon asset from the single source-of-truth SVG (hypertree.svg).
 //
 //   src/Hypertree.App/Assets/icon.png   256x256 PNG — window icons and the in-app logo
-//   src/Hypertree.App/Assets/icon.ico   multi-resolution ICO (16..256) — tray icon + the .exe ApplicationIcon
-//   landing-icon.png                    512x512 PNG — the README header logo
+//   src/Hypertree.App/Assets/icon.ico   multi-resolution ICO (16..256) — windows, taskbar + the .exe ApplicationIcon
+//   src/Hypertree.App/Assets/tray.png   32x32 PNG — the tray icon (see docs/tray-icon-blur.md)
+//   landing-icon.png                   512x512 PNG — the README header logo
 //
 // Re-run after editing hypertree.svg:  dotnet run --project tools/IconGen
 // (or tools/gen-icons.ps1, which also restores packages.)
@@ -45,13 +46,15 @@ var fit = ComputeFit(doc, PAD);
 float vbSide = doc.ViewBox.Width > 0 ? doc.ViewBox.Width : fit.Side;
 Console.WriteLine($"Fit: content {fit.Box.Width:0.0}x{fit.Box.Height:0.0} cropped from {vbSide:0}x{vbSide:0} viewBox ({vbSide / fit.Side:0.00}x larger)");
 
-// The .ico ships a true frame at each of these sizes so Windows never has to downscale at runtime
-// (the tray asks for a 16px frame; large surfaces ask for 256).
+// The .ico ships a true frame at each of these sizes so windows and the taskbar can pick an exact match.
 int[] icoSizes = { 16, 24, 32, 48, 64, 128, 256 };
 
 string assetsDir = Path.Combine(repoRoot, "src", "Hypertree.App", "Assets");
 Directory.CreateDirectory(assetsDir);
 WritePng(doc, fit, Path.Combine(assetsDir, "icon.png"), 256);
+// Avalonia's tray picks the nearest .ico frame without resizing it, so at 125 % and 175 % Explorer would
+// stretch a 16 or 24 px frame. A single 32 px PNG is only ever shrunk, which stays crisp up to 200 %.
+WritePng(doc, fit, Path.Combine(assetsDir, "tray.png"), 32);
 WritePng(doc, fit, Path.Combine(repoRoot, "landing-icon.png"), 512);
 WriteIco(doc, fit, Path.Combine(assetsDir, "icon.ico"), icoSizes);
 
