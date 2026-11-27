@@ -259,7 +259,7 @@ tools\gen-icons.cmd              # cmd
 ```
 
 This writes `src/Hypertree.App/Assets/icon.png`, `src/Hypertree.App/Assets/icon.ico`
-(multi-resolution), and `landing-icon.png`.
+(multi-resolution), `src/Hypertree.App/Assets/tray.png` (32 px, for the tray), and `landing-icon.png`.
 
 ### Docs
 

@@ -34,6 +34,7 @@ internal static class DevChrome
 
     private static readonly Uri PngUri = new("avares://hypertree/Assets/icon.png");
     private static readonly Uri IcoUri = new("avares://hypertree/Assets/icon.ico");
+    private static readonly Uri TrayUri = new("avares://hypertree/Assets/tray.png");
 
     /// <summary>The app logo as a bitmap — tinted pink on a dev build, the plain logo otherwise. Used by
     /// the switcher's header/bubble and as the source for <see cref="AppWindowIcon"/>.</summary>
@@ -43,10 +44,19 @@ internal static class DevChrome
         return Active ? Tint(src, Pink) : src;
     }
 
-    /// <summary>A window / tray icon: the tinted PNG on a dev build, the real multi-resolution <c>.ico</c>
-    /// otherwise. Every window icon and the tray icon route through here.</summary>
+    /// <summary>A window icon: the tinted PNG on a dev build, the real multi-resolution <c>.ico</c>
+    /// otherwise. Every window icon routes through here.</summary>
     public static WindowIcon AppWindowIcon()
         => Active ? new WindowIcon(AppLogo()) : new WindowIcon(AssetLoader.Open(IcoUri));
+
+    /// <summary>The tray icon: one 32 px PNG, tinted on a dev build. Avalonia makes a tray icon from a PNG
+    /// at the PNG's own size and Explorer only ever shrinks it, so it stays sharp at every scale up to
+    /// 200 %; an <c>.ico</c> frame gets stretched at 125 % and 175 % (see docs/tray-icon-blur.md).</summary>
+    public static WindowIcon TrayIcon()
+    {
+        var src = new Bitmap(AssetLoader.Open(TrayUri));
+        return new WindowIcon(Active ? Tint(src, Pink) : src);
+    }
 
     // Blend every non-transparent pixel toward `target`, keeping its alpha, so the logo's shape survives
     // but its colour reads pink. A decoded PNG gives Bgra8888 premultiplied pixels, so the target is scaled

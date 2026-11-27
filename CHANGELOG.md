@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.5.10] - 2026-11-27
+
+### Fixed
+
+- Tray icon stays sharp at 125 % and 175 % display scale.
+
+---
+
 ## [v0.5.9] - 2026-11-10
 
 ### Window finder
